@@ -79,7 +79,7 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := handoff.New(direct)
+	coordinator, err := handoff.New(handoff.Config{Local: direct})
 	if err != nil {
 		t.Fatal(err)
 	}

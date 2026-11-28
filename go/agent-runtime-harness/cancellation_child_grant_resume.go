@@ -30,7 +30,7 @@ func ValidDeferredChildGrantCancellationProofAdmission(item Item) bool {
 		item.ID == stableID("hcancelchildbusy", fields["intentID"])
 }
 
-// This evidence is emitted only after an original Kernel ChildExecutionStore
+// This evidence is emitted only after an original Kernel PhysicalExecutionStore
 // rejected parent Cancel BEFORE ANY root mutation. Unlike an arbitrary error
 // from a Host Canceller it is a direct, source-restricted no-effect proof.
 func (runner *Runner) recordDeferredChildGrantCancellation(
@@ -149,8 +149,10 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 		return false, errors.Join(ErrConflict, err)
 	}
 	// Persist the same-election recovery witness BEFORE any remote cleanup.
-	if err = runner.recordDeferredChildGrantCancellation(ctx, turn, intent, current.Run.ID); err != nil {
-		return true, err
+	if intent.ID != "" {
+		if err = runner.recordDeferredChildGrantCancellation(ctx, turn, intent, current.Run.ID); err != nil {
+			return true, err
+		}
 	}
 	if scope.RetirementOnly() {
 		// No remaining physical Tool/Child receipt to obtain. Retire the
@@ -180,7 +182,7 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 // any native grant/retirement keeps its existing projection semantics.
 func (runner *Runner) reconcileTerminalRootRetirement(ctx context.Context, current kernel.Snapshot) error {
 	rt := runner.runtime
-	if !rt.SupportsChildExecution() || current.Run.Kind != agent.RunKind || current.Run.ParentRunID != "" {
+	if !rt.SupportsPhysicalExecution() || current.Run.Kind != agent.RunKind || current.Run.ParentRunID != "" {
 		return nil
 	}
 	if _, err := rt.LookupChildExecution(ctx, current.Run.ID); errors.Is(err, kernel.ErrNotFound) {

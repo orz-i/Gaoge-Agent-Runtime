@@ -27,7 +27,7 @@ func (r *Runtime) CheckOwnedPhysicalEntry(ctx context.Context, expected Snapshot
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
+	store, ok := r.store.(PhysicalExecutionStore)
 	if !ok {
 		return false, ErrExecutionRequired
 	}
@@ -65,15 +65,15 @@ func PrepareOwnedEntryEpoch(g ChildExecutionGrant, epoch, previous uint64) (uint
 // success, commit its native physical epoch under the
 // same transaction before returning the window.
 func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapshot, claimed, persisted ExecutionLease,
-	now time.Time, quarantined bool, physicalEpoch, marked uint64, completion OwnedPhysicalCallbackCompletion, transfer ManagedTransfer,
+	now time.Time, quarantined bool, physicalEpoch, marked uint64, completion PhysicalCallbackCompletion, transfer ManagedTransfer,
 ) (OwnedPhysicalEntryWindow, error) {
-	if err := ValidateOwnedPhysicalAdmissionRequest(g, claimed); err != nil {
+	if err := ValidatePhysicalAdmissionRequest(g, claimed); err != nil {
 		return OwnedPhysicalEntryWindow{}, err
 	}
-	if current.Run.ID != g.ChildRunID || current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
+	if current.Run.ID != g.ChildRunID || current.Run.Kind != "agent" ||
 		current.Run.Revision != g.ExpectedRevision || ManagedDigest(current) != ManagedDigest(expected) ||
 		!g.MatchesExecution(persisted) || marked != 0 ||
-		completion != (OwnedPhysicalCallbackCompletion{}) || !now.Before(persisted.ExpiresAt) {
+		completion != (PhysicalCallbackCompletion{}) || !now.Before(persisted.ExpiresAt) {
 		return OwnedPhysicalEntryWindow{}, ErrExecutionConflict
 	}
 	if quarantined {
@@ -96,7 +96,7 @@ func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapsho
 	case "managed_resume":
 		// Equality means this native segment has already crossed entry;
 		// an entry ACK can never be used to dispatch again.
-		if current.Run.Status != RunStatusRunning || !transfer.Valid() || transfer.Terminal != nil ||
+		if current.Run.ParentRunID != "" || current.Run.Status != RunStatusRunning || !transfer.Valid() || transfer.Terminal != nil ||
 			transfer.SuccessorGrant != g || !transfer.SafePoint.Valid() ||
 			!managedResumeSelectionMatches(transfer) ||
 			!ManagedSourceMatches(transfer.SafePoint, current) {

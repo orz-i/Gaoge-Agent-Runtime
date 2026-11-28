@@ -72,6 +72,37 @@ type releaseRecordingRunFeedStore struct {
 	releases []string
 }
 
+func TestTerminalRunFeedReplaysOnlyCommittedSequencesThenReturnsNoContent(t *testing.T) {
+	engine, runtime, feed, actor := newRunFeedHTTPTest(t)
+	createHTTPTestRun(t, runtime, actor, "terminal-no-fake")
+	publishHTTPTestEvent(t, feed, "terminal-no-fake", runfeed.Draft{Type: runfeed.EventModelDelta, Delta: "answer"})
+	_, err := runtime.Apply(t.Context(), "terminal-no-fake", 1, kernel.Mutation{
+		Status: kernel.RunStatusCompleted, State: json.RawMessage(`{}`),
+		Result: &kernel.Result{ContentType: "text", Content: json.RawMessage(`"answer"`)},
+		Events: []kernel.EventDraft{{Type: "agent.completed"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		cursor string
+		status int
+	}{{"0", http.StatusOK}, {"1", http.StatusNoContent}} {
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/runs/terminal-no-fake/feed?afterSeq="+test.cursor, nil))
+		body := response.Body.String()
+		if response.Code != test.status || strings.Contains(body, "id: 2") || strings.Contains(body, `"terminal":true`) {
+			t.Fatalf("fabricated terminal sequence: %d %s", response.Code, body)
+		}
+		if test.status == http.StatusOK && !strings.Contains(body, "id: 1\n") {
+			t.Fatal("committed replay lost")
+		}
+		if test.status == http.StatusNoContent && body != "" {
+			t.Fatal("204 has an event body")
+		}
+	}
+}
+
 func (store *releaseRecordingRunFeedStore) ReleaseTerminal(ctx context.Context, runID string, retention time.Duration) error {
 	store.releases = append(store.releases, runID)
 	return store.Store.ReleaseTerminal(ctx, runID, retention)

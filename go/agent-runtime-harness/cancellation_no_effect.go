@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 // cancellationReadNoEffect is issued only by cancelRuntimeRun for a failed
@@ -34,11 +36,14 @@ func (failure cancellationReadNoEffect) Unwrap() error { return failure.cause }
 func (runner *Runner) releaseNoEffectCancellation(
 	ctx context.Context, turn Turn, intent Item, runID string, cause error,
 ) error {
+	if intent.ID == "" {
+		return cause
+	}
 	_, nativeKernel := runner.cancellation.(*kernel.Runtime)
 	_, preflightRead := cause.(cancellationReadNoEffect) //nolint:errorlint // Only a direct Harness-minted proof is valid.
 	nativeNoEffect := nativeKernel && kernel.IsControlNoEffect(cause)
 	// A mixed, same-Kernel Host Canceller may pass through the Kernel's
-	// unforgeable ChildExecutionStore busy-no-effect proof. Recheck its
+	// unforgeable PhysicalExecutionStore busy-no-effect proof. Recheck its
 	// exact native RunKind before trusting it; arbitrary custom Cancellers
 	// cannot manufacture admission authority from an error string.
 	hostChildBusyNoEffect := false
@@ -63,6 +68,52 @@ func (runner *Runner) releaseNoEffectCancellation(
 	ledger, err := runner.loadTurnBudget(recoveryCtx, turn)
 	if err != nil {
 		return errors.Join(cause, err)
+	}
+	// A known returned external wait needs the original Host election to
+	// ask its owner for no-effect evidence. Native control cannot close its
+	// accounting before that receipt. Keep the existing fence, not a separate
+	// budget cancellation, and record the exact Kernel busy witness.
+	if runner.nativeBudget() && nativeNoEffect && errors.Is(cause, kernel.ErrChildExecutionBusy) {
+		_, _, affected, e := runner.collectCancellationScope(recoveryCtx, turn, runID)
+		if e != nil {
+			return errors.Join(cause, e)
+		}
+		for id := range affected {
+			snap, e := runner.runtime.Load(recoveryCtx, id)
+			if errors.Is(e, kernel.ErrNotFound) {
+				continue
+			}
+			if e != nil {
+				return errors.Join(cause, e)
+			}
+			call, waiting, e := agent.FrozenExternalToolCall(snap)
+			if e != nil {
+				return errors.Join(cause, e)
+			}
+			if !waiting {
+				continue
+			}
+			if e = runner.verifyLocalRelationRun(recoveryCtx, snap, false); e != nil {
+				return errors.Join(cause, e)
+			}
+			g, e := runner.runtime.LookupChildExecution(recoveryCtx, id)
+			if e != nil {
+				return errors.Join(cause, e)
+			}
+			c, e := runner.runtime.LookupPhysicalCallbackReturn(recoveryCtx, g)
+			if e != nil {
+				return errors.Join(cause, e)
+			}
+			b, found, e := c.ToolReturns.Find(call.ID)
+			if e != nil {
+				return errors.Join(cause, e)
+			}
+			if g.IsOwned() && c.HostCompleted && c.MatchesReturnSnapshot(snap) && found &&
+				b.RequestDigest == kernel.ManagedDigest(tools.ExecutionRequest{RunID: id, Call: call}) &&
+				b.LedgerID == snap.Run.BudgetScopeID && b.PendingKind == string(tools.PendingExternalResult) {
+				return errors.Join(cause, runner.recordDeferredChildGrantCancellation(recoveryCtx, turn, intent, runID))
+			}
+		}
 	}
 	if ledger != nil && (!runner.nativeBudget() || ledger.RunCancelled(runID)) {
 		// The shared budget was deliberately revoked BEFORE physical

@@ -38,16 +38,29 @@ type ControlGuard struct {
 	// Unexported and minted only by first-party Feature validators; custom SDK
 	// consumers and independent Store adapters cannot forge a guarded resume.
 	verified *featurecontrol.Proof
+	managed  *ManagedAdmissionProof
 }
 
-// ControlStore is one optional, guarded-CAS Store capability. It does not
-// authorize arbitrary execution: the source gate and target must match.
-// The returned bool is true only if the committed control revoked a prior
-// execution epoch. The Feature must not automatically dispatch a Model/Tool
-// after such a control until an executor has acquired new Store authority.
-// Unfenced legacy Stores still use their existing Store.Apply semantics.
-type ControlStore interface {
-	ApplyControl(context.Context, string, uint64, ControlGuard, StoreMutation) (Snapshot, bool, error)
+// CancellationGuard carries the already authorized original recovery source
+// into the ordinary terminal control transaction. It confers no dispatch.
+func (p ManagedAdmissionProof) CancellationGuard() ControlGuard {
+	return ControlGuard{Kind: ControlCancel, managed: &p}
+}
+
+// ManagedCancellation identifies a sealed cancellation of the original
+// expired physical effect. The Store constructs the terminal mutation from
+// that source under its own lock; no caller-provided mutation is accepted.
+func (g *ControlGuard) ManagedCancellation(runID string, revision uint64, m StoreMutation) (ManagedAdmissionProof, bool, error) {
+	if g == nil || g.managed == nil {
+		return ManagedAdmissionProof{}, false, nil
+	}
+	p := *g.managed
+	if g.Kind != ControlCancel || g.CheckpointID != "" || g.BlockedCode != "" || g.WaitID != "" || g.WaitDeadlineAt != nil || g.verified != nil ||
+		!p.Matches(p.transfer, ManagedCancel) || runID != p.transfer.SafePoint.Host.RunID || revision != p.transfer.SafePoint.Source.Run.Revision ||
+		!reflect.DeepEqual(m, StoreMutation{}) {
+		return p, true, ErrExecutionConflict
+	}
+	return p, true, nil
 }
 
 // ValidateControl is pure, Feature-neutral gate validation. Store adapters
@@ -190,6 +203,14 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	if runtime == nil || mutation.Ledger != nil || hasReservedApplyEvidence(mutation.Events) {
 		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
 	}
+	if guard.managed != nil {
+		if ctx == nil || runtime.execution != nil || runtime.physicalGrant != nil || permit != nil || !reflect.DeepEqual(mutation, Mutation{}) {
+			return Snapshot{}, false, ErrExecutionConflict
+		}
+		// Exact ACK replay is evaluated under the same native commit.
+		return runtime.store.Commit(ctx, runID, expectedRevision, StoreMutation{}, ControlCommit(guard))
+	}
+
 	if runtime.execution != nil && (guard.Kind != ControlApproval || runtime.physicalGrant == nil || !runtime.physicalGrant.IsOwned() || !runtime.physicalGrant.MatchesExecution(*runtime.execution)) {
 		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
 	}
@@ -229,26 +250,14 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	}
 	// Write-capable Store code begins here. Never certify a Store-returned
 	// error as no-effect: even a failed CAS response can be outcome-unknown.
-	if store, ok := runtime.store.(ControlStore); ok {
-		snapshot, revoked, writeErr := store.ApplyControl(ctx, runID, expectedRevision, guard, next)
-		if guard.Kind == ControlCancel && errors.Is(writeErr, ErrChildExecutionBusy) {
-			if _, authorized := runtime.store.(ChildExecutionStore); authorized {
-				// Every ChildExecutionStore MUST attest this busy outcome was
-				// rejected BEFORE any CAS mutation; unlike a generic Store
-				// ErrConflict it is a source-specific no-effect proof.
-				return Snapshot{}, false, &controlChildBusyNoEffect{cause: writeErr}
-			}
+	snapshot, revoked, writeErr := runtime.store.Commit(ctx, runID, expectedRevision, next, ControlCommit(guard))
+	if guard.Kind == ControlCancel && errors.Is(writeErr, ErrChildExecutionBusy) {
+		if _, authorized := runtime.store.(PhysicalExecutionStore); authorized {
+			// Every PhysicalExecutionStore MUST attest this busy outcome was
+			// rejected BEFORE any CAS mutation; unlike a generic Store
+			// ErrConflict it is a source-specific no-effect proof.
+			return Snapshot{}, false, &controlChildBusyNoEffect{cause: writeErr}
 		}
-		return snapshot, revoked, controlStoreOutcome(writeErr)
 	}
-	// Older custom stores implement no execution epochs and retain the existing
-	// six-state single-executor behavior; never fall back on a fenced Store.
-	if current.Run.BudgetScopeID != "" {
-		return Snapshot{}, false, controlNoEffectBeforeStore(ErrExecutionRequired)
-	}
-	if _, fenced := runtime.store.(ExecutionStore); fenced {
-		return Snapshot{}, false, controlNoEffectBeforeStore(ErrExecutionRequired)
-	}
-	result, writeErr := runtime.store.Apply(ctx, runID, expectedRevision, next)
-	return result, false, controlStoreOutcome(writeErr)
+	return snapshot, revoked, controlStoreOutcome(writeErr)
 }

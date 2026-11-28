@@ -8,8 +8,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type budgetResponseModel struct {
@@ -110,52 +110,35 @@ func TestRunnerEnforcesTerminalOutputBytes(t *testing.T) {
 	}
 }
 
-type rejectingBudgetModelMiddleware struct{ err error }
+type sharedDimensionBudgetPorts struct{}
 
-func (middleware rejectingBudgetModelMiddleware) Name() string { return "rejecting-budget" }
-
-func (middleware rejectingBudgetModelMiddleware) Model(
-	context.Context,
-	runtimemodel.Request,
-	runtimemodel.StreamSink,
-	plugin.ModelNext,
-) (runtimemodel.Response, error) {
-	return runtimemodel.Response{}, middleware.err
+func (sharedDimensionBudgetPorts) ResolveScope(_ context.Context, runID string) (agent.BoundedBudgetScope, error) {
+	return agent.BoundedBudgetScope{LedgerID: "turn", Limits: runtimebudget.Limits{MaxLLMCalls: 1}, Runs: []agent.BoundedBudgetRunBinding{{RunID: runID}}}, nil
 }
-
+func (sharedDimensionBudgetPorts) Project(context.Context, runtimebudget.Ledger) error { return nil }
+func (p sharedDimensionBudgetPorts) PlanModel(_ context.Context, ledger runtimebudget.Ledger, request runtimemodel.Request) (runtimemodel.Request, runtimebudget.Reservation, error) {
+	return p.PreviewModel(ledger, request)
+}
+func (sharedDimensionBudgetPorts) PreviewModel(_ runtimebudget.Ledger, request runtimemodel.Request) (runtimemodel.Request, runtimebudget.Reservation, error) {
+	hash, err := runtimemodel.PhysicalRequestHash(request)
+	return request, runtimebudget.Reservation{ID: "model:" + request.InvocationID, RunID: request.RunID, RequestHash: hash, Requested: runtimebudget.Usage{LLMCalls: 1}}, err
+}
 func TestRunnerReportsSharedBudgetExhaustionDimension(t *testing.T) {
-	runtime, _ := newTestRuntimeAndApprovals(t)
-	denied := exhaustedSharedLLMError(t)
-	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime:         runtime,
-		Model:           &budgetResponseModel{response: runtimemodel.Response{Content: "unused"}},
-		ModelMiddleware: []plugin.ModelMiddleware{rejectingBudgetModelMiddleware{err: denied}},
-	})
+	native := memory.NewStore()
+	runtime, err := kernel.New(kernel.Dependencies{Store: native})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := startRequest("run_shared_budget", "request_shared_budget", "answer")
-	snapshot, err := runner.StartRun(t.Context(), request)
-	if !errors.Is(err, runtimebudget.ErrExhausted) || snapshot.Run.Status != kernel.RunStatusFailed ||
-		snapshot.Run.ErrorCode != "agent.shared_llm_calls_budget" {
-		t.Fatalf("snapshot=%#v err=%v", snapshot.Run, err)
-	}
-}
-
-func exhaustedSharedLLMError(t *testing.T) error {
-	t.Helper()
-	coordinator := runtimebudget.Coordinator{Store: runtimebudget.NewMemoryLedgerStore()}
+	ledger := runtimebudget.LedgerStore(native)
+	coordinator := runtimebudget.Coordinator{Store: ledger}
 	ctx := t.Context()
 	if _, err := coordinator.Ensure(ctx, "turn", runtimebudget.Limits{MaxLLMCalls: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := coordinator.RegisterRun(ctx, "turn", "root", runtimebudget.RunBudget{}); err != nil {
+	if _, err := coordinator.RegisterRun(ctx, "turn", "previous", runtimebudget.RunBudget{}); err != nil {
 		t.Fatal(err)
 	}
-	first := runtimebudget.Reservation{
-		ID: "first", RunID: "root", RequestHash: "first",
-		Requested: runtimebudget.Usage{LLMCalls: 1},
-	}
+	first := runtimebudget.Reservation{ID: "first", RunID: "previous", RequestHash: "first", Requested: runtimebudget.Usage{LLMCalls: 1}}
 	if _, err := coordinator.Reserve(ctx, "turn", first, true); err != nil {
 		t.Fatal(err)
 	}
@@ -165,15 +148,20 @@ func exhaustedSharedLLMError(t *testing.T) error {
 	if _, err := coordinator.Settle(ctx, "turn", first.ID, runtimebudget.Usage{LLMCalls: 1}, []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
-	second := runtimebudget.Reservation{
-		ID: "second", RunID: "root", RequestHash: "second",
-		Requested: runtimebudget.Usage{LLMCalls: 1},
+	bounded, err := agent.NewBoundedBudgetAdapter(ledger, sharedDimensionBudgetPorts{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, err := coordinator.Reserve(ctx, "turn", second, true)
-	if !errors.Is(err, runtimebudget.ErrExhausted) {
-		t.Fatalf("expected exhaustion, got %v", err)
+	provider := &budgetResponseModel{response: runtimemodel.Response{Content: "unused"}}
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: provider, BoundedBudget: bounded})
+	if err != nil {
+		t.Fatal(err)
 	}
-	return err
+	request := startRequest("run_shared_budget", "request_shared_budget", "answer")
+	snapshot, err := runner.StartRun(ctx, request)
+	if !errors.Is(err, runtimebudget.ErrExhausted) || snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != "agent.shared_llm_calls_budget" || provider.calls != 0 {
+		t.Fatalf("snapshot=%#v err=%v calls=%d", snapshot.Run, err, provider.calls)
+	}
 }
 
 func TestRunnerRejectsCommonCeilingsItCannotEnforce(t *testing.T) {

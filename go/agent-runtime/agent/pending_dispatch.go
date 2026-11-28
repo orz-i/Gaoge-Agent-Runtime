@@ -26,13 +26,18 @@ func frozenToolWait(snapshot kernel.Snapshot, kind tools.PendingKind) (tools.Cal
 	if err != nil {
 		return tools.Call{}, tools.PendingExecution{}, false, err
 	}
-	if state.ToolWait == nil || state.ToolWait.Kind != kind {
+	wait := state.toolWait()
+	if state.ToolDispatchID == "" || (wait == nil && kind != "") || (wait != nil && wait.Kind != kind) {
 		return tools.Call{}, tools.PendingExecution{}, false, nil
 	}
-	if len(state.PendingCalls) == 0 || state.ToolDispatchID == "" || state.PendingCalls[0].ID != state.ToolDispatchID || state.ToolWait.CallID != state.ToolDispatchID {
+	call, ok := nextPendingCall(state)
+	if !ok || call.ID != state.ToolDispatchID {
 		return tools.Call{}, tools.PendingExecution{}, false, ErrToolOutcomeUnknown
 	}
-	return tools.CloneCall(state.PendingCalls[0]), *tools.ClonePending(&state.ToolWait.PendingExecution), true, nil
+	if wait == nil {
+		return tools.CloneCall(call), tools.PendingExecution{}, true, nil
+	}
+	return tools.CloneCall(call), *tools.ClonePending(&wait.PendingExecution), true, nil
 }
 
 // FrozenPendingDispatch returns an isolated copy of a Tool call whose
@@ -41,18 +46,6 @@ func frozenToolWait(snapshot kernel.Snapshot, kind tools.PendingKind) (tools.Cal
 // not execute the Tool again. A Feature owner must independently validate
 // the original durable admission before any recovery effects.
 func FrozenPendingDispatch(snapshot kernel.Snapshot) (tools.Call, bool, error) {
-	if snapshot.Run.Kind != RunKind || snapshot.Run.Status != kernel.RunStatusRunning {
-		return tools.Call{}, false, nil
-	}
-	state, err := decodeState(snapshot.State)
-	if err != nil {
-		return tools.Call{}, false, err
-	}
-	if state.ToolDispatchID == "" || state.ToolWait != nil {
-		return tools.Call{}, false, nil
-	}
-	if len(state.PendingCalls) == 0 || state.PendingCalls[0].ID != state.ToolDispatchID {
-		return tools.Call{}, false, ErrToolOutcomeUnknown
-	}
-	return tools.CloneCall(state.PendingCalls[0]), true, nil
+	call, _, ok, err := frozenToolWait(snapshot, "")
+	return call, ok, err
 }

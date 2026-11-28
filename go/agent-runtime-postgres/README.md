@@ -15,8 +15,14 @@ removed in beta.24. Legacy tables can be retired only after explicitly
 reconciling obsolete executions and following
 [`docs/migrations/retire-obsolete-orchestration.sql`](../../docs/migrations/retire-obsolete-orchestration.sql).
 
-Run migrations explicitly before starting workers. Constructing a store does
-not migrate the schema. The experimental Stage 2 Phase 1 branch adds
+Managed recovery derives current state from the unique latest history revision.
+`Migrate` initializes or verifies the current fresh-profile layout; it rejects
+legacy Effect, identity, retirement and Managed-current tables before any
+schema writes. Drain or quarantine obligations with the previous writer and
+retain or export its data before initializing a separate Profile.
+Do not mix writers or run `AutoMigrate(Models()...)` directly.
+
+The experimental Stage 2 Phase 1 branch adds
 **Epoch-derived sticky fencing**, owner/lease identity and Store-owned
 expiry to the Kernel Run record, without a redundant fence boolean.
 An explicit migration is required before trying these APIs on PostgreSQL.
@@ -24,7 +30,7 @@ The new `ExecutionStore` port uses PostgreSQL row locking and
 `clock_timestamp()` for authoritative epoch/expiry CAS. A real PostgreSQL
 16 test is available via `TEST_POSTGRES_DSN`, while ordinary GORM SQLite
 unit tests do **not** certify PostgreSQL fencing. The experimental
-Stage 2 Phase 2A adds `ControlStore.ApplyControl` for trusted,
+Stage 2 Phase 2A adds `Store.Commit with ControlCommit` for trusted,
 Feature-validated approval, budget, cancellation and deadline CAS.
 It atomically invalidates prior Run ownership with the control state,
 journal and outbox. [Phase 2A security remediation](../../docs/audits/2026-10-16-stage2-phase2a-code-review-remediation.md)
@@ -70,12 +76,15 @@ Run the public Core conformance kit for custom store integrations. Follow the
 pinning modules, coordinating migrations, and recovering an interrupted upgrade.
 
 
-### Physical Grant identity
+### Permanent physical Effect identity
 
-Run `Migrate` with old writers stopped before serving this schema. The permanent
-`agent_kernel_grant_identities` primary key serializes admissions across
-independent Run locks and pools. Multiple ancestor fence rows share one
-reservation. Managed Resume/Cancel consume exactly one original self-scoped
-grant; neither consumption nor retirement releases the ID. Migration reserves
-known active, retained retirement and managed-history identities and rejects
-ambiguous retained ownership. It does not recreate discarded history.
+The permanent `agent_kernel_effects` key serializes admissions across Run
+locks and pools. `agent_kernel_effect_owners` indexes active ancestor fences
+without copying the execution facts. Consumption retains the same identity
+and, when applicable, the final retirement receipt in the same row.
+
+Agent history uses `agent_kernel_state_history` with the same native Run
+transaction and shared physical codec as SQLite and Memory. Read logical
+State through the Store; the internal state column may contain a versioned
+hot-state envelope. Profiles lacking the immutable history table are
+refused before schema writes.

@@ -22,10 +22,10 @@ func TestAgentStateOneSealedOpaquePathForAllOriginalEvidence(t *testing.T) {
 	message := model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{call},
 		ProviderReplay: &model.ProviderReplay{Provider: "openai", Format: "responses.output.v1", Data: json.RawMessage(`{ "cipher": "<>&" }`)}}
 	original := runState{
-		Messages:       []model.Message{message},
-		ModelOptions:   json.RawMessage(`{ "name": "<>&" }`),
-		PendingCalls:   []tools.Call{call},
-		RecoveredTools: []rootToolReceipt{{Call: call, Result: tools.ExecutionResult{Content: json.RawMessage(`{ "original": "<>&" }`)}}},
+		Messages:     []model.Message{message},
+		ModelOptions: json.RawMessage(`{ "name": "<>&" }`),
+		PendingCalls: []tools.Call{call},
+		ToolReturns:  []returnedTool{{CallID: call.ID, Outcome: &toolOutcomeReceipt{Result: tools.ExecutionResult{Content: json.RawMessage(`{ "original": "<>&" }`)}}}},
 		ModelInvocations: []ModelInvocation{{
 			Request: model.Request{
 				ModelOptions: json.RawMessage(raw),
@@ -79,6 +79,7 @@ func TestAgentStateMissingOrContradictoryOriginalEvidenceFailsClosed(t *testing.
 		edit func(*persistedRunState)
 	}{
 		{"missing-original", func(v *persistedRunState) { v.OriginalStateEvidence = nil }},
+		{"prior-wire-version", func(v *persistedRunState) { v.OriginalStateEvidence.Version = "agent-state-opaque-v4" }},
 		{"changed-original", func(v *persistedRunState) { v.OriginalStateEvidence.Fields[0].Raw = []byte(`{"html":"forged"}`) }},
 		{"stripped-field", func(v *persistedRunState) { v.OriginalStateEvidence.Fields = v.OriginalStateEvidence.Fields[:1] }},
 		{"duplicate-field", func(v *persistedRunState) {

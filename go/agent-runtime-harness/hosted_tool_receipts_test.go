@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -13,14 +12,23 @@ func TestHostedEmptyStatusWithIdentityKeepsQuotaUntilExplicitTerminal(t *testing
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{
 		MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3,
 	})
-	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
-			t.Fatalf("initial native allowance was not fenced: %+v", bounded)
+	var fixturePhysical1 model.Request
+	_, err := func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical1, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
 		}
-		return model.Response{Content: "pending native result", HostedToolCalls: []model.HostedToolCall{{
-			ID: "pending-native", ToolKey: "native.search", Status: "",
-		}}}, nil
-	})
+		response, callErr := func(bounded model.Request) (model.Response, error) {
+			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+				t.Fatalf("initial native allowance was not fenced: %+v", bounded)
+			}
+			return model.Response{Content: "pending native result", HostedToolCalls: []model.HostedToolCall{{
+				ID: "pending-native", ToolKey: "native.search", Status: "",
+			}}}, nil
+		}(fixturePhysical1)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical1, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,14 +46,23 @@ func TestHostedEmptyStatusWithIdentityKeepsQuotaUntilExplicitTerminal(t *testing
 		t.Fatal(err)
 	}
 	request.InvocationID = "reconcile-native"
-	_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
-			t.Fatalf("restart turned unknown native effect into new authorization: %+v", bounded)
+	var fixturePhysical2 model.Request
+	_, err = func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical2, admissionErr = admitModelLedgerFixture(t.Context(), restarted, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
 		}
-		return model.Response{Content: "confirmed", HostedToolCalls: []model.HostedToolCall{{
-			ID: "pending-native", ToolKey: "native.search", Status: "completed",
-		}}}, nil
-	})
+		response, callErr := func(bounded model.Request) (model.Response, error) {
+			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
+				t.Fatalf("restart turned unknown native effect into new authorization: %+v", bounded)
+			}
+			return model.Response{Content: "confirmed", HostedToolCalls: []model.HostedToolCall{{
+				ID: "pending-native", ToolKey: "native.search", Status: "completed",
+			}}}, nil
+		}(fixturePhysical2)
+		return settleModelLedgerFixture(t.Context(), restarted, fixturePhysical2, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,15 +84,24 @@ func TestHostedAnonymousUnfinishedStatusKeepsDispatchedModelReservation(t *testi
 				MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 2,
 			})
 			calls := 0
-			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-				calls++
-				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
-					t.Fatalf("initial native allowance missing: %+v", bounded)
+			var fixturePhysical3 model.Request
+			_, err := func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical3, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
 				}
-				return model.Response{Content: "incomplete", HostedToolCalls: []model.HostedToolCall{{
-					ToolKey: "native.search", Status: status, // Missing provider-owned Call ID.
-				}}}, nil
-			})
+				response, callErr := func(bounded model.Request) (model.Response, error) {
+					calls++
+					if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+						t.Fatalf("initial native allowance missing: %+v", bounded)
+					}
+					return model.Response{Content: "incomplete", HostedToolCalls: []model.HostedToolCall{{
+						ToolKey: "native.search", Status: status, // Missing provider-owned Call ID.
+					}}}, nil
+				}(fixturePhysical3)
+				return settleModelLedgerFixture(t.Context(), shared, fixturePhysical3, response, callErr)
+			}()
 			if !errors.Is(err, budget.ErrInvalidUsage) || calls != 1 {
 				t.Fatalf("anonymous unverified native effect was not fenced: err=%v calls=%d", err, calls)
 			}
@@ -92,11 +118,11 @@ func TestHostedAnonymousUnfinishedStatusKeepsDispatchedModelReservation(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-				calls++
-				return model.Response{Content: "unsafe replay"}, nil
-			})
-			if !errors.Is(err, budget.ErrWaiting) || calls != 1 {
+			_, err = func() (model.Response, error) {
+				_, e := admitModelLedgerFixture(t.Context(), restarted, request)
+				return model.Response{}, e
+			}()
+			if !errors.Is(err, budget.ErrLedgerConflict) || calls != 1 {
 				t.Fatalf("unidentified native effect was automatically retried: err=%v calls=%d", err, calls)
 			}
 		})
@@ -115,24 +141,33 @@ func TestHostedPauseReceiptsHoldAndReconcileAcrossRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-			// The in-progress receipt holds the only slot until settled.
-			// Continuation of that old execution is not a new allowance.
-			want := 0
-			if step == 0 {
-				want = 1
+		var fixturePhysical4 model.Request
+		_, err := func() (model.Response, error) {
+			var admissionErr error
+			fixturePhysical4, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+			if admissionErr != nil {
+				return model.Response{}, admissionErr
 			}
-			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != want {
-				t.Fatalf("step %d allowance=%v", step, bounded.HostedToolCallLimit)
-			}
-			if step == 1 && len(bounded.Tools) != 1 {
-				t.Fatal("a pending native receipt consumed the same slot twice, hiding the authorized local tool")
-			}
-			if step >= 2 {
-				call.Status = "completed"
-			}
-			return model.Response{Content: "evidence", Continue: step < 2, Usage: &model.Usage{InputTokens: 17, OutputTokens: 3}, HostedToolCalls: []model.HostedToolCall{call}}, nil
-		})
+			response, callErr := func(bounded model.Request) (model.Response, error) {
+				// The in-progress receipt holds the only slot until settled.
+				// Continuation of that old execution is not a new allowance.
+				want := 0
+				if step == 0 {
+					want = 1
+				}
+				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != want {
+					t.Fatalf("step %d allowance=%v", step, bounded.HostedToolCallLimit)
+				}
+				if step == 1 && len(bounded.Tools) != 1 {
+					t.Fatal("a pending native receipt consumed the same slot twice, hiding the authorized local tool")
+				}
+				if step >= 2 {
+					call.Status = "completed"
+				}
+				return model.Response{Content: "evidence", Continue: step < 2, Usage: &model.Usage{InputTokens: 17, OutputTokens: 3}, HostedToolCalls: []model.HostedToolCall{call}}, nil
+			}(fixturePhysical4)
+			return settleModelLedgerFixture(t.Context(), shared, fixturePhysical4, response, callErr)
+		}()
 		if err != nil {
 			t.Fatalf("step %d: %v", step, err)
 		}
@@ -153,10 +188,7 @@ func TestHostedPauseReceiptsHoldAndReconcileAcrossRestart(t *testing.T) {
 			t.Fatalf("known model tokens were not settled: %+v", view)
 		}
 		// Reusing a logical invocation returns its durable receipt without dispatch.
-		_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-			t.Fatal("receipt redispatched")
-			return model.Response{}, nil
-		})
+		_, err = shared.VerifyModelOutcome(t.Context(), fixturePhysical4)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,21 +197,39 @@ func TestHostedPauseReceiptsHoldAndReconcileAcrossRestart(t *testing.T) {
 
 func TestHostedUnfinishedReceiptSurvivesTerminalRun(t *testing.T) {
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1})
-	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		return model.Response{Content: "partial answer", HostedToolCalls: []model.HostedToolCall{{ID: "unresolved", ToolKey: "native.search", Status: "in_progress"}}}, nil
-	})
+	var fixturePhysical5 model.Request
+	_, err := func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical5, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
+		}
+		response, callErr := func(q model.Request) (model.Response, error) {
+			return model.Response{Content: "partial answer", HostedToolCalls: []model.HostedToolCall{{ID: "unresolved", ToolKey: "native.search", Status: "in_progress"}}}, nil
+		}(fixturePhysical5)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical5, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.InvocationID = "final-only"
 	zero := 0
 	request.HostedToolCallLimit = &zero
-	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
-			t.Fatal("final-only sampling resumed uncertain native work")
+	var fixturePhysical6 model.Request
+	_, err = func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical6, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
 		}
-		return model.Response{Content: "final answer with an explicitly unknown native outcome"}, nil
-	})
+		response, callErr := func(bounded model.Request) (model.Response, error) {
+			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
+				t.Fatal("final-only sampling resumed uncertain native work")
+			}
+			return model.Response{Content: "final answer with an explicitly unknown native outcome"}, nil
+		}(fixturePhysical6)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical6, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,25 +251,43 @@ func TestHostedUnfinishedReceiptSurvivesTerminalRun(t *testing.T) {
 // not another allowance for new provider executions on the next model step.
 func TestHostedContinuationHeldReceiptCannotGrantNewNativeCall(t *testing.T) {
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3})
-	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
-			t.Fatalf("initial new-call allowance: %v", bounded.HostedToolCallLimit)
+	var fixturePhysical7 model.Request
+	_, err := func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical7, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
 		}
-		return model.Response{Continue: true, HostedToolCalls: []model.HostedToolCall{{ID: "old", ToolKey: "native.search", Status: "in_progress"}}}, nil
-	})
+		response, callErr := func(bounded model.Request) (model.Response, error) {
+			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+				t.Fatalf("initial new-call allowance: %v", bounded.HostedToolCallLimit)
+			}
+			return model.Response{Continue: true, HostedToolCalls: []model.HostedToolCall{{ID: "old", ToolKey: "native.search", Status: "in_progress"}}}, nil
+		}(fixturePhysical7)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical7, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.InvocationID = "finish-old"
-	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
-			t.Fatalf("held receipt became a fresh call permit: %v", bounded.HostedToolCallLimit)
+	var fixturePhysical8 model.Request
+	_, err = func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical8, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
 		}
-		if len(bounded.HostedTools) != 1 || len(bounded.Tools) != 0 {
-			t.Fatalf("native replay was removed or a local call was admitted: %+v", bounded)
-		}
-		return model.Response{Content: "old complete", HostedToolCalls: []model.HostedToolCall{{ID: "old", ToolKey: "native.search", Status: "completed"}}}, nil
-	})
+		response, callErr := func(bounded model.Request) (model.Response, error) {
+			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
+				t.Fatalf("held receipt became a fresh call permit: %v", bounded.HostedToolCallLimit)
+			}
+			if len(bounded.HostedTools) != 1 || len(bounded.Tools) != 0 {
+				t.Fatalf("native replay was removed or a local call was admitted: %+v", bounded)
+			}
+			return model.Response{Content: "old complete", HostedToolCalls: []model.HostedToolCall{{ID: "old", ToolKey: "native.search", Status: "completed"}}}, nil
+		}(fixturePhysical8)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical8, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,26 +305,44 @@ func TestHostedContinuationHeldReceiptCannotGrantNewNativeCall(t *testing.T) {
 // quota may be delegated for NEW native executions.
 func TestHostedContinuationReservesOnlyFreshCalls(t *testing.T) {
 	_, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 3, MaxToolCalls: 3})
-	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		return model.Response{Continue: true, HostedToolCalls: []model.HostedToolCall{
-			{ID: "old-1", ToolKey: "native.search", Status: "in_progress"},
-			{ID: "old-2", ToolKey: "native.search", Status: "in_progress"},
-		}}, nil
-	})
+	var fixturePhysical9 model.Request
+	_, err := func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical9, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
+		}
+		response, callErr := func(bounded model.Request) (model.Response, error) {
+			return model.Response{Continue: true, HostedToolCalls: []model.HostedToolCall{
+				{ID: "old-1", ToolKey: "native.search", Status: "in_progress"},
+				{ID: "old-2", ToolKey: "native.search", Status: "in_progress"},
+			}}, nil
+		}(fixturePhysical9)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical9, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.InvocationID = "fresh-only"
-	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
-			t.Fatalf("held calls inflated the new-execution limit: %v", bounded.HostedToolCallLimit)
+	var fixturePhysical10 model.Request
+	_, err = func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical10, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
 		}
-		return model.Response{Content: "done", HostedToolCalls: []model.HostedToolCall{
-			{ID: "old-1", ToolKey: "native.search", Status: "completed"},
-			{ID: "old-2", ToolKey: "native.search", Status: "completed"},
-			{ID: "new-3", ToolKey: "native.search", Status: "completed"},
-		}}, nil
-	})
+		response, callErr := func(bounded model.Request) (model.Response, error) {
+			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+				t.Fatalf("held calls inflated the new-execution limit: %v", bounded.HostedToolCallLimit)
+			}
+			return model.Response{Content: "done", HostedToolCalls: []model.HostedToolCall{
+				{ID: "old-1", ToolKey: "native.search", Status: "completed"},
+				{ID: "old-2", ToolKey: "native.search", Status: "completed"},
+				{ID: "new-3", ToolKey: "native.search", Status: "completed"},
+			}}, nil
+		}(fixturePhysical10)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical10, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,15 +361,24 @@ func TestHostedSameResponseTerminalWinsAndReplaysExactlyOnce(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3})
-			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
-					t.Fatalf("missing bounded initial dispatch: %v", bounded.HostedToolCallLimit)
+			var fixturePhysical11 model.Request
+			_, err := func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical11, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
 				}
-				return model.Response{Content: "final result", HostedToolCalls: []model.HostedToolCall{
-					{ID: "call", ToolKey: "native.search", Status: tc.first},
-					{ID: "call", ToolKey: "native.search", Status: tc.last},
-				}}, nil
-			})
+				response, callErr := func(bounded model.Request) (model.Response, error) {
+					if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+						t.Fatalf("missing bounded initial dispatch: %v", bounded.HostedToolCallLimit)
+					}
+					return model.Response{Content: "final result", HostedToolCalls: []model.HostedToolCall{
+						{ID: "call", ToolKey: "native.search", Status: tc.first},
+						{ID: "call", ToolKey: "native.search", Status: tc.last},
+					}}, nil
+				}(fixturePhysical11)
+				return settleModelLedgerFixture(t.Context(), shared, fixturePhysical11, response, callErr)
+			}()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -299,20 +394,26 @@ func TestHostedSameResponseTerminalWinsAndReplaysExactlyOnce(t *testing.T) {
 			if usage.Incomplete || usage.HostedCalls != 1 || usage.HostedCallsByKey["native.search"] != 1 {
 				t.Fatalf("host projection disagrees with settled receipt: %+v", usage)
 			}
-			_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-				t.Fatal("replayed model invocation dispatched a second time")
-				return model.Response{}, nil
-			})
+			_, err = shared.VerifyModelOutcome(t.Context(), fixturePhysical11)
 			if err != nil {
 				t.Fatal(err)
 			}
 			request.InvocationID = "after-terminal"
-			_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
-					t.Fatalf("already-charged tool has gained new authorization: %v", bounded.HostedToolCallLimit)
+			var fixturePhysical12 model.Request
+			_, err = func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical12, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
 				}
-				return model.Response{Content: "done"}, nil
-			})
+				response, callErr := func(bounded model.Request) (model.Response, error) {
+					if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
+						t.Fatalf("already-charged tool has gained new authorization: %v", bounded.HostedToolCallLimit)
+					}
+					return model.Response{Content: "done"}, nil
+				}(fixturePhysical12)
+				return settleModelLedgerFixture(t.Context(), shared, fixturePhysical12, response, callErr)
+			}()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -326,11 +427,20 @@ func TestHostedNonterminalStatusesPreserveUncertainCharges(t *testing.T) {
 	for _, status := range []string{"requested", "pending", "in_progress", "running", "queued", "unknown_vendor_state"} {
 		t.Run(status, func(t *testing.T) {
 			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1})
-			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-				return model.Response{Content: "still pending", HostedToolCalls: []model.HostedToolCall{
-					{ID: "unresolved", ToolKey: "native.search", Status: status},
-				}}, nil
-			})
+			var fixturePhysical13 model.Request
+			_, err := func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical13, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
+				}
+				response, callErr := func(q model.Request) (model.Response, error) {
+					return model.Response{Content: "still pending", HostedToolCalls: []model.HostedToolCall{
+						{ID: "unresolved", ToolKey: "native.search", Status: status},
+					}}, nil
+				}(fixturePhysical13)
+				return settleModelLedgerFixture(t.Context(), shared, fixturePhysical13, response, callErr)
+			}()
 			if err != nil {
 				t.Fatal(err)
 			}

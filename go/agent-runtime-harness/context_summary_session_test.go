@@ -15,7 +15,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func summaryTestPolicy() *agent.WorkingStateSummaryPolicy {
@@ -49,21 +48,24 @@ type sharedSummaryReceiptFaultStore struct {
 	armed, after, fired bool
 }
 
-func (s *sharedSummaryReceiptFaultStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.armed && !s.fired {
-		for _, event := range mutation.Events {
-			if event.Type == "agent.model_invocation.completed" {
-				s.fired = true
-				if s.after {
-					if _, err := s.Store.ApplyExecution(ctx, lease, revision, mutation); err != nil {
-						return kernel.Snapshot{}, err
+func (s *sharedSummaryReceiptFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		if s.armed && !s.fired {
+			for _, event := range commitMutation.Events {
+				if event.Type == "agent.model_invocation.completed" {
+					s.fired = true
+					if s.after {
+						if _, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); err != nil {
+							return kernel.Snapshot{}, false, err
+						}
 					}
+					return kernel.Snapshot{}, false, errSharedSummaryReceiptCut
 				}
-				return kernel.Snapshot{}, errSharedSummaryReceiptCut
 			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.ApplyExecution(ctx, lease, revision, mutation)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing.T) {
@@ -191,7 +193,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				if err != nil {
 					t.Fatal(err)
 				}
-				options.Context.ManagedRecovery = true
+
 			}
 			session, err := harness.OpenAgentSession(options)
 			if err != nil {
@@ -365,6 +367,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 					}
 				}
 				options.Session.Transcript = nil
+				options.Session.Config.WorkingStateSummary = nil // Original policy, not a reopened handle, selects summary execution.
 				reopened, err := harness.OpenAgentSession(options)
 				if err != nil {
 					t.Fatal(err)
@@ -423,38 +426,42 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			options.Runtime, err = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
+			deps := kernel.Dependencies{Store: runs}
+			if !nativeRecovery {
+				deps.ManagedRecoveryHost = store
+			}
+			options.Runtime, err = kernel.New(deps)
 			if err != nil {
 				t.Fatal(err)
 			}
-			options.Context.ManagedRecovery = !nativeRecovery
 			retrospective, err := harness.OpenAgentSession(options)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := retrospective.Resume(t.Context(), "second"); !errors.Is(err, harness.ErrInvalidRequest) || len(client.requests) != before {
-				t.Fatalf("new handle retroactively selected native summary recovery: %v", err)
+			if observed, err := retrospective.Resume(t.Context(), "second"); err != nil || observed.Turn.Status != harness.TurnCompleted || len(client.requests) != before {
+				t.Fatalf("terminal observation executed or required a recovery selector: %v", err)
 			}
 			retainedNative, err := options.Runtime.Load(t.Context(), root.ExecutionRefID)
 			if err != nil || retainedNative.Run.Revision != originalNative.Run.Revision {
-				t.Fatal("rejected recovery selector changed the original Run")
+				t.Fatal("terminal observation changed the original Run")
 			}
 		})
 	}
 }
 
 func TestAgentSessionSummaryRejectsUnsupportedComposition(t *testing.T) {
-	for _, mode := range []string{"missing managed host binding", "shared native budget", "zero input", "zero bytes"} {
+	for _, mode := range []string{"foreign managed host binding", "zero input", "zero bytes"} {
 		t.Run(mode, func(t *testing.T) {
 			client := &agentSessionModel{}
 			options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
 			options.Session.Config.WorkingStateSummary = summaryTestPolicy()
 			switch mode {
-			case "missing managed host binding":
-				options.Context.ManagedRecovery = true
-			case "shared native budget":
-				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 3}
-				options.Context.ManagedRecovery = true
+			case "foreign managed host binding":
+				var err error
+				options.Runtime, err = kernel.New(kernel.Dependencies{Store: memory.NewStore(), ManagedRecoveryHost: harness.NewMemoryStore()})
+				if err != nil {
+					t.Fatal(err)
+				}
 			case "zero input":
 				options.Session.Config.WorkingStateSummary.MaxInputTokens = 0
 			case "zero bytes":
@@ -476,7 +483,7 @@ func TestAgentSessionManagedRecoveryRequiresExactHostStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options.Context.ManagedRecovery = true
+
 	options.Session.Config.WorkingStateSummary = summaryTestPolicy()
 	if _, err := harness.OpenAgentSession(options); err != nil {
 		t.Fatalf("matching explicit native summary recovery composition rejected: %v", err)
@@ -510,11 +517,7 @@ func TestNativeSummaryValidatesBothConcreteBridgesActualStore(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dependencies := agent.Dependencies{Runtime: runtime, Model: &summarySessionModel{}, ContextSummary: summary, RunMiddleware: []plugin.RunMiddleware{bounded}}
-			if _, err := agent.NewRunner(dependencies); err != nil {
-				t.Fatalf("ordinary adapter construction was unnecessarily restricted: %v", err)
-			}
-			dependencies.ManagedRecovery = true
+			dependencies := agent.Dependencies{Runtime: runtime, Model: &summarySessionModel{}, ContextSummary: summary}
 			if _, err := agent.NewRunner(dependencies); !errors.Is(err, agent.ErrInvalidRequest) {
 				t.Fatalf("native summary accepted a foreign actual bridge Store: %v", err)
 			}
@@ -567,7 +570,7 @@ func TestRootSummaryPolicyMatchesOriginalConfigBeforeProjectionAndResume(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			loop, err := agent.NewRunner(agent.Dependencies{Runtime: options.Runtime, Model: client, ContextSummary: summary, RunMiddleware: []plugin.RunMiddleware{bounded}})
+			loop, err := agent.NewRunner(agent.Dependencies{Runtime: options.Runtime, Model: client, ContextSummary: summary})
 			if err != nil {
 				t.Fatal(err)
 			}

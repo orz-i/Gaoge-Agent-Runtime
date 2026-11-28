@@ -13,7 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
-// IsOwned distinguishes ANY native binding from separately owned child grants.
+// IsOwned identifies a native lease binding, independently of physical parentage.
 // Partial bindings are owned-invalid, never a fallback to unrelated authority.
 func (g ChildExecutionGrant) IsOwned() bool {
 	return g.ExecutionOwnerID != "" || g.ExecutionLeaseID != "" || g.ExecutionEpoch != 0 || g.AdmissionSourceHash != "" || g.AdmissionOperation != ""
@@ -29,51 +29,54 @@ func (g ChildExecutionGrant) MatchesExecution(l ExecutionLease) bool {
 // admission can recover an exact committed attempt.
 var ErrPhysicalAdmissionCommitUnknown = errors.New("kernel physical admission commit is uncertain")
 
-// OwnedPhysicalExecutionStore adds an atomic Root Agent barrier to its native
-// lease/receipt protocol. Begin returns nil only for the original committed
+// PhysicalExecutionStore is the shared admission, return, consumption and
+// receipt-only recovery contract for all first-party physical operations. Begin returns nil only for the original committed
 // admission; a definite rejection cannot grant execution, even if the same
 // public Grant ID is already present. Only an actual COMMIT failure may be
-// returned through this attempt's OwnedPhysicalAdmission.CommitOutcome.
+// returned through this attempt's PhysicalAdmission.CommitOutcome.
 // Observations and receipt-only recovery never grant fresh dispatch authority.
 // CheckOwnedPhysicalEntry atomically consumes the original Grant entry epoch
 // before acknowledging callback entry, including Managed successors; no replay.
-type OwnedPhysicalExecutionStore interface {
-	RecordOwnedPhysicalCallbackReturn(context.Context, ChildExecutionGrant, uint64, OwnedPhysicalCallbackOutcome, OwnedPhysicalCallbackReturn) error
-	LookupOwnedPhysicalCallbackReturn(context.Context, ChildExecutionGrant) (OwnedPhysicalCallbackCompletion, error)
-	BeginOwnedPhysicalExecution(context.Context, OwnedPhysicalAdmission) (OwnedPhysicalAdmissionResult, error)
+type PhysicalExecutionStore interface {
+	LoadOwnedRetirement(context.Context, string) (OwnedRetirementReceipt, error)
+	LookupOwnedRetirementForRun(context.Context, string) (OwnedRetirementReceipt, error)
+	LookupChildExecution(context.Context, string) (ChildExecutionGrant, error)
+	FinishChildExecution(context.Context, ChildExecutionGrant, ChildExecutionSettlement) error
+	RecordPhysicalCallbackReturn(context.Context, ChildExecutionGrant, uint64, PhysicalCallbackOutcome, PhysicalCallbackReturn) error
+	LookupPhysicalCallbackReturn(context.Context, ChildExecutionGrant) (PhysicalCallbackCompletion, error)
+	BeginPhysicalExecution(context.Context, PhysicalAdmission) (PhysicalAdmissionResult, error)
 	CheckOwnedPhysicalEntry(context.Context, ChildExecutionGrant, ExecutionLease, Snapshot) (OwnedPhysicalEntryWindow, error)
-	ApplyOwnedPhysicalRecovery(context.Context, ChildExecutionGrant, uint64, StoreMutation, OwnedPhysicalRecovery) (Snapshot, error)
 }
 
-// OwnedPhysicalAdmission binds the original source proof to one private
+// PhysicalAdmission binds the original source proof to one private
 // invocation, not merely to a caller-configurable public Grant ID. The
 // commitment is retained in the existing AdmissionSourceHash field; the
 // attempt nonce is never exported or reconstructed from a stored Grant.
-type OwnedPhysicalAdmission struct {
-	proof      *featurecontrol.Proof
-	attempt    [32]byte
-	dispatchID string
-	acquire    ExecutionAcquireRequest
-	candidate  OwnedPhysicalAdmissionResult
-	recovery   ManagedAdmissionProof
+type PhysicalAdmission struct {
+	proof                 *featurecontrol.Proof
+	attempt               [32]byte
+	operation, dispatchID string
+	acquire               ExecutionAcquireRequest
+	candidate             PhysicalAdmissionResult
+	recovery              ManagedAdmissionProof
 }
 
-// OwnedPhysicalAdmissionResult is the single admitted native segment.
-type OwnedPhysicalAdmissionResult struct {
+// PhysicalAdmissionResult is the single admitted native segment.
+type PhysicalAdmissionResult struct {
 	Grant ChildExecutionGrant
 	Lease ExecutionLease
 }
 
-func (p OwnedPhysicalAdmission) AcquiresLease() bool     { return p.acquire.RunID != "" }
-func (p OwnedPhysicalAdmission) IsManagedRecovery() bool { return p.recovery.valid }
+func (p PhysicalAdmission) AcquiresLease() bool     { return p.acquire.RunID != "" }
+func (p PhysicalAdmission) IsManagedRecovery() bool { return p.recovery.valid }
 
 // Candidate exposes only the immutable request identity, not dispatch
 // authority. Fresh candidates have no epoch or authoritative expiration.
-func (p OwnedPhysicalAdmission) Candidate() OwnedPhysicalAdmissionResult { return p.candidate }
+func (p PhysicalAdmission) Candidate() PhysicalAdmissionResult { return p.candidate }
 
-// OwnedPhysicalAdmissionSubject seals the same intent for fresh and borrowed
+// PhysicalAdmissionSubject seals the same intent for fresh and borrowed
 // owners, including the operation and original Host dispatch correlation.
-func OwnedPhysicalAdmissionSubject(q ExecutionAcquireRequest, l ExecutionLease, operation, dispatchID string) string {
+func PhysicalAdmissionSubject(q ExecutionAcquireRequest, l ExecutionLease, operation, dispatchID string) string {
 	l.ExpiresAt = time.Time{}
 	return ManagedDigest(struct {
 		Request               ExecutionAcquireRequest
@@ -102,7 +105,7 @@ func (e *ownedAdmissionCommitUnknown) Is(target error) bool {
 // Runtime must independently recover the exact committed attempt. Preserve
 // this direct result across Store wrappers; an arbitrary joined or wrapped
 // error is not sufficient to opt in to transparent ACK recovery.
-func (p OwnedPhysicalAdmission) CommitOutcome(err error) error {
+func (p PhysicalAdmission) CommitOutcome(err error) error {
 	if err == nil || p.attempt == ([32]byte{}) {
 		return err
 	}
@@ -117,25 +120,30 @@ func (p OwnedPhysicalAdmission) CommitOutcome(err error) error {
 	return &ownedAdmissionCommitUnknown{attempt: p.attempt, cause: err}
 }
 
-func (p OwnedPhysicalAdmission) commitUncertain(err error) bool {
+func (p PhysicalAdmission) commitUncertain(err error) bool {
 	outcome, ok := err.(*ownedAdmissionCommitUnknown) //nolint:errorlint // Direct attempt-specific Store outcome only.
 	return ok && outcome.attempt == p.attempt && p.attempt != ([32]byte{})
 }
 
-func (p OwnedPhysicalAdmission) Matches(g ChildExecutionGrant, s Snapshot, l ExecutionLease) bool {
-	candidate := p.candidate
-	if p.attempt == ([32]byte{}) || !g.Identity().Valid() ||
-		g.ID != candidate.Grant.ID || g.ChildRunID != candidate.Grant.ChildRunID || g.ExpectedRevision != candidate.Grant.ExpectedRevision ||
-		g.AdmissionOperation != candidate.Grant.AdmissionOperation || l.OwnerID != candidate.Lease.OwnerID || l.LeaseID != candidate.Lease.LeaseID ||
-		(!p.AcquiresLease() && l.Epoch != candidate.Lease.Epoch) || !g.MatchesExecution(l) {
+func (p PhysicalAdmission) Matches(g ChildExecutionGrant, s Snapshot, l ExecutionLease) bool {
+	c := p.candidate
+	if !g.Identity().Valid() || g.ExpectedRevision == 0 ||
+		g.ID != c.Grant.ID || g.ChildRunID != c.Grant.ChildRunID || g.ExpectedRevision != c.Grant.ExpectedRevision ||
+		s.Run.Kind != "agent" || s.Run.ID != g.ChildRunID || s.Run.Revision != g.ExpectedRevision ||
+		(s.Run.Status != RunStatusRunning && s.Run.Status != RunStatusWaitingInput) {
+		return false
+	}
+	if p.attempt == ([32]byte{}) || g.AdmissionOperation != c.Grant.AdmissionOperation ||
+		l.OwnerID != c.Lease.OwnerID || l.LeaseID != c.Lease.LeaseID ||
+		(!p.AcquiresLease() && l.Epoch != c.Lease.Epoch) || !g.MatchesExecution(l) ||
+		g.AdmissionSourceHash != ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt) {
 		return false
 	}
 	if p.IsManagedRecovery() {
-		return p.AcquiresLease() && g.AdmissionOperation == "managed_resume" && !strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) &&
-			p.recovery.Matches(p.recovery.transfer, ManagedResume) && ManagedSourceMatches(p.recovery.transfer.SafePoint, s) &&
-			g.AdmissionSourceHash == ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt)
+		return s.Run.ParentRunID == "" && p.AcquiresLease() && g.AdmissionOperation == "managed_resume" && !strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) &&
+			p.recovery.Matches(p.recovery.transfer, ManagedResume) && ManagedSourceMatches(p.recovery.transfer.SafePoint, s)
 	}
-	if !ordinaryOwnedOperation(g.AdmissionOperation) {
+	if g.AdmissionOperation != p.operation {
 		return false
 	}
 	if p.dispatchID != "" {
@@ -146,14 +154,12 @@ func (p OwnedPhysicalAdmission) Matches(g ChildExecutionGrant, s Snapshot, l Exe
 	} else if strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) {
 		return false
 	}
-	borrowed := candidate.Lease
+	lease := c.Lease
 	if p.AcquiresLease() {
-		borrowed = ExecutionLease{}
+		lease = ExecutionLease{}
 	}
-	return s.Run.Kind == "agent" && s.Run.ParentRunID == "" && s.Run.Revision == g.ExpectedRevision &&
-		(s.Run.Status == RunStatusRunning || s.Run.Status == RunStatusWaitingInput) &&
-		g.AdmissionSourceHash == ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt) &&
-		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", OwnedPhysicalAdmissionSubject(p.acquire, borrowed, g.AdmissionOperation, p.dispatchID), s.State, s)
+	return ordinaryOwnedOperation(p.operation) &&
+		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", PhysicalAdmissionSubject(p.acquire, lease, p.operation, p.dispatchID), s.State, s)
 }
 
 func ownedAdmissionAttemptHash(s Snapshot, l ExecutionLease, operation, grantID string, attempt [32]byte) string {
@@ -177,11 +183,11 @@ func (r *Runtime) BoundExecutionLease() (ExecutionLease, bool) {
 	}
 	return *r.execution, true
 }
-func (r *Runtime) SupportsOwnedPhysicalExecution() bool {
+func (r *Runtime) SupportsPhysicalExecution() bool {
 	if r == nil {
 		return false
 	}
-	_, ok := r.store.(OwnedPhysicalExecutionStore)
+	_, ok := r.store.(PhysicalExecutionStore)
 	return ok
 }
 
@@ -207,23 +213,30 @@ func OwnedPhysicalDispatchGrantID(runID, operation, dispatchID string) (string, 
 	return prefix + ManagedDigest(struct{ RunID, Operation, DispatchID string }{runID, operation, dispatchID}), nil
 }
 
-// AdmitOwnedPhysicalExecution is the sole native Root admission. A fresh
-// owner request is admitted atomically with its Grant, or a caller-bound
-// Lease is borrowed unchanged. No ordinary Acquire/Release compensation.
-func (r *Runtime) AdmitOwnedPhysicalExecution(ctx context.Context, s Snapshot, q ExecutionAcquireRequest, proof *featurecontrol.Proof, operation, dispatchID string) (*Runtime, OwnedPhysicalAdmissionResult, error) {
-	var zero OwnedPhysicalAdmissionResult
+// AdmitPhysicalExecution is the sole ordinary native admission. The original
+// source determines ancestor fencing or a leased owner; both use the same
+// Store transaction and the exact returned binding.
+func (r *Runtime) AdmitPhysicalExecution(ctx context.Context, s Snapshot, q ExecutionAcquireRequest, proof *featurecontrol.Proof, operation, dispatchID string) (*Runtime, PhysicalAdmissionResult, error) {
+	var zero PhysicalAdmissionResult
 	id, rev := s.Run.ID, s.Run.Revision
 	if r == nil || ctx == nil || id == "" || rev == 0 || !ordinaryOwnedOperation(operation) {
 		return nil, zero, ErrInvalidInput
 	}
-	_, ok := r.store.(OwnedPhysicalExecutionStore)
-	if !ok || !r.SupportsExecution() || !r.SupportsChildExecution() {
-		return nil, zero, ErrExecutionRequired
-	}
 	if r.physicalGrant != nil {
 		return nil, zero, ErrExecutionConflict
 	}
+	if s.Run.Kind != "agent" {
+		return nil, zero, ErrExecutionRequired
+	}
 	l, bound := r.BoundExecutionLease()
+	parented := s.Run.ParentRunID != ""
+	p := PhysicalAdmission{proof: proof, operation: operation, dispatchID: dispatchID, acquire: q}
+	if parented && dispatchID != "" {
+		return nil, zero, ErrExecutionConflict
+	}
+	if !r.SupportsPhysicalExecution() || !r.SupportsExecution() {
+		return nil, zero, ErrExecutionRequired
+	}
 	if bound {
 		if l.RunID != id || q != (ExecutionAcquireRequest{}) {
 			return nil, zero, ErrExecutionConflict
@@ -231,6 +244,10 @@ func (r *Runtime) AdmitOwnedPhysicalExecution(ctx context.Context, s Snapshot, q
 	} else if q.RunID != id || !validExecutionAcquireRequest(q) || strings.TrimSpace(q.OwnerID) != q.OwnerID {
 		return nil, zero, ErrInvalidInput
 	}
+	if !proof.Matches(id, rev, "agent_owned_physical_admission", PhysicalAdmissionSubject(q, l, operation, dispatchID), s.State, s) {
+		return nil, zero, ErrExecutionConflict
+	}
+
 	var gid string
 	var e error
 	if dispatchID != "" {
@@ -244,7 +261,7 @@ func (r *Runtime) AdmitOwnedPhysicalExecution(ctx context.Context, s Snapshot, q
 	if e != nil {
 		return nil, zero, e
 	}
-	p := OwnedPhysicalAdmission{proof: proof, dispatchID: dispatchID, acquire: q}
+	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: rev}
 	if _, e = rand.Read(p.attempt[:]); e != nil {
 		return nil, zero, e
 	}
@@ -257,47 +274,39 @@ func (r *Runtime) AdmitOwnedPhysicalExecution(ctx context.Context, s Snapshot, q
 		}
 		l = ExecutionLease{RunID: id, OwnerID: q.OwnerID, LeaseID: hex.EncodeToString(token[:])}
 	}
-	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: rev, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionOperation: operation}
+	g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionOperation = l.OwnerID, l.LeaseID, l.Epoch, operation
 	if bound {
 		g.AdmissionSourceHash = ownedAdmissionAttemptHash(s, l, operation, gid, p.attempt)
 	}
-	p.candidate = OwnedPhysicalAdmissionResult{Grant: g, Lease: l}
-	borrowed := l
-	if !bound {
-		borrowed = ExecutionLease{}
-	}
-	if !proof.Matches(id, rev, "agent_owned_physical_admission", OwnedPhysicalAdmissionSubject(q, borrowed, operation, dispatchID), s.State, s) {
-		return nil, zero, ErrExecutionConflict
-	}
-	return r.admitOwnedPhysical(ctx, s, p)
+	p.candidate = PhysicalAdmissionResult{Grant: g, Lease: l}
+	return r.admitPhysical(ctx, s, p)
 }
 
 // Both ordinary and recovered segments use the same commit outcome and
 // scoped native bearer. A separate recovery ACK cannot elect an owner.
-func (r *Runtime) admitOwnedPhysical(ctx context.Context, s Snapshot, p OwnedPhysicalAdmission) (*Runtime, OwnedPhysicalAdmissionResult, error) {
-	var zero OwnedPhysicalAdmissionResult
+func (r *Runtime) admitPhysical(ctx context.Context, s Snapshot, p PhysicalAdmission) (*Runtime, PhysicalAdmissionResult, error) {
+	var zero PhysicalAdmissionResult
 	if r == nil || ctx == nil {
 		return nil, zero, ErrInvalidInput
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
+	store, ok := r.store.(PhysicalExecutionStore)
 	if !ok {
 		return nil, zero, ErrExecutionRequired
 	}
 	id, gid := s.Run.ID, p.Candidate().Grant.ID
-	v, e := store.BeginOwnedPhysicalExecution(ctx, p)
+	v, e := store.BeginPhysicalExecution(ctx, p)
 	if e != nil {
 		if !p.commitUncertain(e) {
 			return nil, zero, e
 		}
 		// A commit error is not a grant. Compare the exact candidate, private
 		// attempt and durable original row before returning a bearer.
-		physical, ok := r.store.(ChildExecutionStore)
-		if !ok || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return nil, zero, errors.Join(e, ctx.Err())
 		}
 		readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		stored, readErr := physical.LookupChildExecution(readCtx, id)
+		stored, readErr := store.LookupChildExecution(readCtx, id)
 		if readErr != nil || stored != v.Grant || readCtx.Err() != nil {
 			return nil, zero, errors.Join(e, readErr, readCtx.Err())
 		}
@@ -309,7 +318,8 @@ func (r *Runtime) admitOwnedPhysical(ctx context.Context, s Snapshot, p OwnedPhy
 	// read/owner proof is required. Callback entry revalidates the native
 	// identity, current Snapshot and Store time before any effect.
 	scoped := *r
-	scoped.execution, scoped.physicalGrant = &v.Lease, &v.Grant
+	scoped.physicalGrant = &v.Grant
+	scoped.execution = &v.Lease
 	return &scoped, v, nil
 }
 
@@ -348,8 +358,15 @@ func (p OwnedPhysicalRecovery) Matches(g ChildExecutionGrant, current Snapshot, 
 	if !reflect.DeepEqual(run, current.Run) || m.Record.ExecutionRequired || !reflect.DeepEqual(m.Record.Result, current.Result) {
 		return false
 	}
-	if m.Ledger != nil && (p.modelEvidence || len(m.Events) != 1 || (m.Events[0].Type != "agent.model_invocation.completed" && m.Events[0].Type != "tool.receipt_recovered")) {
-		return false
+	if m.Ledger != nil {
+		if p.modelEvidence || len(m.Events) != 1 {
+			return false
+		}
+		switch m.Events[0].Type {
+		case "agent.model_invocation.completed", "tool.receipt_recovered", "tool.admission_unsent", "tool.external_no_effect":
+		default:
+			return false
+		}
 	}
 	if p.modelEvidence {
 		if len(m.Events) != 0 || m.Record.Run.ErrorCode != current.Run.ErrorCode || m.Record.Run.ErrorDetail != current.Run.ErrorDetail || !reflect.DeepEqual(m.Record.Checkpoint, current.Checkpoint) {
@@ -381,8 +398,7 @@ func (r *Runtime) applyOwnedPhysicalPurpose(ctx context.Context, g ChildExecutio
 	if r == nil || ctx == nil || revision == 0 || (evidence && m.Ledger != nil) || hasReservedApplyEvidence(m.Events) {
 		return Snapshot{}, ErrInvalidInput
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
-	if !ok {
+	if !r.SupportsPhysicalExecution() {
 		return Snapshot{}, ErrExecutionRequired
 	}
 	s, e := r.Load(ctx, g.ChildRunID)
@@ -405,5 +421,6 @@ func (r *Runtime) applyOwnedPhysicalPurpose(ctx context.Context, g ChildExecutio
 	if !p.Matches(g, s, proposed) {
 		return Snapshot{}, ErrExecutionConflict
 	}
-	return store.ApplyOwnedPhysicalRecovery(ctx, g, revision, proposed, p)
+	out, _, err := r.store.Commit(ctx, g.ChildRunID, revision, proposed, ReceiptCommit(g, p))
+	return out, err
 }

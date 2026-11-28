@@ -73,6 +73,9 @@ func TestAllowancePausesBeforeNewModelAndResumesSameRun(t *testing.T) {
 	if _, err = runner.GrantCallAllowance(t.Context(), paused.Run.ID, paused.Run.Revision, agent.CallAllowance{LLMCalls: 6}); !errors.Is(err, agent.ErrInvalidCallAllowance) {
 		t.Fatalf("grant past hard cap: %v", err)
 	}
+	if _, err = runner.GrantCallAllowance(t.Context(), paused.Run.ID, paused.Run.Revision, agent.CallAllowance{LLMCalls: 1, Renewal: &agent.AutoAllowancePolicy{ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1}}); !errors.Is(err, agent.ErrInvalidCallAllowance) {
+		t.Fatal("manual increment changed original renewal authority", err)
+	}
 	granted, err := runner.GrantCallAllowance(t.Context(), paused.Run.ID, paused.Run.Revision, agent.CallAllowance{LLMCalls: 1})
 	if err != nil || granted.Run.Status != kernel.RunStatusRunning || granted.Run.ID != paused.Run.ID {
 		t.Fatalf("grant=%#v err=%v", granted.Run, err)

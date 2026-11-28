@@ -37,7 +37,7 @@ func TestManualDelegationPreflightRejectsUnarmedNewsBeforeAnyChildSideEffect(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(direct)
+	handoffs, err := handoff.New(handoff.Config{Local: direct})
 	if err != nil {
 		t.Fatal(err)
 	}

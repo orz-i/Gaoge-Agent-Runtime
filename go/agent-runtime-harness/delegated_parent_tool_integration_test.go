@@ -138,7 +138,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 	projectedRoleWindowChecked := false
 	if frozen {
 		manager = runtimecontext.NewManager(runtimecontext.Dependencies{})
-		managed, prepareErr := harness.NewManagedContextPreparer(store, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+		managed, prepareErr := harness.NewBoundedContextAdapter(store, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 			for _, definition := range request.Tools {
 				if definition.Key == harness.DelegationToolKey {
 					if !strings.Contains(string(definition.InputSchema), "memberID") || strings.Contains(string(definition.InputSchema), "roleID") ||
@@ -149,23 +149,18 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 				}
 			}
 			return runtimecontext.ModelWindow{ContextTokens: 20000, ReservedOutputTokens: 512}, nil
-		})
+		}, nil)
 		if prepareErr != nil {
 			t.Fatal(prepareErr)
 		}
-		dependencies.PrepareModelRequest = managed
-		ctxRun, contextErr := harness.NewContextRunMiddleware(store, nil)
-		if contextErr != nil {
-			t.Fatal(contextErr)
-		}
-		dependencies.RunMiddleware = append(dependencies.RunMiddleware, ctxRun)
+		dependencies.BoundedContext = managed
 	}
 	dependencies.HostedTools = roleScopedHostedCatalog{}
 	direct, err := agent.NewRunner(dependencies)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(direct)
+	handoffs, err := handoff.New(handoff.Config{Local: direct})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +293,7 @@ func TestHostHostedToolUsesInheritedParentModelWithoutParentActivation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(direct)
+	handoffs, err := handoff.New(handoff.Config{Local: direct})
 	if err != nil {
 		t.Fatal(err)
 	}

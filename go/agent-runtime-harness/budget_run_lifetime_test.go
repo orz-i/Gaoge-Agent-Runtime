@@ -6,32 +6,42 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 func TestRunBudgetLifetimeEndsOnlyOnCommittedTerminalSnapshot(t *testing.T) {
-	for _, status := range []kernel.RunStatus{kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled} {
-		t.Run(string(status), func(t *testing.T) {
-			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxConcurrentDescendants: 3})
-			invocation := plugin.RunInvocation{RunID: request.RunID}
-			_, err := mustBudgetAdapter(t, shared).Run(t.Context(), invocation, func(context.Context) (kernel.Snapshot, error) {
-				return kernel.Snapshot{Run: kernel.Run{ID: request.RunID, Status: status}}, nil
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if ledger.FinishedRuns[request.RunID] != terminalRuntimeStatus(status) {
-				t.Fatalf("status=%s finished=%v", status, ledger.FinishedRuns)
-			}
-		})
+	_, fixtureAuthority, request := hostedBudgetFixture(t, budget.Limits{MaxConcurrentDescendants: 3})
+	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := bindHostedBudgetAuthority(t, rt, fixtureAuthority)
+	r, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: budgetFixtureModelFunc(func(context.Context, model.Request) (model.Response, error) {
+		return model.Response{Content: "done"}, nil
+	}), BoundedBudget: mustBudgetAdapter(t, shared)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := r.PrepareRun(t.Context(), agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "audit", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "finish"})
+	if err != nil || prepared.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("prepare=%+v %v", prepared.Run, err)
+	}
+	ledger, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
+	if err != nil || ledger.FinishedRuns[request.RunID] {
+		t.Fatalf("nonterminal budget ended: %v", err)
+	}
+	result, err := r.Resume(t.Context(), prepared.Run.ID, prepared.Run.Revision)
+	if err != nil || result.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("complete=%+v %v", result.Run, err)
+	}
+	ledger, err = rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
+	if err != nil || !ledger.FinishedRuns[request.RunID] {
+		t.Fatalf("terminal budget not ended: %v", err)
 	}
 }
 

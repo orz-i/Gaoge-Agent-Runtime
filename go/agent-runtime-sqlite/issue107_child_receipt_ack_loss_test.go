@@ -16,8 +16,8 @@ type issue107PostMarkAckLossSQLite struct {
 	*sqlite.Store
 }
 
-func (s issue107PostMarkAckLossSQLite) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	if err := s.Store.MarkChildExecutionSettled(ctx, grant, permit); err != nil {
+func (s issue107PostMarkAckLossSQLite) RecordPhysicalCallbackReturn(ctx context.Context, grant kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, permit kernel.PhysicalCallbackReturn) error {
+	if err := s.Store.RecordPhysicalCallbackReturn(ctx, grant, rev, outcome, permit); err != nil {
 		return err
 	}
 	return kernel.ErrExecutionBusy // durable Mark committed but the ACK was lost
@@ -56,11 +56,11 @@ func TestIssue107SQLiteOriginalPhysicalReceiptAckLostAcrossRestart(t *testing.T)
 		OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"isolatedContext":true}`)),
 		Actor:             actor, Thread: thread, Goal: "complete one Model call", Model: "test-model",
 	})
-	if !errors.Is(callErr, kernel.ErrChildExecutionBusy) {
-		t.Fatalf("post-commit Mark ACK loss incorrectly reported success/no effect: %+v err=%v", child.Run, callErr)
+	if callErr != nil || child.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("exact committed callback ACK was not recovered: %+v %v", child.Run, callErr)
 	}
-	if _, err = rt.Cancel(t.Context(), root.Run.ID, root.Run.Revision, "before trusted recovery"); !errors.Is(err, kernel.ErrChildExecutionBusy) {
-		t.Fatalf("pending original Grant released on ACK loss: %v", err)
+	if _, err = rt.LookupChildExecution(t.Context(), "child"); !errors.Is(err, kernel.ErrNotFound) {
+		t.Fatalf("verified original retirement did not commit: %v", err)
 	}
 	if err = first.Close(); err != nil {
 		t.Fatal(err)
@@ -78,11 +78,11 @@ func TestIssue107SQLiteOriginalPhysicalReceiptAckLostAcrossRestart(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := resumedRuntime.LookupChildExecution(t.Context(), "child")
-	if err != nil || original.ChildRunID != "child" {
-		t.Fatalf("original Grant missing after restart: %+v err=%v", original, err)
+	original, err := resumedRuntime.LookupOwnedRetirementForRun(t.Context(), "child")
+	if err != nil || !original.Valid() || original.Evidence.Grant.ChildRunID != "child" || !original.Evidence.Completion.MatchesReturnSnapshot(child) {
+		t.Fatalf("original committed retirement missing after restart: %+v %v", original, err)
 	}
-	if err = resumedAgent.ReconcileChildPhysicalGrant(t.Context(), "child"); err != nil {
+	if err = resumedAgent.ReconcilePhysicalExecution(t.Context(), "child"); err != nil {
 		t.Fatalf("durably proven callback-completed marker did not allow bounded recovery: %v", err)
 	}
 	if _, err = resumedRuntime.Cancel(t.Context(), root.Run.ID, root.Run.Revision, "now physically settled"); err != nil {

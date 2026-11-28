@@ -34,17 +34,18 @@ func (s *rootRetirementFaultStore) lose(cut string) bool {
 	}
 	return false
 }
-func (s *rootRetirementFaultStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := s.Store.RecordOwnedPhysicalCallbackReturn(ctx, g, revision, outcome, p)
+func (s *rootRetirementFaultStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if !g.IsOwned() {
+		s.markCalls++
+		return s.Store.RecordPhysicalCallbackReturn(ctx, g, revision, outcome, p)
+	}
+	err := s.Store.RecordPhysicalCallbackReturn(ctx, g, revision, outcome, p)
 	if err == nil && s.lose("record") {
 		return errRootRetirementACKLost
 	}
 	return err
 }
-func (s *rootRetirementFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	s.markCalls++
-	return s.Store.MarkChildExecutionSettled(ctx, g, p)
-}
+
 func (s *rootRetirementFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.finishCalls++
 	s.grant = g
@@ -164,8 +165,7 @@ func TestRootRetirementPreservesBorrowedLease(t *testing.T) {
 type retirementHiddenStore struct {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
+
 	creates int
 }
 
@@ -174,22 +174,22 @@ func (s *retirementHiddenStore) Create(ctx context.Context, r kernel.Record, e [
 	return s.Store.Create(ctx, r, e)
 }
 
-func TestRootRetirementCapabilityRequiredBeforeCreate(t *testing.T) {
+func TestPhysicalExecutionCapabilityRequiredBeforeCreate(t *testing.T) {
 	for _, explicit := range []bool{false, true} {
 		base := memory.NewStore()
-		store := &retirementHiddenStore{Store: base, ExecutionStore: base, ChildExecutionStore: base, OwnedPhysicalExecutionStore: base}
+		store := &retirementHiddenStore{Store: base, ExecutionStore: base}
 		rt, err := kernel.New(kernel.Dependencies{Store: store})
 		if err != nil {
 			t.Fatal(err)
 		}
 		model := &nativeLeaseFixtureModel{}
-		host := &rootCountingRunMiddleware{}
-		deps := agent.Dependencies{Runtime: rt, Model: model, RunMiddleware: []plugin.RunMiddleware{host}}
+		host := &rootCountingObserver{}
+		deps := agent.Dependencies{Runtime: rt, Model: model, Observers: []plugin.Observer{host}}
 		if explicit {
 			deps.RunExecution = &agent.RunExecution{OwnerID: "explicit-owner", LeaseDuration: 3 * time.Minute}
 		}
-		if _, err := agent.NewRunner(deps); !errors.Is(err, kernel.ErrExecutionRequired) {
-			t.Fatalf("missing retirement accepted explicit=%v: %v", explicit, err)
+		if _, err := agent.NewRunner(deps); !errors.Is(err, agent.ErrInvalidRequest) {
+			t.Fatalf("missing physical contract accepted explicit=%v: %v", explicit, err)
 		}
 		if store.creates != 0 || model.calls != 0 || host.calls.Load() != 0 {
 			t.Fatalf("unsupported adapter changed state: creates=%d host=%d sends=%d", store.creates, host.calls.Load(), model.calls)
@@ -235,7 +235,7 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fresh.ReconcileRootPhysicalExecution(t.Context(), original.Run.ID); err != nil {
+	if err := fresh.ReconcilePhysicalExecution(t.Context(), original.Run.ID); err != nil {
 		t.Fatalf("public only-RunID recovery failed: %v", err)
 	}
 	after, err := base.Load(t.Context(), original.Run.ID)
@@ -246,7 +246,7 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 	if err != nil || !acknowledged.Valid() || acknowledged.Identity() != retired.Identity() {
 		t.Fatalf("recovery did not acknowledge original evidence: %#v %v", acknowledged, err)
 	}
-	if err := fresh.ReconcileRootPhysicalExecution(t.Context(), original.Run.ID); err != nil {
+	if err := fresh.ReconcilePhysicalExecution(t.Context(), original.Run.ID); err != nil {
 		t.Fatalf("RunID selected historical ACK: %v", err)
 	}
 }

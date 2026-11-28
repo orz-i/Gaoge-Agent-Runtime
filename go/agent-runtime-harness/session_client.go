@@ -52,16 +52,14 @@ type SessionClient struct {
 	thread     kernel.ThreadRef
 	config     ConfigSnapshot
 	transcript TranscriptSource
-	// agentSessionOnly restricts execution through OpenAgentSession to its
-	// supported composition, including when reopening older admitted Turns.
-	agentSessionOnly bool
+	inputs     agent.RunInputSource
 }
 
 // OpenSession binds a SessionClient to an already composed Harness Runner.
 // Use OpenAgentSession to also assemble the standard bounded Agent and Context.
 // Transcript may be omitted when reopening a Session only to read or resume
 // existing Turns. Prompt requires it; recovery uses committed Context instead.
-// Advanced Agent and SubAgent composition uses Runner.StartAgentTurn and Runner.Delegate explicitly.
+// Explicit custom route composition uses this same binding and owner checks.
 func (runner *Runner) OpenSession(options SessionOptions) (*SessionClient, error) {
 	options.Config.ContextBase = nil
 	if runner == nil || runner.store == nil || runner.context == nil ||
@@ -134,6 +132,50 @@ func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string)
 	})
 }
 
+// Steer appends authenticated user input to the original Host log when that
+// log also implements Submit. The caller names the exact Run to avoid sending
+// an input meant for a previous Attempt to a replacement Run. A queued receipt
+// does not promise application: only the native InputCursor proves delivery.
+func (session *SessionClient) Steer(ctx context.Context, turnID, runID, inputID, text string) (agent.RunInput, error) {
+	id, err := session.authorizedTurnID(ctx, turnID)
+	if err != nil {
+		return agent.RunInput{}, err
+	}
+	log, ok := session.inputs.(interface {
+		Submit(context.Context, kernel.Run, string, string) (agent.RunInput, error)
+	})
+	if !ok || runID == "" {
+		return agent.RunInput{}, ErrInvalidRequest
+	}
+	turn, err := loadVerifiedTurn(ctx, session.runner.store, id)
+	if err != nil {
+		return agent.RunInput{}, err
+	}
+	owner, err := session.runner.store.GetInvocationByExecutionRefID(ctx, runID)
+	if err != nil || session.checkFrozenRootOwner(turn, owner) != nil || owner.ExecutionRefID != runID {
+		return agent.RunInput{}, errors.Join(ErrConflict, err)
+	}
+	if _, err = verifyProtectiveInvocation(ctx, session.runner.store, owner); err != nil {
+		return agent.RunInput{}, err
+	}
+	snapshot, err := session.runner.runtime.Load(ctx, runID)
+	if err != nil {
+		return agent.RunInput{}, err
+	}
+	if err = validateRootRuntimeOwnership(owner, snapshot); err != nil {
+		return agent.RunInput{}, err
+	}
+	view, err := agent.ViewState(snapshot)
+	if err != nil || snapshot.Run.Status != kernel.RunStatusRunning || view.InputBinding == "" || view.InputBinding != session.inputs.BindingID() {
+		return agent.RunInput{}, errors.Join(ErrInvalidRequest, err)
+	}
+	receipt, err := log.Submit(ctx, snapshot.Run, inputID, text)
+	if err == nil && (receipt.ID != inputID || receipt.Text != text || receipt.Sequence == 0) {
+		return agent.RunInput{}, ErrConflict
+	}
+	return receipt, err
+}
+
 // Load obtains an existing durable Turn without generating another model call.
 func (session *SessionClient) Load(ctx context.Context, turnID string) (Snapshot, error) {
 	id, err := session.authorizedTurnID(ctx, turnID)
@@ -203,6 +245,25 @@ func (session *SessionClient) Timeline(ctx context.Context, turnID string, after
 	return items, nil
 }
 
+// Subscribe returns the existing Turn feed's retained events followed by live
+// events. The Host Turn ID is scoped to this Session's original Actor/Thread;
+// subscription does not execute or reconstruct history when retention expires.
+func (session *SessionClient) Subscribe(ctx context.Context, turnID string, afterSeq int64) (*TurnSubscription, error) {
+	id, err := session.authorizedTurnID(ctx, turnID)
+	if err != nil {
+		return nil, err
+	}
+	subscription, err := session.runner.SubscribeTurnFeed(ctx, id, afterSeq)
+	if err != nil {
+		return nil, err
+	}
+	if err := session.requireFrozenTurnOwner(ctx, id); err != nil {
+		subscription.Close()
+		return nil, err
+	}
+	return subscription, nil
+}
+
 // Refresh synchronizes one existing Turn from its underlying Runtime facts.
 func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snapshot, error) {
 	id, err := session.authorizedTurnID(ctx, turnID)
@@ -244,10 +305,8 @@ func (session *SessionClient) authorizedExecutionTurn(ctx context.Context, turnI
 	if err != nil {
 		return "", err
 	}
-	if session.agentSessionOnly {
-		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
-			return "", err
-		}
+	if err := session.preflightAgentSessionResume(ctx, id); err != nil {
+		return "", err
 	}
 	return id, nil
 }
@@ -322,7 +381,7 @@ func (session *SessionClient) CancelSubtask(ctx context.Context, turnID, taskID,
 // selected Attempt, which has no Run yet.
 func (session *SessionClient) protectiveRunner(ctx context.Context, turnID string) (*Runner, error) {
 	runner := session.runner
-	if !session.agentSessionOnly || runner.budgets != nil || runner.runtime.BudgetStore() == nil {
+	if _, native := runner.agent.(*agent.Runner); !native || runner.budgets != nil || runner.runtime.BudgetStore() == nil {
 		return runner, nil
 	}
 	authority, err := NewBudgetAuthority(BudgetAuthorityDependencies{

@@ -25,23 +25,19 @@ const (
 	// or control/Tool custody. It only permits retirement of that admission.
 	OwnedCustodyNotEntered OwnedCallbackCustody = "not-entered-v1"
 	// OwnedToolResultReturn binds committed Tool results for observation only.
-	OwnedToolResultReturn OwnedCallbackCustody = "tool-result-v1"
-	// OwnedToolBudgetReturn binds an unresolved Tool to its suspended reservation.
-	OwnedToolBudgetReturn      OwnedCallbackCustody = "tool-budget-return-v1"
+	OwnedToolResultReturn      OwnedCallbackCustody = "tool-result-v1"
 	OwnedBoundedApprovalReturn OwnedCallbackCustody = "bounded-approval-v1"
 )
 
 func (c OwnedCallbackCustody) Valid() bool {
-	return c == "" || c == OwnedCustodyNotEntered || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedToolBudgetReturn || c == OwnedBoundedApprovalReturn
+	return c == "" || c == OwnedCustodyNotEntered || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedBoundedApprovalReturn
 }
 
 func (c OwnedCallbackCustody) permitsControl() bool {
 	return c == OwnedCustodyPrepared || c == OwnedCustodyScoped
 }
 
-type OwnedPhysicalCallbackOutcome struct {
-	// The original return hash seals the ledger identity while the Tool is unresolved.
-	ToolBudgetScope string `json:",omitempty"`
+type PhysicalCallbackOutcome struct {
 	// ToolReturns identifies the outstanding Call obligations of this
 	// original callback independently of its control/approval custody.
 	ToolReturns    OwnedToolReturns `json:",omitempty"`
@@ -49,7 +45,7 @@ type OwnedPhysicalCallbackOutcome struct {
 	LeaseOwned     bool
 	ControlCustody OwnedCallbackCustody `json:",omitempty"`
 }
-type OwnedPhysicalCallbackCompletion struct {
+type PhysicalCallbackCompletion struct {
 	GrantID          string
 	ReturnRevision   uint64
 	ReturnSourceHash string
@@ -59,13 +55,13 @@ type OwnedPhysicalCallbackCompletion struct {
 	ToolReturns      OwnedToolReturns     `json:",omitempty"`
 }
 
-// OwnedPhysicalCallbackReturnPayload is a pure canonical proof payload.
-// Only the first-party callback boundary may seal it after all entered Next
-// calls return. No Runtime state or execution permission is changed.
-func OwnedPhysicalCallbackReturnPayload(s Snapshot, o OwnedPhysicalCallbackOutcome) json.RawMessage {
+// PhysicalCallbackReturnPayload is a pure canonical proof payload.
+// Only the first-party callback boundary may seal it after the
+// original executing stages return. No Runtime state or execution permission is changed.
+func PhysicalCallbackReturnPayload(s Snapshot, o PhysicalCallbackOutcome) json.RawMessage {
 	data, err := json.Marshal(struct {
 		Snapshot Snapshot
-		Outcome  OwnedPhysicalCallbackOutcome
+		Outcome  PhysicalCallbackOutcome
 	}{s, o})
 	if err != nil {
 		return nil
@@ -73,7 +69,7 @@ func OwnedPhysicalCallbackReturnPayload(s Snapshot, o OwnedPhysicalCallbackOutco
 	return data
 }
 
-type OwnedPhysicalCallbackReturn struct{ proof *featurecontrol.Proof }
+type PhysicalCallbackReturn struct{ proof *featurecontrol.Proof }
 
 // OwnedToolReturn binds one outstanding Call to its original reservation
 // and/or approval. ReceiptDigest identifies a settled ledger outcome;
@@ -113,7 +109,7 @@ func NewOwnedToolReturns(bindings []OwnedToolReturn) (OwnedToolReturns, error) {
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].CallID < bindings[j].CallID })
 	for i, b := range bindings {
 		if strings.TrimSpace(b.CallID) == "" || b.CallID != strings.TrimSpace(b.CallID) ||
-			b.LedgerID != strings.TrimSpace(b.LedgerID) || (b.LedgerID == "" && b.ApprovalDigest == "" && !b.Unsent) ||
+			b.LedgerID != strings.TrimSpace(b.LedgerID) ||
 			!validToolReceiptDigest(b.RequestDigest) ||
 			(b.ReceiptDigest != "" && (b.LedgerID == "" || !validToolReceiptDigest(b.ReceiptDigest))) ||
 			(b.ApprovalDigest != "" && !validToolReceiptDigest(b.ApprovalDigest)) ||
@@ -164,31 +160,30 @@ func (r OwnedToolReturns) Find(callID string) (OwnedToolReturn, bool, error) {
 // MatchesReturnSnapshot verifies the immutable whole-return evidence at its
 // original revision. Later recovery CASes retain the same Store-owned
 // completion, with independently matched Call bindings.
-func (c OwnedPhysicalCallbackCompletion) MatchesReturnSnapshot(s Snapshot) bool {
-	if !c.HostCompleted || c.ReturnRevision != s.Run.Revision || !c.ToolReturns.Valid() ||
-		c.ControlCustody == OwnedToolBudgetReturn {
+func (c PhysicalCallbackCompletion) MatchesReturnSnapshot(s Snapshot) bool {
+	if !c.HostCompleted || c.ReturnRevision != s.Run.Revision || !c.ToolReturns.Valid() || !c.ControlCustody.Valid() {
 		return false
 	}
-	o := OwnedPhysicalCallbackOutcome{HostCompleted: c.HostCompleted, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody, ToolReturns: c.ToolReturns}
-	return ManagedDigest(OwnedPhysicalCallbackReturnPayload(s, o)) == c.ReturnSourceHash
+	o := PhysicalCallbackOutcome{HostCompleted: c.HostCompleted, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody, ToolReturns: c.ToolReturns}
+	return ManagedDigest(PhysicalCallbackReturnPayload(s, o)) == c.ReturnSourceHash
 }
 
 // NotEntered identifies a distinct original no-callback fact. It must not
 // authorize any receipt consumer that needs an actual Host return.
-func (c OwnedPhysicalCallbackCompletion) NotEntered() bool {
+func (c PhysicalCallbackCompletion) NotEntered() bool {
 	return c.ControlCustody == OwnedCustodyNotEntered
 }
 
 // MatchesNotEnteredSnapshot binds the retirement-only evidence to the exact
 // original admission revision and unchanged source. Managed activations have
 // their own transfer lifecycle and are not ordinary no-entry retirements.
-func (c OwnedPhysicalCallbackCompletion) MatchesNotEnteredSnapshot(g ChildExecutionGrant, s Snapshot) bool {
-	if !c.NotEntered() || ValidateOwnedPhysicalCompletion(g, c) != nil || s.Run.ID != g.ChildRunID ||
-		s.Run.Kind != "agent" || s.Run.ParentRunID != "" || s.Run.Revision != g.ExpectedRevision {
+func (c PhysicalCallbackCompletion) MatchesNotEnteredSnapshot(g ChildExecutionGrant, s Snapshot) bool {
+	if !c.NotEntered() || ValidatePhysicalCompletion(g, c) != nil || s.Run.ID != g.ChildRunID ||
+		s.Run.Kind != "agent" || s.Run.Revision != g.ExpectedRevision {
 		return false
 	}
-	o := OwnedPhysicalCallbackOutcome{LeaseOwned: c.LeaseOwned, ControlCustody: OwnedCustodyNotEntered}
-	return ManagedDigest(OwnedPhysicalCallbackReturnPayload(s, o)) == c.ReturnSourceHash
+	o := PhysicalCallbackOutcome{LeaseOwned: c.LeaseOwned, ControlCustody: OwnedCustodyNotEntered}
+	return ManagedDigest(PhysicalCallbackReturnPayload(s, o)) == c.ReturnSourceHash
 }
 
 func ordinaryOwnedOperation(op string) bool {
@@ -200,51 +195,60 @@ func ordinaryOwnedOperation(op string) bool {
 	}
 }
 
-func (p OwnedPhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o OwnedPhysicalCallbackOutcome) bool {
+func (p PhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o PhysicalCallbackOutcome) bool {
+	if !g.IsOwned() || g.ID == "" || g.ChildRunID != s.Run.ID || s.Run.Kind != "agent" || s.Run.Revision < g.ExpectedRevision {
+		return false
+	}
 	if o.ControlCustody == OwnedCustodyNotEntered {
-		return ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" && o.ToolBudgetScope == "" &&
-			g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID && s.Run.Kind == "agent" && s.Run.ParentRunID == "" &&
-			s.Run.Revision == g.ExpectedRevision &&
-			p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_not_entered", g.ID, OwnedPhysicalCallbackReturnPayload(s, o), nil)
+		return ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" &&
+			s.Run.Revision == g.ExpectedRevision && p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_not_entered", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
 	}
-	return o.ControlCustody.Valid() && (o.ControlCustody == OwnedToolBudgetReturn) == (o.ToolBudgetScope != "") &&
-		o.ToolReturns.Valid() && (o.ToolReturns == "" || (o.HostCompleted && o.ToolBudgetScope == "" && o.ControlCustody != OwnedCustodyPrepared)) &&
-		(o.ControlCustody != OwnedCustodyPrepared || g.AdmissionOperation == "prepare") &&
-		g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID &&
-		s.Run.Kind == "agent" && s.Run.ParentRunID == "" && s.Run.Revision >= g.ExpectedRevision &&
-		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_return", g.ID, OwnedPhysicalCallbackReturnPayload(s, o), nil)
+	// A borrowed operation still requires its exact complete return;
+	// it has no lease ownership or deferred-control custody to transfer.
+	if s.Run.ParentRunID != "" {
+		if !o.HostCompleted || o.ControlCustody != "" || o.ToolReturns != "" {
+			return false
+		}
+	} else {
+		if !o.ControlCustody.Valid() || !o.ToolReturns.Valid() ||
+			(o.ToolReturns != "" && (!o.HostCompleted || o.ControlCustody == OwnedCustodyPrepared)) ||
+			(o.ControlCustody == OwnedCustodyPrepared && g.AdmissionOperation != "prepare") {
+			return false
+		}
+	}
+	return p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_physical_callback_return", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
 }
-func (p OwnedPhysicalCallbackReturn) Completion(g ChildExecutionGrant, s Snapshot, o OwnedPhysicalCallbackOutcome) OwnedPhysicalCallbackCompletion {
+func (p PhysicalCallbackReturn) Completion(g ChildExecutionGrant, s Snapshot, o PhysicalCallbackOutcome) PhysicalCallbackCompletion {
 	if !p.Matches(g, s, o) {
-		return OwnedPhysicalCallbackCompletion{}
+		return PhysicalCallbackCompletion{}
 	}
-	hash := sha256.Sum256(OwnedPhysicalCallbackReturnPayload(s, o))
-	return OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned, ControlCustody: o.ControlCustody, ToolReturns: o.ToolReturns}
+	hash := sha256.Sum256(PhysicalCallbackReturnPayload(s, o))
+	return PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned, ControlCustody: o.ControlCustody, ToolReturns: o.ToolReturns}
 }
-func (r *Runtime) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g ChildExecutionGrant, revision uint64, o OwnedPhysicalCallbackOutcome, proof *featurecontrol.Proof) error {
-	if r == nil || ctx == nil || !g.IsOwned() || revision == 0 {
+func (r *Runtime) RecordPhysicalCallbackReturn(ctx context.Context, g ChildExecutionGrant, revision uint64, o PhysicalCallbackOutcome, proof *featurecontrol.Proof) error {
+	if r == nil || ctx == nil || !g.Identity().Valid() || g.ExpectedRevision == 0 || revision == 0 {
 		return ErrInvalidInput
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
+	store, ok := r.store.(PhysicalExecutionStore)
 	if !ok {
 		return ErrExecutionRequired
 	}
-	return store.RecordOwnedPhysicalCallbackReturn(ctx, g, revision, o, OwnedPhysicalCallbackReturn{proof: proof})
+	return store.RecordPhysicalCallbackReturn(ctx, g, revision, o, PhysicalCallbackReturn{proof: proof})
 }
-func (r *Runtime) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g ChildExecutionGrant) (OwnedPhysicalCallbackCompletion, error) {
-	if r == nil || ctx == nil || !g.IsOwned() {
-		return OwnedPhysicalCallbackCompletion{}, ErrInvalidInput
+func (r *Runtime) LookupPhysicalCallbackReturn(ctx context.Context, g ChildExecutionGrant) (PhysicalCallbackCompletion, error) {
+	if r == nil || ctx == nil || !g.Identity().Valid() || g.ExpectedRevision == 0 {
+		return PhysicalCallbackCompletion{}, ErrInvalidInput
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
+	store, ok := r.store.(PhysicalExecutionStore)
 	if !ok {
-		return OwnedPhysicalCallbackCompletion{}, ErrExecutionRequired
+		return PhysicalCallbackCompletion{}, ErrExecutionRequired
 	}
-	c, err := store.LookupOwnedPhysicalCallbackReturn(ctx, g)
+	c, err := store.LookupPhysicalCallbackReturn(ctx, g)
 	if err != nil {
-		return OwnedPhysicalCallbackCompletion{}, err
+		return PhysicalCallbackCompletion{}, err
 	}
-	if err = ValidateOwnedPhysicalCompletion(g, c); err != nil {
-		return OwnedPhysicalCallbackCompletion{}, ErrExecutionConflict
+	if err = ValidatePhysicalCompletion(g, c); err != nil {
+		return PhysicalCallbackCompletion{}, ErrExecutionConflict
 	}
 	return c, nil
 }

@@ -3,15 +3,19 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -60,6 +64,215 @@ func TestHarnessTimelinePersistsTerminalFactsWithoutStreamingOrBodies(t *testing
 	if len(reloaded.Items) != len(completed.Items) || len(reloaded.Invocations) != len(completed.Invocations) ||
 		reloaded.Turn.Status != harness.TurnCompleted || reloaded.Output == nil {
 		t.Fatalf("reloaded Harness timeline diverged: %#v", reloaded)
+	}
+}
+
+// A registered recovery Store can still serve ordinary execution and all
+// observational projections, without granting those callbacks recovery proof.
+func TestRegisteredRecoveryHostAllowsOrdinaryTimelineComposition(t *testing.T) {
+	store := harness.NewMemoryStore()
+	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), ManagedRecoveryHost: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	resolve := func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 1024}, nil
+	}
+	bounded, err := harness.NewBoundedContextAdapter(store, manager, resolve, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: store, Clock: timelineTestClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := shared.Adapter()
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer, err := harness.NewModelTimelineObserver(store, rt, timelineTestClock{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolTimeline, err := harness.NewBoundedToolTimelineAdapter(store, timelineTestClock{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := &timelineRecorder{}
+	direct, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: directModel{}, BoundedContext: bounded, BoundedBudget: adapter, Observers: []plugin.Observer{observer}, Telemetry: []observability.Recorder{recorder}, ToolTimeline: toolTimeline})
+	if err != nil {
+		t.Fatalf("matching Store with ordinary observation rejected: %v", err)
+	}
+	if direct.SupportsManagedRecovery() {
+		t.Fatal("unscoped observation certified managed takeover")
+	}
+	host, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: direct, Store: store, Context: manager, Budget: shared})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := testStartRequest()
+	req.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2}
+	got, err := host.StartAgentTurn(t.Context(), req)
+	if err != nil || got.Turn.Status != harness.TurnCompleted || recorder.calls == 0 {
+		t.Fatalf("ordinary composed execution: status=%s telemetry=%d error=%v", got.Turn.Status, recorder.calls, err)
+	}
+	if got.Budget == nil || got.Budget.Usage.LLMCalls != 1 {
+		t.Fatalf("lost composed Budget: %+v", got.Budget)
+	}
+	foreign, err := harness.NewBoundedContextAdapter(harness.NewMemoryStore(), manager, resolve, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: directModel{}, BoundedContext: foreign, Observers: []plugin.Observer{observer}}); !errors.Is(err, agent.ErrInvalidRequest) {
+		t.Fatalf("foreign Store gained original recovery source: %v", err)
+	}
+}
+
+type timelineRecorder struct{ calls int }
+
+func (*timelineRecorder) Name() string                                  { return "timeline-test" }
+func (r *timelineRecorder) Record(context.Context, observability.Event) { r.calls++ }
+
+var errTimelineProjection = errors.New("injected model timeline Item write failure")
+
+type timelineProjectionFaultStore struct {
+	harness.Store
+	afterCommit, fired bool
+}
+
+func (s *timelineProjectionFaultStore) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
+	if !s.fired && item.Kind == harness.ItemArtifact {
+		s.fired = true
+		if s.afterCommit {
+			if _, _, err := s.Store.AppendItem(ctx, item); err != nil {
+				return harness.Item{}, false, err
+			}
+		}
+		return harness.Item{}, false, errTimelineProjection
+	}
+	return s.Store.AppendItem(ctx, item)
+}
+
+// Return a lost acknowledgement after the real native Model receipt CAS.
+type timelineReceiptACKFaultStore struct {
+	*memory.Store
+	fired bool
+}
+
+func (s *timelineReceiptACKFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		out, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && !s.fired {
+			for _, e := range commitMutation.Events {
+				if e.Type == "agent.model_invocation.completed" {
+					s.fired = true
+					return kernel.Snapshot{}, false, errTimelineProjection
+				}
+			}
+		}
+		return out, false, err
+	}
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+}
+
+func TestModelTimelineRepairsOriginalReceiptAfterProjectionFailure(t *testing.T) {
+	for _, mode := range []string{"before_append", "after_append_ack", "after_model_receipt_ack"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := t.Context()
+			base := memory.NewStore()
+			lostReceipt := &timelineReceiptACKFaultStore{Store: base}
+			var runs kernel.Store = base
+			if mode == "after_model_receipt_ack" {
+				runs = lostReceipt
+			}
+			rt, err := kernel.New(kernel.Dependencies{Store: runs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			backing := harness.NewMemoryStore()
+			faulty := &timelineProjectionFaultStore{Store: backing, afterCommit: mode == "after_append_ack"}
+			var firstStore harness.Store = backing
+			if mode != "after_model_receipt_ack" {
+				firstStore = faulty
+			}
+			calls := 0
+			modelClient := resumeTurnModelFunc(func(context.Context, model.Request) (model.Response, error) {
+				calls++
+				response := hostedTimelineResponse()
+				response.Artifacts = []model.ArtifactRef{{ID: "original-artifact", Kind: "file", MediaType: "text/plain"}}
+				return response, nil
+			})
+			makeRunner := func(store harness.Store) *harness.Runner {
+				t.Helper()
+				observer, e := harness.NewModelTimelineObserver(store, rt, timelineTestClock{}, nil)
+				if e != nil {
+					t.Fatal(e)
+				}
+				direct, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: modelClient, Observers: []plugin.Observer{observer}})
+				if e != nil {
+					t.Fatal(e)
+				}
+				return newTimelineHarnessRunner(t, rt, direct, store)
+			}
+			req := testStartRequest()
+			first, err := makeRunner(firstStore).StartAgentTurn(ctx, req)
+			if !(faulty.fired || lostReceipt.fired) || !errors.Is(err, errTimelineProjection) || calls != 1 {
+				t.Fatalf("projection/receipt failure not surfaced: item=%v receipt=%v calls=%d error=%v", faulty.fired, lostReceipt.fired, calls, err)
+			}
+			sid, e := harness.SessionID(req.HostThread)
+			if e != nil {
+				t.Fatal(e)
+			}
+			id, e := harness.TurnID(sid, req.HostTurn)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if first.Turn.ID != "" && first.Turn.ID != id {
+				t.Fatal("projection changed Turn")
+			}
+			// The original Runtime receipt is durable, even if the invocation's
+			// completed notification was never delivered. Reopen the same Stores.
+			reopened := makeRunner(backing)
+			got, e := reopened.Refresh(ctx, id)
+			if e != nil {
+				t.Fatalf("refresh of original receipt: %v", e)
+			}
+			assertModelReceiptItems(t, got)
+			if got.Turn.Status == harness.TurnRunning {
+				got, e = reopened.ResumeTurn(ctx, id)
+				if e != nil {
+					t.Fatal(e)
+				}
+			}
+			if got.Turn.Status != harness.TurnCompleted || calls != 1 {
+				t.Fatalf("recovery: %s calls=%d", got.Turn.Status, calls)
+			}
+			// A consumed receipt retains facts even though its executable request
+			// has been cleared. Repeated synchronization must not add duplicates.
+			for range 2 {
+				got, e = reopened.Refresh(ctx, id)
+				if e != nil || got.Turn.Status != harness.TurnCompleted || calls != 1 {
+					t.Fatalf("refresh: %s calls=%d %v", got.Turn.Status, calls, e)
+				}
+				assertModelReceiptItems(t, got)
+			}
+		})
+	}
+}
+func assertModelReceiptItems(t *testing.T, got harness.Snapshot) {
+	t.Helper()
+	artifacts, hosted := 0, 0
+	for _, item := range got.Items {
+		if item.Kind == harness.ItemArtifact {
+			artifacts++
+		}
+		if item.Kind == harness.ItemTool && item.Status == harness.ItemCompleted {
+			hosted++
+		}
+	}
+	if artifacts != 1 || hosted != 1 {
+		t.Fatalf("original facts omitted or duplicated: artifacts=%d hosted=%d", artifacts, hosted)
 	}
 }
 
@@ -194,12 +407,12 @@ func runHostedToolTimeline(t *testing.T, client model.Client, suffix string) (ha
 	if err != nil {
 		t.Fatal(err)
 	}
-	modelTimeline, err := harness.NewModelTimelineMiddleware(store, timelineTestClock{}, turnFeed)
+	modelTimeline, err := harness.NewModelTimelineObserver(store, runtime, timelineTestClock{}, turnFeed)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: client, ModelMiddleware: []plugin.ModelMiddleware{modelTimeline},
+		Runtime: runtime, Model: client, Observers: []plugin.Observer{modelTimeline},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -345,18 +558,18 @@ func newTimelineHarnessDependencies(t *testing.T) (*kernel.Runtime, *agent.Runne
 		t.Fatal(err)
 	}
 	clock := timelineTestClock{}
-	modelTimeline, err := harness.NewModelTimelineMiddleware(store, clock, nil)
+	modelTimeline, err := harness.NewModelTimelineObserver(store, runtime, clock, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	toolTimeline, err := harness.NewToolTimelineMiddleware(store, clock, nil)
+	toolTimeline, err := harness.NewBoundedToolTimelineAdapter(store, clock, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: &timelineModel{}, Catalog: registry, Executor: registry,
-		ModelMiddleware:  []plugin.ModelMiddleware{modelTimeline},
-		ToolMiddleware:   []plugin.ToolMiddleware{toolTimeline},
+		Observers:        []plugin.Observer{modelTimeline},
+		ToolTimeline:     toolTimeline,
 		ApprovalPolicies: []plugin.ApprovalPolicy{policy},
 		Limits:           agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 1},
 	})

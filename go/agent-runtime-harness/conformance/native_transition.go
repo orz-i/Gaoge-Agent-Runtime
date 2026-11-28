@@ -131,7 +131,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 	}
 	if mode == "allowance" {
 		req.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-		req.AutoAllowance = &agent.AutoAllowancePolicy{ModelStep: 1, MaxModelRenewals: 2, MaxNoProgressWindow: 2}
+		req.CallAllowance.Renewal = &agent.AutoAllowancePolicy{ModelStep: 1, MaxModelRenewals: 2, MaxNoProgressWindow: 2}
 	}
 	compose := func(k kernel.Store, h preparationHostPorts, owner string) (*harness.Runner, *kernel.Runtime) {
 		t.Helper()
@@ -168,7 +168,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 		if e != nil {
 			t.Fatal(e)
 		}
-		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry, ManagedRecovery: true, BoundedContext: bounded, BoundedBudget: b, ModelOutcomeVerifier: authority, Inputs: inputs, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
+		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry, BoundedContext: bounded, BoundedBudget: b, ModelOutcomeVerifier: authority, Inputs: inputs, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
 			Execution:    execution,
 			RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration}})
 		if e != nil {

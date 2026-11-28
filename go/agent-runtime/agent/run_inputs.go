@@ -98,7 +98,7 @@ func (runner *Runner) admitRunInputs(ctx context.Context, snapshot kernel.Snapsh
 	// cannot read inputs over a pending model intent or outstanding Tool work.
 	// Its original receipt and the input cursor will commit in the same CAS.
 	if _, active := activeModelInvocation(state); active || len(state.PendingCalls) != 0 ||
-		state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 ||
+		state.ToolDispatchID != "" || state.deferredToolCount() != 0 ||
 		state.PendingApproval != nil || state.ExternalToolCancellation != nil {
 		return snapshot, state, false, ErrInvalidRequest
 	}

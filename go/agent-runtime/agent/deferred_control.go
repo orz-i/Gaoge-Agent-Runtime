@@ -5,34 +5,21 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // trustedDeferredPreparationStack checks only code that may execute while
 // the Deferred Agent is being PREPARED. Host authorization preflights are
 // contractually read-only; Approval/Completion policies and Model/Tool
-// middleware cannot run before the first admitted physical callback. The
+// stages cannot run before the first admitted physical callback. The
 // Kernel separately proves that no such callback has ever been dispatched.
 // This does not grant custody after any physical callback starts.
 func trustedDeferredPreparationStack(d Dependencies) bool {
-	return d.Inputs == nil && nativeRunLayers(d)
+	return d.Inputs == nil && noLiveObservers(d)
 }
 
-// Input is an explicit stage, not Run middleware. The candidate Run stack
-// may be native even when an input source is configured; an executing frame
-// that actually reads that Host source cannot claim scoped control custody.
-func nativeRunLayers(d Dependencies) bool {
-	if len(d.Observers) != 0 || len(d.Telemetry) != 0 {
-		return false
-	}
-	for _, item := range d.RunMiddleware {
-		switch item.(type) {
-		case *BoundedContextAdapter, *BoundedBudgetAdapter:
-		default:
-			return false
-		}
-	}
-	return true
+// Live observers do not certify physical completion. Input reads are tracked separately.
+func noLiveObservers(d Dependencies) bool {
+	return len(d.Observers) == 0 && len(d.Telemetry) == 0
 }
 
 // scopedDeferredRootCallbacks checks callbacks that can enter an owned Agent Root.
@@ -40,24 +27,10 @@ func nativeRunLayers(d Dependencies) bool {
 // policies are checked at their actual entry inside the owned callback journal.
 // Every other unscoped Host callback keeps the stack opaque.
 func scopedDeferredRootCallbacks(d Dependencies) bool {
-	if !nativeRunLayers(d) ||
+	if !noLiveObservers(d) ||
 		d.PrepareModelRequest != nil || d.NormalizeModelPolicy != nil ||
 		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false
-	}
-	for _, item := range d.ModelMiddleware {
-		switch item.(type) {
-		case *BoundedBudgetAdapter, *ModelAdmissionBarrier:
-		default:
-			return false
-		}
-	}
-	for _, item := range d.ToolMiddleware {
-		switch item.(type) {
-		case *BoundedBudgetAdapter, *BoundedToolTimelineAdapter:
-		default:
-			return false
-		}
 	}
 	return true
 }
@@ -81,7 +54,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	// first-party Prepare callback retired and ACKed. This permits a
 	// product with Host approval policies to cancel BEFORE those policies
 	// are invoked, without lending them physical custody after invocation.
-	if runner.trustedDeferredPreparedControl && rt.VerifyPreparedRootSettlement(ctx, child) == nil {
+	if runner.trustedDeferredPreparedControl && rt.VerifyExecutionCustody(ctx, child, kernel.CustodyPrepared) == nil {
 		return true
 	}
 	boundedToolControl := runner.boundedApproval && runner.scopedRootCallbacks
@@ -102,7 +75,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	}
 	if boundedToolControl {
 		state, err := decodeState(child.State)
-		if err != nil || rt.VerifyBoundedToolControl(ctx, child) != nil {
+		if err != nil || rt.VerifyExecutionCustody(ctx, child, kernel.CustodyBoundedApproval) != nil {
 			return false
 		}
 		// Co-located execution already committed original Tool outcomes
@@ -110,7 +83,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 		// all admitted accounting obligations; a second external owner
 		// receipt is not required to stop an otherwise quiescent Agent.
 		// Delegated result verification remains a distinct read-only API.
-		if a := runner.atomicBudget(); a != nil {
+		if a := runner.boundedBudget; a != nil {
 			l, e := a.bindReceiptScope(ctx, child.Run.ID, "")
 			if e != nil {
 				return false
@@ -126,15 +99,10 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 		}
 		// Split-store legacy compositions still require independent owner
 		// evidence for a nonempty Tool history.
-		if state.Budget.Usage.ToolCalls == 0 && len(state.DelegatedToolReceipts) == 0 && len(state.RecoveredTools) == 0 {
+		if state.Budget.Usage.ToolCalls == 0 && len(state.DelegatedToolReceipts) == 0 && state.recoveredToolCount() == 0 {
 			return true
 		}
 		return runner.verifyToolHistory(ctx, child.Run.ID, state)
 	}
-	return rt.VerifyOwnedRootSettlement(ctx, child) == nil
+	return rt.VerifyExecutionCustody(ctx, child, kernel.CustodyRetired) == nil
 }
-
-var (
-	_ plugin.RunMiddleware = (*BoundedContextAdapter)(nil)
-	_ plugin.RunMiddleware = (*BoundedBudgetAdapter)(nil)
-)

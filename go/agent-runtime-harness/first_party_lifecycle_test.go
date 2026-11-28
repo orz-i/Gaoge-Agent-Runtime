@@ -59,7 +59,7 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		options.Context.ManagedRecovery = true
+
 	}
 	client.generate = func(req model.Request) (model.Response, error) {
 		if req.Model == "specialist-model" {
@@ -152,7 +152,7 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := options.Runtime.VerifyBoundedToolControl(ctx, child); err != nil {
+	if err := options.Runtime.VerifyExecutionCustody(ctx, child, kernel.CustodyBoundedApproval); err != nil {
 		t.Fatalf("original child approval return was not qualified: %v", err)
 	}
 	var approved harness.Snapshot
@@ -290,12 +290,12 @@ type firstPartyChildReturnCut struct {
 	before bool
 }
 
-func (s *firstPartyChildReturnCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+func (s *firstPartyChildReturnCut) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if s.before && g.AdmissionOperation == "approval" && o.HostCompleted {
 		s.grant = g
 		panic(managedObligationCrash{})
 	}
-	err := s.Store.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	err := s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	if err == nil && g.AdmissionOperation == "approval" && o.HostCompleted {
 		s.grant = g
 		panic(managedObligationCrash{})

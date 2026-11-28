@@ -13,7 +13,7 @@ import (
 // cancellation authority to such a composition.
 func TestDeferredControlRejectsOpaqueHostCallbackAndForeignRoutedTwin(t *testing.T) {
 	rt, original, model := deferredFixture(t, &deferredHost{})
-	c, err := handoff.NewDeferredAgent(original)
+	c, err := handoff.New(handoff.Config{Local: original, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,23 +27,19 @@ func TestDeferredControlRejectsOpaqueHostCallbackAndForeignRoutedTwin(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.SupportsDeferredAgent(rt) || !c.IsDeferredLocalDelegation(rt, local) || c.VerifiedLocalDelegationControl(t.Context(), rt, local, child) {
+	if !c.PreparesLocal() || !c.ObservesLocalDelegation(rt, local) || c.VerifiedLocalDelegationControl(t.Context(), rt, local, child) {
 		t.Fatalf("arbitrary Host callback claimed physical cancellation")
 	}
-	routed, err := handoff.NewDeferredAgentWithRouting(original, func(d handoff.Delegation) (handoff.DelegationRoute, error) {
-		if d.MemberID == "remote" {
-			return handoff.DelegationRouteRemote, nil
-		}
-		return handoff.DelegationRouteLocal, nil
-	}, handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
+	routed, err := handoff.New(handoff.Config{Local: original, PrepareLocal: true, Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
 		return original, nil
-	}))
+	})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	foreign := local
 	foreign.MemberID = "remote"
-	if routed.IsDeferredLocalDelegation(rt, foreign) || routed.VerifiedLocalDelegationControl(t.Context(), rt, foreign, child) {
+	foreign.Remote = true
+	if routed.ObservesLocalDelegation(rt, foreign) || routed.VerifiedLocalDelegationControl(t.Context(), rt, foreign, child) {
 		t.Fatal("remote same-Kernel twin borrowed local execution authority")
 	}
 }

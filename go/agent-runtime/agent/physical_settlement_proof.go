@@ -32,7 +32,7 @@ func TerminalPhysicalEffectsSettled(snapshot kernel.Snapshot) bool {
 		return false
 	}
 	state, err := decodeState(snapshot.State)
-	if err != nil || state.ExternalToolHold != nil || len(state.RecoveredTools) != 0 {
+	if err != nil || state.recoveredToolCount() != 0 {
 		return false
 	}
 	// Signals remain as idempotency history. Only a unique consumed

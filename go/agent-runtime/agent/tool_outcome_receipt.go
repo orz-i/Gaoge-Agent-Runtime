@@ -11,30 +11,26 @@ import (
 
 // toolOutcomeReceipt is the same immutable terminal fact in the Budget ledger
 // and the Agent's recovered outcome slot. No-effect rejection is not success.
-type toolRejection struct {
-	ErrorCode       string   `json:"errorCode,omitempty"`
-	ErrorMessage    string   `json:"errorMessage,omitempty"`
-	BlockedTools    []string `json:"blockedTools,omitempty"`
-	AllowCompletion bool     `json:"allowCompletion,omitempty"`
-}
-
 type toolOutcomeReceipt struct {
-	Result tools.ExecutionResult `json:"result"`
-	toolRejection
+	Result          tools.ExecutionResult `json:"result"`
+	ErrorCode       string                `json:"errorCode,omitempty"`
+	ErrorMessage    string                `json:"errorMessage,omitempty"`
+	BlockedTools    []string              `json:"blockedTools,omitempty"`
+	AllowCompletion bool                  `json:"allowCompletion,omitempty"`
 }
 
 func newToolOutcomeReceipt(result tools.ExecutionResult, err error) toolOutcomeReceipt {
 	code, message, _ := tools.RecoverableCallErrorInfo(err)
-	return toolOutcomeReceipt{Result: tools.CloneExecutionResult(result), toolRejection: toolRejection{
+	return toolOutcomeReceipt{Result: tools.CloneExecutionResult(result),
 		ErrorCode: code, ErrorMessage: message,
-		BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(err), AllowCompletion: tools.RecoverableCallErrorAllowsCompletion(err)}}
+		BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(err), AllowCompletion: tools.RecoverableCallErrorAllowsCompletion(err)}
 }
 
 const toolOutcomeEvidenceVersion = "budget-tool-outcome-opaque-v1"
 
 type persistedToolOutcome struct {
 	toolOutcomeReceipt
-	Evidence *jsoncontract.OpaqueEvidence `json:"_originalEvidence,omitempty"`
+	Evidence *jsoncontract.OpaqueEvidence `json:"_originalEvidence"`
 }
 
 func encodeToolOutcome(r toolOutcomeReceipt) (json.RawMessage, error) {
@@ -48,33 +44,19 @@ func encodeToolOutcome(r toolOutcomeReceipt) (json.RawMessage, error) {
 	return json.Marshal(persistedToolOutcome{toolOutcomeReceipt: r, Evidence: &seal})
 }
 
-func decodeToolOutcome(raw json.RawMessage, id string, requireOriginal bool) (toolOutcomeReceipt, error) {
+func decodeToolOutcome(raw json.RawMessage, id string) (toolOutcomeReceipt, error) {
 	var saved persistedToolOutcome
 	if err := json.Unmarshal(raw, &saved); err != nil {
 		return toolOutcomeReceipt{}, err
 	}
 	r := saved.toolOutcomeReceipt
-	if saved.Evidence != nil {
-		if err := jsoncontract.RestoreOpaque(toolOutcomeEvidenceVersion, &r, saved.Evidence); err != nil {
-			return toolOutcomeReceipt{}, errors.Join(ErrToolReceiptMismatch, err)
-		}
-	} else if requireOriginal {
-		// Old adapter-only receipts remain readable but cannot claim newly
-		// sealed native original-callback custody.
-		return toolOutcomeReceipt{}, ErrToolReceiptMismatch
+	if err := jsoncontract.RestoreOpaque(toolOutcomeEvidenceVersion, &r, saved.Evidence); err != nil {
+		return toolOutcomeReceipt{}, errors.Join(ErrToolReceiptMismatch, err)
 	}
 	if _, err := r.terminalError(id); err != nil {
 		return toolOutcomeReceipt{}, err
 	}
 	return r, nil
-}
-
-func (r toolOutcomeReceipt) rejection() *toolRejection {
-	if r.ErrorCode == "" {
-		return nil
-	}
-	value := r.toolRejection
-	return &value
 }
 
 // terminalError distinguishes an exact original refusal from invalid evidence.
@@ -92,7 +74,7 @@ func (r toolOutcomeReceipt) terminalError(id string) (error, error) {
 	} else if r.ErrorMessage != "" || len(r.BlockedTools) != 0 || r.AllowCompletion {
 		return nil, ErrToolReceiptMismatch
 	}
-	if !validBoundedToolReceipt(r.Result, refusal, id) {
+	if terminal, _ := qualifyToolReturn(r.Result, refusal, id); !terminal {
 		return nil, ErrToolReceiptMismatch
 	}
 	return refusal, nil

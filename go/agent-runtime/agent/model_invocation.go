@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"strconv"
@@ -54,20 +53,20 @@ type ModelInvocation struct {
 	// BindingFingerprint freezes the effective named Provider binding without
 	// persisting endpoint addresses or credentials. Unnamed local Model clients
 	// are not identified as external Provider bindings.
-	BindingFingerprint  string                `json:"bindingFingerprint,omitempty"`
-	Model               string                `json:"model,omitempty"`
-	Status              ModelInvocationStatus `json:"status"`
-	Request             model.Request         `json:"request,omitempty"`
-	SamplingPlan        *SamplingPlan         `json:"samplingPlan,omitempty"`
-	ProviderResponseID  string                `json:"providerResponseID,omitempty"`
-	Response            model.Response        `json:"response,omitempty"`
-	Usage               *model.Usage          `json:"usage,omitempty"`
-	ErrorCode           string                `json:"errorCode,omitempty"`
-	OutcomeErrorCode    string                `json:"outcomeErrorCode,omitempty"`
-	OutcomeErrorDetail  string                `json:"outcomeErrorDetail,omitempty"`
-	DispatchAttempt     uint32                `json:"dispatchAttempt,omitempty"`
-	ExecutionAttempt    uint32                `json:"executionAttempt,omitempty"`
-	ExecutionLeaseUntil *time.Time            `json:"executionLeaseUntil,omitempty"`
+	BindingFingerprint string                `json:"bindingFingerprint,omitempty"`
+	Model              string                `json:"model,omitempty"`
+	Status             ModelInvocationStatus `json:"status"`
+	Request            model.Request         `json:"request,omitzero"`
+	SamplingPlan       *SamplingPlan         `json:"samplingPlan,omitempty"`
+	ProviderResponseID string                `json:"providerResponseID,omitempty"`
+	Response           model.Response        `json:"response,omitempty"`
+
+	ErrorCode           string     `json:"errorCode,omitempty"`
+	OutcomeErrorCode    string     `json:"outcomeErrorCode,omitempty"`
+	OutcomeErrorDetail  string     `json:"outcomeErrorDetail,omitempty"`
+	DispatchAttempt     uint32     `json:"dispatchAttempt,omitempty"`
+	ExecutionAttempt    uint32     `json:"executionAttempt,omitempty"`
+	ExecutionLeaseUntil *time.Time `json:"executionLeaseUntil,omitempty"`
 	// RetryAfter is the Feature-owned ReadyAt gate for a released,
 	// retryable model call. It is not a second execution lease.
 	RetryAfter  *time.Time `json:"retryAfter,omitempty"`
@@ -211,7 +210,6 @@ func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 	value.Request = model.CloneRequest(value.Request)
 	value.CatalogFingerprints = append([]string(nil), value.CatalogFingerprints...)
 	value.Response = model.CloneResponse(value.Response)
-	value.Usage = model.CloneUsage(value.Usage)
 	if value.ExecutionLeaseUntil != nil {
 		leaseUntil := value.ExecutionLeaseUntil.UTC()
 		value.ExecutionLeaseUntil = &leaseUntil
@@ -232,7 +230,6 @@ func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 }
 
 func validModelInvocations(values []ModelInvocation) bool {
-	active := 0
 	seenPhysical := make(map[[3]string]struct{})
 	for index, invocation := range values {
 		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) ||
@@ -245,60 +242,34 @@ func validModelInvocations(values []ModelInvocation) bool {
 			invocation.CreatedAt.IsZero() {
 			return false
 		}
-		if (invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted) &&
-			(invocation.Provider != "" || invocation.BindingFingerprint != "") &&
-			!validBindingFingerprint(invocation.BindingFingerprint) {
-			return false
-		}
+
 		if invocation.DispatchAttempt > invocation.ExecutionAttempt || (invocation.DispatchAttempt != 0 && invocation.DispatchAttempt != invocation.ExecutionAttempt) {
 			return false
 		}
 		switch invocation.Status {
-		case ModelInvocationPending:
-			active++
-			if invocation.ErrorCode != "" {
-				return false
-			}
-			if invocation.RetryAfter != nil &&
-				(invocation.RetryAfter.IsZero() || invocation.ExecutionLeaseUntil != nil) {
-				return false
-			}
-			if index != len(values)-1 || strings.TrimSpace(invocation.Request.InvocationID) != invocation.ID {
-				return false
-			}
-			if !validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
+		case ModelInvocationPending, ModelInvocationCompleted:
+			if index != len(values)-1 || strings.TrimSpace(invocation.Request.InvocationID) != invocation.ID ||
+				((invocation.Provider != "" || invocation.BindingFingerprint != "") && !validBindingFingerprint(invocation.BindingFingerprint)) ||
+				!validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
 				return false
 			}
 			hash, err := modelInvocationRequestHash(invocation.Request, invocation.CatalogFingerprints, invocation.Provider, invocation.BindingFingerprint, invocation.Purpose, invocation.ContextSummary)
 			if err != nil || hash != invocation.RequestHash {
 				return false
 			}
-			if (invocation.ExecutionLeaseUntil != nil && invocation.ExecutionAttempt == 0) ||
-				(invocation.ExecutionAttempt > 0 && invocation.ExecutionLeaseUntil == nil && invocation.RetryAfter == nil) {
-				// A released attempt must always carry its durable retry due
-				// time. The old direct-Resume immediate-retry state is invalid.
-				return false
-			}
-		case ModelInvocationCompleted:
-			active++
-			if invocation.RetryAfter != nil || index != len(values)-1 || invocation.CompletedAt == nil ||
-				invocation.ExecutionLeaseUntil != nil || strings.TrimSpace(invocation.Request.InvocationID) != invocation.ID ||
-				!validModelInvocationReceipt(invocation) {
-				return false
-			}
-			if !validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
-				return false
-			}
-			hash, err := modelInvocationRequestHash(invocation.Request, invocation.CatalogFingerprints, invocation.Provider, invocation.BindingFingerprint, invocation.Purpose, invocation.ContextSummary)
-			if err != nil || hash != invocation.RequestHash {
+			if invocation.Status == ModelInvocationPending {
+				if invocation.ErrorCode != "" ||
+					(invocation.RetryAfter != nil && (invocation.RetryAfter.IsZero() || invocation.ExecutionLeaseUntil != nil)) ||
+					(invocation.ExecutionLeaseUntil != nil && invocation.ExecutionAttempt == 0) ||
+					(invocation.ExecutionAttempt > 0 && invocation.ExecutionLeaseUntil == nil && invocation.RetryAfter == nil) {
+					return false
+				}
+			} else if invocation.RetryAfter != nil || invocation.CompletedAt == nil || invocation.ExecutionLeaseUntil != nil || !validModelInvocationReceipt(invocation) {
 				return false
 			}
 		case ModelInvocationConsumed:
-			if len(invocation.CatalogFingerprints) != 0 {
-				return false
-			}
-			if invocation.RetryAfter != nil || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.ExecutionLeaseUntil != nil ||
-				!validModelInvocationReceipt(invocation) {
+			if len(invocation.CatalogFingerprints) != 0 || invocation.RetryAfter != nil || invocation.CompletedAt == nil || invocation.ConsumedAt == nil ||
+				invocation.ExecutionLeaseUntil != nil || !validModelInvocationReceipt(invocation) {
 				return false
 			}
 		default:
@@ -313,7 +284,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 			seenPhysical[key] = struct{}{}
 		}
 	}
-	return active <= 1
+	return true
 }
 
 func validCatalogFingerprints(definitions []tools.Definition, fingerprints []string) bool {
@@ -331,6 +302,26 @@ func validCatalogFingerprints(definitions []tools.Definition, fingerprints []str
 	return true
 }
 
+// Completion normalizes the same committed receipt for live and recovered
+// execution. The callers retain their distinct original authority checks.
+func completeModelInvocation(inv ModelInvocation, response model.Response, err error, rejected bool, now time.Time) ModelInvocation {
+	if rejected {
+		response = model.BillingOnlyResponse(response)
+		inv.ErrorCode = model.ClassifiedErrorCode(err)
+		if inv.ErrorCode == "" {
+			inv.ErrorCode = rejectedModelResponseCode
+		}
+	}
+	inv.Status = ModelInvocationCompleted
+	inv.ProviderResponseID = strings.TrimSpace(response.ResponseID)
+	inv.Response = model.CloneResponse(response)
+	inv.ExecutionLeaseUntil, inv.RetryAfter = nil, nil
+	if inv.CompletedAt == nil {
+		inv.CompletedAt = &now
+	}
+	return inv
+}
+
 func validModelInvocationReceipt(invocation ModelInvocation) bool {
 	// Restarted Runs must not trust legacy completed/consumed named Provider
 	// receipts whose original physical identity was never established. Agent
@@ -345,8 +336,7 @@ func validModelInvocationReceipt(invocation ModelInvocation) bool {
 		}
 	}
 	if invocation.ErrorCode != "" {
-		return invocation.Usage != nil && invocation.Response.Usage != nil &&
-			model.ValidUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
+		return invocation.Response.Usage != nil && model.ValidUsage(invocation.Response.Usage)
 	}
 	return model.ValidResponse(invocation.Response)
 }
@@ -501,7 +491,7 @@ func (runner *Runner) buildInvocation(ctx context.Context, snapshot kernel.Snaps
 		return ModelInvocation{}, err
 	}
 	preparation := &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
-		original: model.CloneRequest(request), catalog: definitions, budget: runner.samplingBudget}
+		original: model.CloneRequest(request), catalog: definitions, budget: runner.boundedBudget}
 	defer preparation.close()
 	if summaryEligible(snapshot, state) {
 		if runner.contextSummary == nil {
@@ -571,36 +561,16 @@ func validPreparedModelRequest(original, prepared model.Request) bool {
 
 func sameModelRequestIdentity(frozen, candidate model.Request) bool {
 	return frozen.BindingRef == candidate.BindingRef && frozen.PromptCacheKey == candidate.PromptCacheKey && frozen.PreviousResponseID == candidate.PreviousResponseID && frozen.RunID == candidate.RunID && frozen.InvocationID == candidate.InvocationID &&
-		frozen.Model == candidate.Model && sameFrozenModelOptions(frozen.ModelOptions, candidate.ModelOptions) &&
-		sameFrozenOutputContract(frozen.OutputContract, candidate.OutputContract)
+		frozen.Model == candidate.Model && reflect.DeepEqual(frozen.ModelOptions, candidate.ModelOptions) &&
+		reflect.DeepEqual(frozen.OutputContract, candidate.OutputContract)
 }
 
 // A model-facing schema may narrow or specialize a registered Tool before the
 // intent is frozen. Execution still uses the registered Catalog definition.
 func preparedOutputToolsWithinAuthority(registered, projected []tools.Definition) bool {
-	if len(projected) > len(registered) {
-		return false
-	}
-	byKey := make(map[string]tools.Definition, len(registered))
-	for _, definition := range registered {
-		if definition.Key == "" || definition.Name == "" {
-			return false
-		}
-		if _, exists := byKey[definition.Key]; exists {
-			return false
-		}
-		byKey[definition.Key] = definition
-	}
-	seen := make(map[string]bool, len(projected))
-	for _, definition := range projected {
-		original, ok := byKey[definition.Key]
-		if !ok || seen[definition.Key] || definition.Name != original.Name || definition.Terminal != original.Terminal ||
-			tools.ValidateDefinition(definition) != nil {
-			return false
-		}
-		seen[definition.Key] = true
-	}
-	return true
+	return toolSubset(registered, projected, localAuthorityKey, func(original, candidate tools.Definition) bool {
+		return candidate.Name == original.Name && candidate.Terminal == original.Terminal && tools.ValidateDefinition(candidate) == nil
+	})
 }
 
 func catalogFingerprintsForRequest(registered, projected []tools.Definition) ([]string, error) {
@@ -623,24 +593,12 @@ func catalogFingerprintsForRequest(registered, projected []tools.Definition) ([]
 	return fingerprints, nil
 }
 
-func sameFrozenModelMessages(original, candidate []model.Message) bool {
-	return reflect.DeepEqual(original, candidate)
-}
-
-func sameFrozenOutputContract(original, candidate *model.OutputContract) bool {
-	return reflect.DeepEqual(original, candidate)
-}
-
-func sameFrozenModelOptions(original, candidate json.RawMessage) bool {
-	return reflect.DeepEqual(original, candidate)
-}
-
 // A durable invocation permits only budget restrictions and filtering already
 // authorized Tool declarations at physical dispatch. All model-visible bytes
 // (messages, Tool schemas and descriptions) are sealed before intent commit.
 func validDispatchModelRequest(frozen, candidate model.Request) bool {
 	return sameModelRequestIdentity(frozen, candidate) &&
-		sameFrozenModelMessages(frozen.Messages, candidate.Messages) &&
+		reflect.DeepEqual(frozen.Messages, candidate.Messages) &&
 		dispatchLocalToolsWithinIntent(frozen.Tools, candidate.Tools) &&
 		dispatchHostedToolsWithinIntent(frozen.HostedTools, candidate.HostedTools) &&
 		dispatchToolChoiceWithinIntent(frozen, candidate) &&
@@ -693,54 +651,41 @@ func dispatchHostedToolCeilingWithinIntent(frozen, candidate *int) bool {
 	return *frozen >= 0 && candidate != nil && *candidate <= *frozen
 }
 
-func dispatchLocalToolsWithinIntent(frozen, candidate []tools.Definition) bool {
-	if len(candidate) > len(frozen) {
+// Both pre-intent projection and physical dispatch qualify the same
+// original keyed Tool subset. Only the allowed per-entry comparison differs.
+func toolSubset[T any](original, candidate []T, key func(T) string, matches func(T, T) bool) bool {
+	if len(candidate) > len(original) {
 		return false
 	}
-	authorized := make(map[string]tools.Definition, len(frozen))
-	for _, definition := range frozen {
-		if definition.Key == "" || definition.Name == "" {
+	authorized := make(map[string]T, len(original))
+	for _, value := range original {
+		k := key(value)
+		if _, exists := authorized[k]; k == "" || exists {
 			return false
 		}
-		if _, exists := authorized[definition.Key]; exists {
-			return false
-		}
-		authorized[definition.Key] = definition
+		authorized[k] = value
 	}
-	seen := make(map[string]bool, len(candidate))
-	for _, definition := range candidate {
-		original, ok := authorized[definition.Key]
-		if !ok || seen[definition.Key] || !reflect.DeepEqual(original, definition) {
+	for _, value := range candidate {
+		k := key(value)
+		old, ok := authorized[k]
+		if !ok || !matches(old, value) {
 			return false
 		}
-		seen[definition.Key] = true
+		delete(authorized, k)
 	}
 	return true
 }
-
+func localAuthorityKey(d tools.Definition) string {
+	if d.Name == "" {
+		return ""
+	}
+	return d.Key
+}
+func dispatchLocalToolsWithinIntent(frozen, candidate []tools.Definition) bool {
+	return toolSubset(frozen, candidate, localAuthorityKey, func(a, b tools.Definition) bool { return reflect.DeepEqual(a, b) })
+}
 func dispatchHostedToolsWithinIntent(frozen, candidate []model.HostedTool) bool {
-	if len(candidate) > len(frozen) {
-		return false
-	}
-	authorized := make(map[string]model.HostedTool, len(frozen))
-	for _, definition := range frozen {
-		if definition.Key == "" {
-			return false
-		}
-		if _, exists := authorized[definition.Key]; exists {
-			return false
-		}
-		authorized[definition.Key] = definition
-	}
-	seen := make(map[string]bool, len(candidate))
-	for _, definition := range candidate {
-		original, ok := authorized[definition.Key]
-		if !ok || seen[definition.Key] || !reflect.DeepEqual(original, definition) {
-			return false
-		}
-		seen[definition.Key] = true
-	}
-	return true
+	return toolSubset(frozen, candidate, hostedSamplingKey, func(a, b model.HostedTool) bool { return reflect.DeepEqual(a, b) })
 }
 
 // Reusing one physical Provider completion ID for a different durable
@@ -800,7 +745,7 @@ func (runner *Runner) executeModelInvocation(
 		Attempt: int(invocation.ExecutionAttempt), ObservedAt: startedAt,
 	})
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
-		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
+		Type: EventModelStarted, Message: invocation.ID, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	authority := modelCompletionAuthority{
 		named:   invocation.Provider != "" && invocation.BindingFingerprint != "",
@@ -811,15 +756,20 @@ func (runner *Runner) executeModelInvocation(
 		},
 	}
 	generateCtx := ctx
-	if invocation.SamplingPlan != nil {
-		if (invocation.SamplingPlan.LedgerID != "" && runner.samplingBudget == nil) || !invocation.SamplingPlan.valid(invocation.Request) {
+	ledgerID := ""
+	if plan := invocation.SamplingPlan; plan != nil {
+		ledgerID = plan.LedgerID
+		if !plan.valid(invocation.Request) {
 			return snapshot, state, ErrInvalidRequest
 		}
+	}
+	if ledgerID != snapshot.Run.BudgetScopeID || (ledgerID != "" && runner.boundedBudget == nil) {
+		return snapshot, state, runtimebudget.ErrLedgerConflict
 	}
 	if invocation.Purpose == ModelInvocationContextSummary {
 		generateCtx = context.WithValue(ctx, contextSummaryModelKey{}, true)
 	}
-	atomicBudget := runner.atomicModelBudget(invocation.SamplingPlan)
+	atomicBudget := runner.modelBudget(invocation.SamplingPlan)
 	response, err := runner.generateModelWithPolicyGuarded(generateCtx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context, candidate model.Request) error {
 			// Resolve and revalidate Catalog authority first: a slow external
@@ -886,11 +836,7 @@ func (runner *Runner) executeModelInvocation(
 	}
 	// Validate against the original receipt, not just another syntactically
 	// valid ID. The same authority also fences downstream shared settlement.
-	if atomicBudget != nil {
-		response, err = authority.validate(response, err)
-	} else {
-		response, err = authority.validateFinal(response, err)
-	}
+	response, err = authority.validate(response, err)
 	late := errors.Is(err, ErrModelLateResult)
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && model.ValidUsage(response.Usage)
 	var denied modelPreDispatchDenied
@@ -956,25 +902,12 @@ func (runner *Runner) executeModelInvocation(
 			return snapshot, state, errors.Join(ErrModelOutcomeUnknown, err)
 		}
 	}
-	if knownRejection {
-		// The accounting reducer must see the original physical receipt,
-		// including Hosted Tool effects, before rejected execution payloads
-		// are stripped from the persisted Agent response.
-		response = model.BillingOnlyResponse(response)
-	}
-	completedAt := runner.clock.Now().UTC()
-	invocation.Status = ModelInvocationCompleted
-	invocation.ProviderResponseID = strings.TrimSpace(response.ResponseID)
-	invocation.Response = model.CloneResponse(response)
-	invocation.Usage = model.CloneUsage(response.Usage)
-	if knownRejection {
-		invocation.ErrorCode = model.ClassifiedErrorCode(err)
-		if invocation.ErrorCode == "" {
-			invocation.ErrorCode = rejectedModelResponseCode
-		}
-	}
-	invocation.ExecutionLeaseUntil = nil
-	invocation.CompletedAt = &completedAt
+	// The accounting reducer has seen the original physical receipt,
+	// including Hosted effects, before the common completion reducer
+	// strips an unusable response's execution payload.
+	invocation.CompletedAt = nil
+	invocation = completeModelInvocation(invocation, response, err, knownRejection, runner.clock.Now().UTC())
+	response = invocation.Response
 	if !replaceLastModelInvocation(&state, invocation) {
 		return kernel.Snapshot{}, runState{}, ErrInvalidRequest
 	}
@@ -1032,7 +965,7 @@ func (runner *Runner) executeModelInvocation(
 		Duration: endedAt.Sub(startedAt), Usage: telemetryModelUsage(response.Usage), ErrorCode: invocation.ErrorCode,
 	})
 	runner.publish(ctx, next.Run.ID, plugin.Event{
-		Type: EventModelCompleted, Revision: next.Run.Revision, Status: string(next.Run.Status),
+		Type: EventModelCompleted, Message: invocation.ID, Revision: next.Run.Revision, Status: string(next.Run.Status),
 	})
 	if invocation.Purpose != ModelInvocationContextSummary {
 		runner.publishHostedToolReceipts(ctx, next, response.HostedToolCalls)
@@ -1099,20 +1032,7 @@ func (runner *Runner) claimModelInvocationExecution(
 	invocation.RetryAfter = nil
 	invocation.ExecutionAttempt++
 	invocation.ExecutionLeaseUntil = &leaseUntil
-	if !replaceLastModelInvocation(&state, invocation) {
-		return snapshot, state, invocation, ErrInvalidRequest
-	}
-	encoded, err := encodeState(state)
-	if err != nil {
-		return snapshot, state, invocation, err
-	}
-	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{
-			Type: "agent.model_invocation.claimed", Message: invocation.ID, Wakeup: true,
-			WakeupAt: &leaseUntil,
-		}},
-	})
+	next, err := runner.commitInvocationState(ctx, snapshot, &state, invocation, kernel.EventDraft{Type: "agent.model_invocation.claimed", Message: invocation.ID, Wakeup: true, WakeupAt: &leaseUntil})
 	if err != nil {
 		return snapshot, state, invocation, err
 	}
@@ -1137,19 +1057,20 @@ func (runner *Runner) releaseModelInvocationExecution(
 	// One Feature-owned retry eligibility applies to every Agent Runner.
 	// No legacy immediate-Resume compatibility path remains.
 	invocation.RetryAfter = &wakeupAt
-	if !replaceLastModelInvocation(&state, invocation) {
+	return runner.commitInvocationState(ctx, snapshot, &state, invocation, kernel.EventDraft{Type: "agent.model_invocation.retryable", Message: invocation.ID, Wakeup: true, WakeupAt: &wakeupAt})
+}
+
+// Claim and release, including managed recovery of an undispatched claim,
+// update one original invocation and its existing Run journal.
+func (runner *Runner) commitInvocationState(ctx context.Context, snapshot kernel.Snapshot, state *runState, inv ModelInvocation, event kernel.EventDraft) (kernel.Snapshot, error) {
+	if !replaceLastModelInvocation(state, inv) {
 		return snapshot, ErrInvalidRequest
 	}
-	encoded, err := encodeState(state)
+	encoded, err := encodeState(*state)
 	if err != nil {
 		return snapshot, err
 	}
-	return runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{
-			Type: "agent.model_invocation.retryable", Message: invocation.ID, Wakeup: true, WakeupAt: &wakeupAt,
-		}},
-	})
+	return runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{event}})
 }
 
 // The physical Tool subset and its original Catalog fingerprints travel

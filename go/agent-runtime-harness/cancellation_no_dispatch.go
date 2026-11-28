@@ -116,8 +116,8 @@ func (runner *Runner) missingRunCancellation(ctx context.Context, turn Turn, run
 		binding.Parents = append([]childAttemptBinding{invocationAttempt(parent)}, frozen.Parents...)
 	}
 	intent, bound := ctx.Value(cancellationElectionKey{}).(Item)
-	if !bound || intent.TurnID != turn.ID || intent.Seq <= source.Seq || !ValidCancellationFenceIntentAdmission(intent) ||
-		(intent.RunID != runID && intent.RunID != root.ExecutionRefID && !slices.ContainsFunc(binding.Parents, func(p childAttemptBinding) bool { return p.ExecutionRefID == intent.RunID })) {
+	if (!d.NativeLocal || bound) && (!bound || intent.TurnID != turn.ID || intent.Seq <= source.Seq || !ValidCancellationFenceIntentAdmission(intent) ||
+		(intent.RunID != runID && intent.RunID != root.ExecutionRefID && !slices.ContainsFunc(binding.Parents, func(p childAttemptBinding) bool { return p.ExecutionRefID == intent.RunID }))) {
 		return false, ErrConflict
 	}
 	if d.NativeLocal {
@@ -143,8 +143,39 @@ func (runner *Runner) missingRunCancellation(ctx context.Context, turn Turn, run
 		if e = runner.projectCreationDecisionBudget(ctx, decision); e != nil {
 			return false, e
 		}
+		ctx = context.WithValue(ctx, nativeNoRunProjectionKey{}, nativeNoRunProjection{decision: decision, source: cloneItem(source)})
 	}
 	d.Status = "cancelled"
 	_, err = runner.recordDelegationItem(ctx, turn, parent, d, ItemCancelled, source.ID)
 	return err == nil, err
+}
+
+// A native negative decision authorizes only its immutable product projection.
+// This private context capability never authorizes physical admission or control.
+type nativeNoRunProjectionKey struct{}
+type nativeNoRunProjection struct {
+	decision kernel.RunCreationDecision
+	source   Item
+}
+
+// ValidNativeNoRunProjection protects the existing Delegation Item on first
+// append. Once committed, the append-only Item is a read-side projection.
+func ValidNativeNoRunProjection(ctx context.Context, value Item, hasChild bool) bool {
+	if value.Kind != ItemDelegation || value.Status != ItemCancelled || hasChild {
+		return true
+	}
+	var payload delegationItemPayload
+	if !decodeTypedAuthorityJSON(value.Payload, &payload) || payload.Execution == nil || !payload.Execution.NativeLocal {
+		return true
+	}
+	proof, ok := ctx.Value(nativeNoRunProjectionKey{}).(nativeNoRunProjection)
+	if !ok || !proof.decision.Valid() || proof.decision.Status != kernel.RunStatusCancelled ||
+		proof.decision.RunID != value.RunID || proof.decision.LogicalParentRunID != payload.ParentRunID ||
+		proof.source.ID != value.ParentItemID || proof.source.RunID != value.RunID ||
+		proof.source.TurnID != value.TurnID || proof.source.InvocationID != value.InvocationID {
+		return false
+	}
+	original, valid := frozenDelegationAdmissionPayload(Invocation{TurnID: value.TurnID}, proof.source)
+	return valid && matchesDelegationPayload(payload, *original.Execution, original.ParentRunID) &&
+		value.ID == stableID("hid", value.TurnID, payload.DelegationID, string(ItemCancelled))
 }

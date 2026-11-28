@@ -6,30 +6,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-var _ kernel.OwnedRootSettlementStore = (*Store)(nil)
-var _ kernel.ReturnedRootSettlementStore = (*Store)(nil)
+var _ kernel.ExecutionCustodyStore = (*Store)(nil)
 
-func (s *Store) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, nil)
-}
-
-func (s *Store) VerifyBoundedToolControl(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyBoundedToolControlFacts)
-}
-
-func (s *Store) VerifyCompletedToolReturn(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyCompletedToolReturnFacts)
-}
-
-// VerifyOwnedRootSettlement is read-only under the same Store lock that
-// serializes physical grants and Kernel control writes. No public Run metadata
-// can substitute for the exact retired owner callback retirement.
-func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyOwnedRootSettlementFacts)
-}
-
-func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, check kernel.RootSettlementCheck) error {
-	if s == nil || ctx == nil || expected.Run.ID == "" {
+func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snapshot, requirement kernel.ExecutionCustody) error {
+	if s == nil || ctx == nil || expected.Run.ID == "" || !requirement.Valid() {
 		return kernel.ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
@@ -37,14 +17,14 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	current, exists := s.records[expected.Run.ID]
-	if !exists {
-		return kernel.ErrNotFound
+	current, readErr := s.snapshotLocked(expected.Run.ID)
+	if readErr != nil {
+		return readErr
 	}
 	if err := s.nativeEntryGateLocked(expected.Run.ID); err != nil {
 		return err
 	}
-	native := s.execution[expected.Run.ID]
+	native := s.runs[expected.Run.ID].execution
 	if native.quarantineRev != 0 {
 		return kernel.ErrExecutionConflict
 	}
@@ -55,25 +35,18 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 	if !lease.ExpiresAt.After(s.currentExecutionTime()) {
 		lease = kernel.ExecutionLease{}
 	}
-	active := len(s.childGrantOwners[expected.Run.ID]) != 0
-	for _, g := range s.childGrants {
-		if g.grant.ChildRunID == expected.Run.ID {
-			active = true
-		}
+	active := len(s.effectOwners[expected.Run.ID]) != 0
+	receipts, err := s.retirementsLocked(expected.Run.ID)
+	if err != nil {
+		return err
 	}
-	receipts := make([]kernel.OwnedRetirementReceipt, 0)
-	for id, r := range s.ownedRetirements {
-		if r.Evidence.Grant.ChildRunID != expected.Run.ID {
-			continue
-		}
-		if r.Evidence.Grant.ID != id {
-			return kernel.ErrExecutionConflict
-		}
-		receipts = append(receipts, r)
-	}
-	if check == nil {
-		var original memoryChildGrant
-		for _, candidate := range s.childGrants {
+	if requirement == kernel.CustodyReturned {
+		var original memoryEffect
+		for id := range s.effectOwners[expected.Run.ID] {
+			candidate, ok := s.activeEffect(id)
+			if !ok {
+				return kernel.ErrExecutionConflict
+			}
 			if candidate.grant.ChildRunID == expected.Run.ID {
 				if original.grant.ID != "" {
 					return kernel.ErrExecutionConflict
@@ -81,8 +54,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 				original = candidate
 			}
 		}
-		return kernel.VerifyReturnedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch,
-			native.lease, original.grant, original.completion, receipts, active)
+		return kernel.VerifyExecutionCustodyFacts(expected, current, native.epoch, native.physicalEpoch, native.lease, active, receipts, original.grant, original.completion, requirement)
 	}
-	return check(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
+	return kernel.VerifyExecutionCustodyFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, requirement)
 }

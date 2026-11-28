@@ -1562,6 +1562,15 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		outcome.item = existing
 		return nil
 	}
+	if value.Kind == harness.ItemDelegation && value.Status == harness.ItemCancelled {
+		var count int64
+		if err = tx.Model(&invocationRecord{}).Where("execution_ref_id = ?", value.RunID).Count(&count).Error; err != nil {
+			return err
+		}
+		if !harness.ValidNativeNoRunProjection(tx.Statement.Context, value, count != 0) {
+			return harness.ErrConflict
+		}
+	}
 	seq, err := nextItemSeq(tx, value.TurnID)
 	if err != nil {
 		return err

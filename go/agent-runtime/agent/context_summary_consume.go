@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
@@ -10,19 +9,17 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel.Snapshot, state runState) (kernel.Snapshot, error) {
+func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel.Snapshot, state runState, invocation ModelInvocation) (kernel.Snapshot, error) {
 	adapter := runner.contextSummary
 	if adapter == nil {
 		return snapshot, ErrInvalidRequest
 	}
-	last, ok := activeModelInvocation(state)
-	if !ok || last.Status != ModelInvocationCompleted || last.Purpose != ModelInvocationContextSummary || !validContextSummaryInvocation(*last) {
+	if invocation.Status != ModelInvocationConsumed || invocation.Purpose != ModelInvocationContextSummary || !validContextSummaryInvocation(invocation) {
 		return snapshot, ErrInvalidRequest
 	}
 	if runner.rootCallbacks != nil {
 		runner.rootCallbacks.summaryPhaseEntered.Store(true)
 	}
-	invocation := cloneModelInvocation(*last)
 	binding := invocation.ContextSummary
 	read, err := adapter.ports.ReadSummary(ctx, *cloneContextSummaryBinding(binding))
 	if err != nil {
@@ -71,19 +68,7 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 	if err != nil {
 		return snapshot, err
 	}
-	// Compute the same native usage mutation before any additional Host write.
-	// An exhausted budget consumes the known bill but never starts business work.
-	consumed, consumedOK := consumeLastModelInvocation(&state, runner.clock.Now())
-	if !consumedOK {
-		return snapshot, ErrInvalidRequest
-	}
-	dimension, usageErr := chargeConsumedModelUsage(&state, consumed)
-	if usageErr != nil {
-		return runner.fail(ctx, snapshot, state, "agent.usage_invalid", usageErr)
-	}
-	if dimension != "" {
-		return runner.fail(ctx, snapshot, state, "agent."+string(dimension)+"_budget", fmt.Errorf("%w: %s", ErrBudgetExceeded, dimension))
-	}
+
 	if target != nil {
 		if err = runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
 			return snapshot, err

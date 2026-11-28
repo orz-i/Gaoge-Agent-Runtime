@@ -47,7 +47,7 @@ func (m *dispatchFrontierModel) Generate(ctx context.Context, r model.Request) (
 // Control, Model and Tool obligations already settled at a safe point.
 type approvalReturnFailure struct{ preparationKernelPorts }
 
-func (s approvalReturnFailure) RecordOwnedPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.OwnedPhysicalCallbackOutcome, kernel.OwnedPhysicalCallbackReturn) error {
+func (s approvalReturnFailure) RecordPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.PhysicalCallbackOutcome, kernel.PhysicalCallbackReturn) error {
 	return errors.New("original callback record refused before commit")
 }
 
@@ -128,7 +128,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 			execution, leaseDuration := ManagedFixtureExecutionPolicy()
 			effects := 0
-			opts := harness.AgentSessionOptions{Store: h, Model: client, Inputs: inputs, Context: harness.AgentSessionContextOptions{ManagedRecovery: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+			opts := harness.AgentSessionOptions{Store: h, Model: client, Inputs: inputs, Context: harness.AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 				return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 			}},
 				Session: harness.SessionOptions{HostThread: harness.HostRef{Kind: "conversation", ID: "dispatch-frontier"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "operator"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "dispatch-frontier"}, Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", MaxModelOutputTokens: 128}, SharedBudget: &budget.Limits{MaxLLMCalls: 3, MaxToolCalls: 2}}, Transcript: harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
@@ -360,7 +360,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				if !point.Valid() || point.Selection.Mode != "" {
 					t.Fatal("wrong original return failure cut")
 				}
-				if _, err := rt.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(err, kernel.ErrNotFound) {
+				if _, err := rt.LookupPhysicalCallbackReturn(ctx, g); !errors.Is(err, kernel.ErrNotFound) {
 					t.Fatalf("unexpected original callback evidence: %v", err)
 				}
 				if c.name != "approval/return-record-failed" {
@@ -469,8 +469,8 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 					t.Fatalf("actual successor finish cut: %v calls=%d", e, len(client.requests))
 				}
 				observed, e := base.(kernel.ManagedRecoveryStore).LoadManagedRecovery(ctx, root.ExecutionRefID)
-				receipt, retErr := base.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, fault.grant.ID)
-				grant, grantErr := base.(kernel.ChildExecutionStore).LookupChildExecution(ctx, root.ExecutionRefID)
+				receipt, retErr := base.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, fault.grant.ID)
+				grant, grantErr := base.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, root.ExecutionRefID)
 				if e != nil {
 					t.Fatal(e)
 				}

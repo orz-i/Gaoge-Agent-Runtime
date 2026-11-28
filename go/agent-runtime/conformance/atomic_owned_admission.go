@@ -13,13 +13,27 @@ import (
 // Every rejected attempt must leave the exact next epoch and grant identity
 // available, and a genuine competing winner must have both facts together.
 func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
-	for _, mode := range []string{"stale-revision", "foreign-event-head", "foreign-proof", "live-owner", "descendant-fence", "two-fresh-contenders"} {
+	for _, mode := range []string{"stale-revision", "foreign-event-head", "foreign-proof", "live-owner", "descendant-fence", "two-fresh-contenders", "physical-child"} {
 		t.Run(mode, func(t *testing.T) {
 			b := factory(t)
 			ctx := t.Context()
 			rt := retirementRuntime(t, b.Store)
 			peer := retirementRuntime(t, b.Peer)
-			source, e := rt.Create(ctx, kernel.CreateRequest{ID: "atomic-root", Kind: "agent", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "single native admission", State: []byte(`{}`), ExecutionRequired: true})
+			request := kernel.CreateRequest{ID: "atomic-root", Kind: "agent", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "single native admission", State: []byte(`{}`), ExecutionRequired: true}
+			var ancestors []kernel.Snapshot
+			if mode == "physical-child" {
+				for _, id := range []string{"grandparent", "parent"} {
+					parent := request
+					parent.ID = id
+					s, e := rt.Create(ctx, parent)
+					if e != nil {
+						t.Fatal(e)
+					}
+					ancestors = append(ancestors, s)
+					request.ParentRunID = id
+				}
+			}
+			source, e := rt.Create(ctx, request)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -35,15 +49,34 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 			// Deterministic Host dispatch linkage also checks that a refused
 			// transaction did not burn an otherwise unused Grant ID.
 			dispatchID := "atomic-original"
-			admit := func(r *kernel.Runtime, v kernel.Snapshot, request kernel.ExecutionAcquireRequest, wrongProof bool) (*kernel.Runtime, kernel.OwnedPhysicalAdmissionResult, error) {
-				subject := kernel.OwnedPhysicalAdmissionSubject(request, kernel.ExecutionLease{}, "start", dispatchID)
+			if mode == "physical-child" {
+				q.LeaseDuration = 5 * time.Second
+				dispatchID = ""
+				foreign, e := peer.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: ancestors[0].Run.ID, OwnerID: "foreign-parent", LeaseDuration: time.Minute})
+				if e != nil {
+					t.Fatal(e)
+				}
+				bound, e := rt.WithExecution(foreign)
+				if e != nil {
+					t.Fatal(e)
+				}
+				proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(kernel.ExecutionAcquireRequest{}, foreign, "start", ""), source.State, source)
+				if _, v, e := bound.AdmitPhysicalExecution(ctx, source, kernel.ExecutionAcquireRequest{}, proof, "start", ""); !errors.Is(e, kernel.ErrExecutionConflict) || v != (kernel.PhysicalAdmissionResult{}) {
+					t.Fatalf("child inherited a foreign/root lease: %v", e)
+				}
+				if e := peer.ReleaseExecution(ctx, foreign); e != nil {
+					t.Fatal(e)
+				}
+			}
+			admit := func(r *kernel.Runtime, v kernel.Snapshot, request kernel.ExecutionAcquireRequest, wrongProof bool) (*kernel.Runtime, kernel.PhysicalAdmissionResult, error) {
+				subject := kernel.PhysicalAdmissionSubject(request, kernel.ExecutionLease{}, "start", dispatchID)
 				if wrongProof {
 					subject = "foreign-proof"
 				}
 				proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", subject, v.State, v)
-				return r.AdmitOwnedPhysicalExecution(ctx, v, request, proof, "start", dispatchID)
+				return r.AdmitPhysicalExecution(ctx, v, request, proof, "start", dispatchID)
 			}
-			assertAdmission := func(r *kernel.Runtime, v kernel.OwnedPhysicalAdmissionResult, wantEpoch uint64) {
+			assertAdmission := func(r *kernel.Runtime, v kernel.PhysicalAdmissionResult, wantEpoch uint64) {
 				t.Helper()
 				if v.Lease.Epoch != wantEpoch || !v.Grant.MatchesExecution(v.Lease) {
 					t.Fatalf("split admission or wrong epoch: %+v", v)
@@ -55,9 +88,9 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				if e = r.RequireExecution(ctx, source.Run.ID); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("admission granted execution before entry: %v", e)
 				}
-				outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
-				proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(source, outcome), nil)
-				if e = peer.RecordOwnedPhysicalCallbackReturn(ctx, g, source.Run.Revision, outcome, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
+				outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
+				proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_physical_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(source, outcome), nil)
+				if e = peer.RecordPhysicalCallbackReturn(ctx, g, source.Run.Revision, outcome, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("admission fabricated an actual callback return: %v", e)
 				}
 				if _, e = r.CheckOwnedPhysicalEntry(ctx, source); e != nil {
@@ -66,7 +99,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				if e = r.RequireExecution(ctx, source.Run.ID); e != nil {
 					t.Fatalf("entered runtime not native owner: %v", e)
 				}
-				if _, e = b.Peer.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, v.Lease, source); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = b.Peer.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, v.Lease, source); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("repeated entry admitted: %v", e)
 				}
 				if e = peer.ReleaseExecution(ctx, v.Lease); !errors.Is(e, kernel.ErrChildExecutionBusy) {
@@ -75,11 +108,38 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				if current, e := peer.Load(ctx, source.Run.ID); e != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(source) {
 					t.Fatalf("admission changed business source: %v", e)
 				}
+				if mode == "physical-child" {
+					for _, parent := range ancestors {
+						if _, e := peer.Cancel(ctx, parent.Run.ID, parent.Run.Revision, "child active"); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+							t.Fatalf("leased child lost ancestor fence: %v", e)
+						}
+					}
+					if e := peer.RecordPhysicalCallbackReturn(ctx, g, source.Run.Revision, outcome, proof); e != nil {
+						t.Fatal(e)
+					}
+					b.AdvanceTo(v.Lease.ExpiresAt.Add(time.Millisecond))
+					if e := FinishOwnedFixture(ctx, peer, g, source); e != nil {
+						t.Fatal(e)
+					}
+					retired, e := peer.LoadOwnedRetirement(ctx, g.ID)
+					if e != nil || !retired.Valid() || retired.Evidence.Grant != g || retired.Evidence.Completion.LeaseOwned != true || !retired.Evidence.Completion.MatchesReturnSnapshot(source) {
+						t.Fatalf("child retirement lost exact original return: %v", e)
+					}
+					for _, custody := range []kernel.ExecutionCustody{kernel.CustodyRetired, kernel.CustodyPrepared, kernel.CustodyReturned} {
+						if e := peer.VerifyExecutionCustody(ctx, source, custody); !errors.Is(e, kernel.ErrExecutionConflict) {
+							t.Fatalf("physical child inherited root custody: %v", e)
+						}
+					}
+					next, e := peer.AcquireExecution(ctx, q)
+					if e != nil || next.Epoch != v.Lease.Epoch+1 {
+						t.Fatalf("child retirement did not atomically release original lease: %v", e)
+					}
+				}
 			}
 			if mode == "two-fresh-contenders" {
 				type result struct {
 					r *kernel.Runtime
-					v kernel.OwnedPhysicalAdmissionResult
+					v kernel.PhysicalAdmissionResult
 					e error
 				}
 				start := make(chan struct{})
@@ -117,6 +177,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 			var competing kernel.ExecutionLease
 			var childGrant kernel.ChildExecutionGrant
 			var childProof *featurecontrol.Proof
+			var childSource kernel.Snapshot
 			switch mode {
 			case "stale-revision":
 				candidate.Run.Revision++
@@ -125,26 +186,27 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				candidate.EventHead++
 			case "foreign-proof":
 				wrongProof = true
-			case "live-owner":
+			case "live-owner", "physical-child":
 				competing, e = peer.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: source.Run.ID, OwnerID: "incumbent", LeaseDuration: time.Minute})
 				if e != nil {
 					t.Fatal(e)
 				}
 				previous = competing
 			case "descendant-fence":
-				child, e := peer.Create(ctx, kernel.CreateRequest{ID: "atomic-child", Kind: "agent", ParentRunID: source.Run.ID, Actor: source.Run.Actor, Thread: source.Run.Thread, Goal: "descendant fence", State: []byte(`{}`)})
+				child, e := peer.Create(ctx, kernel.CreateRequest{ID: "atomic-child", Kind: "agent", ExecutionRequired: true, ParentRunID: source.Run.ID, Actor: source.Run.Actor, Thread: source.Run.Thread, Goal: "descendant fence", State: []byte(`{}`)})
 				if e != nil {
 					t.Fatal(e)
 				}
-				childGrant, e = peer.BeginChildExecution(ctx, child.Run.ID, child.Run.Revision)
+				childGrant, e = AdmitChildFixture(ctx, peer, child.Run.ID, child.Run.Revision)
 				if e != nil {
 					t.Fatal(e)
 				}
-				childProof = featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", childGrant.ID, child.State, child.Checkpoint)
+				childSource = child
+				childProof = featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", childGrant.ID, child.State, child)
 				want = kernel.ErrChildExecutionBusy
 			}
 			scoped, v, e := admit(rt, candidate, q, wrongProof)
-			if !errors.Is(e, want) || scoped != nil || v != (kernel.OwnedPhysicalAdmissionResult{}) {
+			if !errors.Is(e, want) || scoped != nil || v != (kernel.PhysicalAdmissionResult{}) {
 				t.Fatalf("rejected admission: %v %+v", e, v)
 			}
 			if g, e := peer.LookupChildExecution(ctx, source.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -163,7 +225,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				}
 			}
 			if childGrant.ID != "" {
-				if e = peer.MarkChildExecutionSettled(ctx, childGrant, childProof); e != nil {
+				if e = peer.RecordPhysicalCallbackReturn(ctx, childGrant, childGrant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(childSource.Run.ID, childSource.Run.Revision, "agent_physical_callback_return", childGrant.ID, kernel.PhysicalCallbackReturnPayload(childSource, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); e != nil {
 					t.Fatal(e)
 				}
 				if e = peer.FinishChildExecution(ctx, childGrant, childProof); e != nil {

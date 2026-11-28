@@ -4,37 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-type dispatchMutationMiddleware struct {
-	name   string
-	change func(*model.Request)
-}
-
-func (middleware dispatchMutationMiddleware) Name() string { return middleware.name }
-func (middleware dispatchMutationMiddleware) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	middleware.change(&request)
-	return next(ctx, request, emit)
-}
-
-func TestModelDispatchRejectsPostIntentIdentityOrAuthorityMutation(t *testing.T) {
+func TestModelPreparerRejectsIdentityOrAuthorityMutation(t *testing.T) {
 	for _, test := range []struct {
-		name    string
-		prepare bool
-		change  func(*model.Request)
+		name   string
+		change func(*model.Request)
 	}{
-		{name: "model_without_preparer", change: func(r *model.Request) { r.Model = "other-model" }},
-		{name: "model_with_preparer", prepare: true, change: func(r *model.Request) { r.Model = "other-model" }},
+		{name: "model", change: func(r *model.Request) { r.Model = "other-model" }},
 		{name: "run_id", change: func(r *model.Request) { r.RunID = "other-run" }},
 		{name: "invocation_id", change: func(r *model.Request) { r.InvocationID = "other-invocation" }},
 		{name: "model_options", change: func(r *model.Request) { r.ModelOptions = json.RawMessage(`{"temperature":0.99}`) }},
@@ -55,8 +41,6 @@ func TestModelDispatchRejectsPostIntentIdentityOrAuthorityMutation(t *testing.T)
 		{name: "negative_output_budget", change: func(r *model.Request) { r.MaxOutputTokens = -1 }},
 		{name: "increase_frozen_output_budget", change: func(r *model.Request) { r.MaxOutputTokens = 81 }},
 		{name: "remove_frozen_output_budget", change: func(r *model.Request) { r.MaxOutputTokens = 0 }},
-		{name: "message_rewrite_without_preparer", change: func(r *model.Request) { r.Messages[0].Content = model.TextParts("new message") }},
-		{name: "tool_presentation_post_intent", change: func(r *model.Request) { r.Tools[0].Description = "not frozen" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			provider := &invocationRecordingModel{}
@@ -67,10 +51,7 @@ func TestModelDispatchRejectsPostIntentIdentityOrAuthorityMutation(t *testing.T)
 			dependencies := agent.Dependencies{
 				Runtime: newModelInvocationRuntime(t, memory.NewStore()), Model: provider,
 				Catalog: registry, Executor: registry,
-				ModelMiddleware: []plugin.ModelMiddleware{dispatchMutationMiddleware{name: "test.mutate", change: test.change}},
-			}
-			if test.prepare {
-				dependencies.PrepareModelRequest = func(_ context.Context, r model.Request) (model.Request, error) { return r, nil }
+				PrepareModelRequest: func(_ context.Context, r model.Request) (model.Request, error) { test.change(&r); return r, nil },
 			}
 			runner, err := agent.NewRunner(dependencies)
 			if err != nil {
@@ -82,41 +63,13 @@ func TestModelDispatchRejectsPostIntentIdentityOrAuthorityMutation(t *testing.T)
 			request.ModelOptions = json.RawMessage(`{"temperature":0.3}`)
 			finished, err := runner.StartRun(t.Context(), request)
 			if !errors.Is(err, agent.ErrInvalidRequest) || len(provider.callsCopy()) != 0 {
-				t.Fatalf("post-intent change reached provider or did not fail closed: err=%v, calls=%+v", err, provider.callsCopy())
+				t.Fatalf("invalid preparation reached provider or did not fail closed: err=%v, calls=%+v", err, provider.callsCopy())
 			}
-			if finished.Run.Status != kernel.RunStatusFailed || finished.Run.ErrorCode != "agent.model_dispatch_invalid" {
-				t.Fatalf("permanent invalid Model Middleware left a Run retrying indefinitely: status=%s code=%q", finished.Run.Status, finished.Run.ErrorCode)
+			view := mustModelInvocationView(t, finished)
+			if len(view.ModelInvocations) != 0 || view.Budget.Usage.LLMCalls != 0 {
+				t.Fatal("invalid preparation committed or spent a Model intent")
 			}
 		})
-	}
-}
-
-func TestModelDispatchAllowsOnlyBoundedBudgetAdjustments(t *testing.T) {
-	provider := &invocationRecordingModel{}
-	registry := mustRegistry(t, []tools.Registration{{Definition: tools.Definition{Key: manifestToolKey, Name: manifestToolName, InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
-		t.Fatal("unexpected tool execution")
-		return tools.ExecutionResult{}, nil
-	})}})
-	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: newModelInvocationRuntime(t, memory.NewStore()), Model: provider,
-		Catalog: registry, Executor: registry,
-		PrepareModelRequest: func(_ context.Context, r model.Request) (model.Request, error) { return r, nil },
-		ModelMiddleware: []plugin.ModelMiddleware{dispatchMutationMiddleware{name: "test.narrow", change: func(r *model.Request) {
-			r.MaxOutputTokens = 32
-			zero := 0
-			r.HostedToolCallLimit = &zero
-		}}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := startRequest("dispatch-allow-budget", "request-allow-budget", "complete", manifestToolKey)
-	request.Model = "sealed-model"
-	request.MaxModelOutputTokens = 64
-	completed, err := runner.StartRun(t.Context(), request)
-	calls := provider.callsCopy()
-	if err != nil || len(calls) != 1 || calls[0].Model != request.Model || calls[0].MaxOutputTokens != 32 || calls[0].HostedToolCallLimit == nil || *calls[0].HostedToolCallLimit != 0 || completed.Run.ID == "" {
-		t.Fatalf("legal restriction failed: err=%v calls=%+v status=%s", err, calls, completed.Run.Status)
 	}
 }
 
@@ -151,21 +104,23 @@ func TestModelDispatchFenceSurvivesPendingIntentRestart(t *testing.T) {
 	// identity. Only the originally committed request can be delivered.
 	reopened, err := agent.NewRunner(agent.Dependencies{
 		Runtime: persisted, Model: provider, Clock: modelInvocationClock{offset: 3 * time.Minute},
-		ModelMiddleware: []plugin.ModelMiddleware{dispatchMutationMiddleware{name: "test.swap-on-resume", change: func(r *model.Request) {
-			r.Model = "swapped-model"
-		}}},
+		PrepareModelRequest: func(context.Context, model.Request) (model.Request, error) {
+			t.Fatal("restart recalculated a frozen pending request")
+			return model.Request{}, agent.ErrInvalidRequest
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = reopened.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-	if !errors.Is(err, agent.ErrInvalidRequest) || len(provider.callsCopy()) != 0 {
+	if err != nil || len(provider.callsCopy()) != 1 || provider.callsCopy()[0].Model != request.Model {
 		t.Fatalf("restart dispatched inconsistent identity: err=%v calls=%+v", err, provider.callsCopy())
 	}
 	latest := mustLoadModelInvocationRun(t, persisted, request.ID)
 	view := mustModelInvocationView(t, latest)
 	if len(view.ModelInvocations) != 1 || view.ModelInvocations[0].RequestHash != before.ModelInvocations[0].RequestHash ||
-		view.ModelInvocations[0].Request.Model != request.Model || len(view.ModelInvocations[0].Request.Messages) != 2 {
+		view.ModelInvocations[0].Status != agent.ModelInvocationConsumed ||
+		!reflect.DeepEqual(provider.callsCopy()[0], before.ModelInvocations[0].Request) {
 		t.Fatalf("restart rewrote committed intent: before=%+v after=%+v", before.ModelInvocations, view.ModelInvocations)
 	}
 }

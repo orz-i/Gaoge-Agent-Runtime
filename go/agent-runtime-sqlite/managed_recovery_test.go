@@ -54,6 +54,7 @@ func TestSQLiteManagedRecoveryStore(t *testing.T) {
 			// Every original connection is closed before reopening the durable file.
 			Reopen: func() kernel.Store {
 				closeAll()
+
 				fresh := open()
 				a, e := fresh.ManagedRecoveryAuthority(t.Context())
 				if e != nil || a != authority {

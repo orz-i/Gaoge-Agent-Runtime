@@ -1,11 +1,9 @@
 package conformance
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -15,400 +13,207 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// The elected cancellation commits after the actual final Kernel owner
-// check and earlier ledger read, but before the budget layer's Dispatch CAS.
+// Elect cancellation after original authorization, before native dispatch
+// planning. There is no separate reservation/Dispatch CAS to interrupt now.
 type toolDispatchDenialStore struct {
 	*ea1AgentReceiptFault
-	afterCheck   func()
-	afterCallID  string
-	checkPending bool
-	closureCuts  int
-	hits, cuts   int
+	afterCheck  func()
+	afterCallID string
+	hits        int
 }
 
-func (s *toolDispatchDenialStore) cut(m kernel.StoreMutation) bool {
-	for _, event := range m.Events {
-		if event.Type == "tool.admission_unsent" && s.closureCuts > 0 {
-			s.closureCuts--
-			s.cuts++
-			return true
-		}
-	}
-	return false
-}
-func (s *toolDispatchDenialStore) arm(m kernel.StoreMutation, err error) {
+func (s *toolDispatchDenialStore) Commit(ctx context.Context, id string, rev uint64, m kernel.StoreMutation, auth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	next, created, err := s.ea1AgentReceiptFault.Commit(ctx, id, rev, m, auth)
 	if err == nil && s.afterCheck != nil {
 		for _, event := range m.Events {
-			if event.Type == "tool.dispatch_intent" && (s.afterCallID == "" || event.Message == s.afterCallID) {
-				s.checkPending = true
+			if event.Type == "tool.authorization_committed" && (s.afterCallID == "" || event.Message == s.afterCallID) {
+				action := s.afterCheck
+				s.afterCheck = nil
+				s.hits++
+				action()
+				break
 			}
 		}
 	}
-}
-func (s *toolDispatchDenialStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.cut(m) {
-		return kernel.Snapshot{}, s.injected
-	}
-	next, err := s.Store.Apply(ctx, id, rev, m)
-	s.arm(m, err)
-	return next, err
-}
-func (s *toolDispatchDenialStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.cut(m) {
-		return kernel.Snapshot{}, s.injected
-	}
-	next, err := s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-	s.arm(m, err)
-	return next, err
-}
-func (s *toolDispatchDenialStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
-	err := s.ExecutionStore.CheckExecution(ctx, id, l)
-	if err == nil && s.checkPending && s.afterCheck != nil {
-		action := s.afterCheck
-		s.afterCheck = nil
-		s.checkPending = false
-		s.hits++
-		action()
-	}
-	return err
+	return next, created, err
 }
 
-// Even a Store write error with the same public classification as a native
-// denial must not qualify a speculative dispatched candidate.
-type toolDispatchWriteFault struct {
-	budget.LedgerStore
-	after bool
-	hits  int
-}
-
-func (s *toolDispatchWriteFault) SaveBudget(ctx context.Context, l budget.Ledger, rev uint64) error {
-	if s.hits == 0 && l.Reservations["tool:dispatch-denial-root:original-call"].Dispatched {
-		s.hits++
-		if s.after {
-			if err := s.LedgerStore.SaveBudget(ctx, l, rev); err != nil {
-				return err
-			}
-		}
-		return budget.ErrExhausted
-	}
-	return s.LedgerStore.SaveBudget(ctx, l, rev)
-}
-
-type dispatchDenialPorts struct {
-	capacityAdmissionPorts
-	fail error
-	hits *int
-}
-
-func (p dispatchDenialPorts) Project(_ context.Context, l budget.Ledger) error {
-	if l.RunCancelled("dispatch-denial-root") && p.fail != nil {
-		*p.hits++
-		return p.fail
-	}
-	return nil
-}
-
-type dispatchDenialOpaqueLayer struct {
-	mode  string
-	calls *int
-}
-
-func (dispatchDenialOpaqueLayer) Name() string { return "fixture.opaque-tool-denial" }
-func (m dispatchDenialOpaqueLayer) Tool(ctx context.Context, _ plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
-	*m.calls++
-	if m.mode == "opaque-before" {
-		return tools.ExecutionResult{}, budget.ErrExhausted
-	}
-	out, err := next(ctx)
-	switch m.mode {
-	case "opaque-mask":
-		return out, nil
-	case "opaque-augment":
-		return out, errors.Join(err, errors.New("opaque tool callback failed"))
-	case "opaque-forged-result":
-		return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: "original-call", Disposition: "committed"}}, err
-	default:
-		return out, err
-	}
-}
-
-func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"budget-only", "timeline-outer", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "timeline-failure", "opaque-before", "opaque-pass", "opaque-mask", "opaque-augment", "opaque-forged-result", "opaque-inner-unentered", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error", "retirement-recovery-before", "retirement-recovery-ack", "retirement-finish-before", "retirement-finish-ack"} {
+func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
+	// Split-only speculative-marker cleanup/retirement cuts are gone: an
+	// uncommitted dispatch has neither a reservation nor physical custody.
+	// Native dispatch-before/ACK and receipt-before/ACK remain covered by
+	// runNativeToolBudget; unmetered no-send closure is in toolUnsentRecovery,
+	// and final-child receipt/retirement ACK loss remains in toolBatchBoundary.
+	for _, mode := range []string{"budget-only", "timeline-inner", "parented", "terminal-before", "terminal-ack", "projection-failure", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
-			retirementMode := strings.HasPrefix(mode, "retirement-")
 			base, peer, reopen := factory(t)
+			ledger := newToolTestLedger(t, base)
 			observer := ea1StartRuntime(t, peer)
-			ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
-			const root = "dispatch-denial-root"
-			const scope = "dispatch-denial-ledger"
-			const id = "tool:dispatch-denial-root:original-call"
+			const root, scope = "dispatch-denial-root", "dispatch-denial-ledger"
+			const reservation = "tool:dispatch-denial-root:original-call"
 			limits := budget.Limits{MaxToolCalls: 2, MaxConcurrentRuns: 1}
-			coord := budget.Coordinator{Store: ledger}
-			cut := errors.New("native no-send closure CAS failed")
-			store := &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{
-				Store: base, ExecutionStore: base.(kernel.ExecutionStore), ControlStore: base.(kernel.ControlStore), ChildExecutionStore: base.(kernel.ChildExecutionStore), ExecutionQuarantineStore: base.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: base.(kernel.OwnedPhysicalExecutionStore), injected: cut,
-			}}
+			cut := errors.New("native terminal commit interrupted")
+			fault := &ea1AgentReceiptFault{Store: base, LedgerStore: ledger, ExecutionStore: base.(kernel.ExecutionStore), ExecutionQuarantineStore: base.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: base.(kernel.PhysicalExecutionStore)}
+			store := &toolDispatchDenialStore{ea1AgentReceiptFault: fault}
 			cancelled := mode != "dispatch-write-before" && mode != "dispatch-write-ack" && mode != "actual-handler-error"
 			if cancelled {
 				store.afterCheck = func() {
-					if _, err := coord.CancelRoot(ctx, scope, root); err != nil {
+					coord := budget.Coordinator{Store: ledger}
+					var err error
+					if mode == "parented" {
+						_, err = coord.CancelRun(ctx, scope, root)
+					} else {
+						_, err = coord.CancelRoot(ctx, scope, root)
+					}
+					if err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
-			if mode == "cleanup-cas" || retirementMode {
-				store.closureCuts = 2
+			if mode == "terminal-before" || mode == "terminal-ack" {
+				fault.event, fault.injected, fault.after = "agent.failed", cut, mode == "terminal-ack"
 			}
-			useLedger := ledger
-			var writeFault *toolDispatchWriteFault
 			if mode == "dispatch-write-before" || mode == "dispatch-write-ack" {
-				writeFault = &toolDispatchWriteFault{LedgerStore: ledger, after: mode == "dispatch-write-ack"}
-				useLedger = writeFault
+				// A Store error with the public denial classification is NOT
+				// evidence that the native accounting decision denied send.
+				fault.event, fault.injected, fault.after = "tool.dispatch_intent", budget.ErrExhausted, mode == "dispatch-write-ack"
 			}
 			m := &settledToolModel{}
-			physical, policies, reads, opaque, projection := 0, 0, 0, 0, 0
+			physical, policies, reads := 0, 0, 0
 			reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				physical++
-				if mode == "actual-handler-error" {
-					return tools.ExecutionResult{}, budget.ErrExhausted
-				}
-				return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
+				return tools.ExecutionResult{}, budget.ErrExhausted
 			})}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			timeline := &toolConsumptionTimeline{}
-			if mode == "timeline-failure" {
-				timeline.fail = errors.New("outer timeline terminal append failed")
-			}
-			mk := func(rt *kernel.Runtime, l budget.LedgerStore, original bool) *agent.Runner {
+			makeRunner := func(s kernel.Store, original bool) (*agent.Runner, *kernel.Runtime) {
 				t.Helper()
-				ports := dispatchDenialPorts{capacityAdmissionPorts: capacityAdmissionPorts{settledToolPorts: settledToolPorts{id: scope}, limits: limits}, hits: &projection}
+				rt := ea1StartRuntime(t, s)
+				ports := capacityAdmissionPorts{settledToolPorts: settledToolPorts{id: scope}, limits: limits}
+				if mode == "parented" {
+					ports.parent = "dispatch-denial-parent"
+				}
 				if original && mode == "projection-failure" {
-					ports.fail = errors.New("native denial projection failed")
-				}
-				b, err := agent.NewBoundedBudgetAdapter(l, ports)
-				if err != nil {
-					t.Fatal(err)
-				}
-				layers := []plugin.ToolMiddleware{b}
-				if original {
-					track, err := agent.NewBoundedToolTimelineAdapter(timeline)
-					if err != nil {
-						t.Fatal(err)
-					}
-					switch mode {
-					case "timeline-outer", "timeline-failure", "parented":
-						layers = []plugin.ToolMiddleware{track, b}
-					case "timeline-inner":
-						layers = append(layers, track)
-					case "opaque-before", "opaque-pass", "opaque-mask", "opaque-augment", "opaque-forged-result":
-						layers = append([]plugin.ToolMiddleware{dispatchDenialOpaqueLayer{mode: mode, calls: &opaque}}, layers...)
-					case "opaque-inner-unentered":
-						layers = append(layers, dispatchDenialOpaqueLayer{mode: mode, calls: &opaque})
+					ports.project = func(_ context.Context, l budget.Ledger) error {
+						if l.RunCancelled(root) {
+							return cut
+						}
+						return nil
 					}
 				}
-				p, err := agent.NewBoundedToolApproval(func(context.Context, tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
+				b, e := agent.NewBoundedBudgetAdapter(newToolTestLedger(t, s), ports)
+				if e != nil {
+					t.Fatal(e)
+				}
+				policy, e := agent.NewBoundedToolApproval(func(context.Context, tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
 					policies++
 					return plugin.ApprovalNotRequired, nil
 				})
-				if err != nil {
-					t.Fatal(err)
+				if e != nil {
+					t.Fatal(e)
 				}
-				reader := agent.ToolOutcomeVerifierFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }, ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 					reads++
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
-				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, RunMiddleware: []plugin.RunMiddleware{b}, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
-				if original && !retirementMode {
-					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
+				})}
+				if original {
+					d.ApprovalPolicies = []plugin.ApprovalPolicy{policy}
+					if mode == "timeline-inner" || mode == "parented" {
+						d.ToolTimeline, e = agent.NewBoundedToolTimelineAdapter(timeline)
+						if e != nil {
+							t.Fatal(e)
+						}
+					}
 				}
-				r, err := agent.NewRunner(d)
-				if err != nil {
-					t.Fatal(err)
+				r, e := agent.NewRunner(d)
+				if e != nil {
+					t.Fatal(e)
 				}
-				return r
+				return r, rt
 			}
 			req := agent.StartRequest{ID: root, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"read"}}
 			if mode == "parented" {
-				parent, err := observer.Create(ctx, kernel.CreateRequest{ID: "dispatch-denial-parent", Kind: "workflow", Actor: req.Actor, Thread: req.Thread, Goal: "parent", State: json.RawMessage("{}")})
-				if err != nil {
+				if _, err = observer.Create(ctx, kernel.CreateRequest{ID: "dispatch-denial-parent", Kind: "workflow", Budget: &budget.RunEnrollment{ScopeID: scope, Limits: limits}, Actor: req.Actor, Thread: req.Thread, Goal: "parent", State: json.RawMessage(`{}`)}); err != nil {
 					t.Fatal(err)
 				}
-				req.ParentRunID = parent.Run.ID
-				req.OriginFingerprint = agent.FrozenOriginFingerprint([]byte("{}"))
+				req.ParentRunID, req.RequestID, req.OriginFingerprint = "dispatch-denial-parent", "original", agent.FrozenOriginFingerprint([]byte(`{}`))
 			}
-			r := mk(ea1StartRuntime(t, store), useLedger, true)
-			got, outcome, runErr := r.ObservePhysicalCall(ctx, root, plugin.RunStart, func(c context.Context) (kernel.Snapshot, error) { return r.StartRun(c, req) })
-			cur, err := observer.Load(ctx, root)
+			r, _ := makeRunner(store, true)
+			_, _, runErr := r.ObservePhysicalCall(ctx, root, plugin.RunStart, func(c context.Context) (kernel.Snapshot, error) { return r.StartRun(c, req) })
+			fresh := reopen()
+			r, rt := makeRunner(fresh, false)
+			cur, err := rt.Load(ctx, root)
 			if err != nil {
 				t.Fatal(err)
 			}
-			saved, err := ledger.LoadBudget(ctx, scope)
+			saved, err := newToolTestLedger(t, fresh).LoadBudget(ctx, scope)
 			if err != nil {
 				t.Fatal(err)
 			}
-			res := saved.Reservations[id]
-			if cancelled && (store.hits != 1 || !saved.RunCancelled(root) || res.Status != budget.ReservationReleased || res.Active || res.Dispatched) {
-				t.Fatal("real cancellation cut not reached", store.hits, res, runErr)
-			}
-			if writeFault != nil && writeFault.hits != 1 {
-				t.Fatal("dispatch store fault not reached")
-			}
+			res, exists := saved.Reservations[reservation]
 			wantPhysical := 0
 			if mode == "actual-handler-error" {
 				wantPhysical = 1
 			}
-			wantPolicies := 1
-			if retirementMode {
-				wantPolicies = 0
+			if physical != wantPhysical || policies != 1 || reads != 0 || len(m.calls) != 1 || timeline.starts != 0 || timeline.ends != 0 {
+				t.Fatal("denial/unknown crossed original physical boundary", runErr, physical, policies, reads)
 			}
-			if physical != wantPhysical || policies != wantPolicies || reads != 0 || len(m.calls) != 1 || len(res.Receipt) != 0 || res.Usage != (budget.Usage{}) {
-				t.Fatal("original no-send/unknown effect identity changed", physical, policies, reads, len(m.calls), res)
-			}
-			positive := mode == "budget-only" || mode == "timeline-outer" || mode == "timeline-inner" || mode == "parented" || mode == "opaque-inner-unentered"
-			if positive {
-				if !errors.Is(runErr, budget.ErrExhausted) || errors.Is(runErr, agent.ErrRootOutcomeUnknown) || errors.Is(runErr, kernel.ErrChildExecutionBusy) || got.Run.Status != kernel.RunStatusFailed || cur.Run.Status != kernel.RunStatusFailed || outcome.Kind() != agent.PhysicalCallSettled {
-					t.Fatal("exact actual native denial did not terminalize/retire", runErr, got.Run, cur.Run, outcome.Kind())
+			if cancelled {
+				if !errors.Is(runErr, budget.ErrExhausted) || store.hits != 1 || !saved.RunCancelled(root) || exists {
+					t.Fatal("native cancellation manufactured a dispatched reservation", runErr, res)
 				}
-				if _, err = observer.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
-					t.Fatal("exact denial retained grant", err)
-				}
-				wantTimeline := 0
-				if mode == "timeline-outer" || mode == "parented" {
-					wantTimeline = 1
-				}
-				if timeline.starts != wantTimeline || timeline.ends != wantTimeline || opaque != 0 {
-					t.Fatal("unexpected admitted callbacks", timeline, opaque)
-				}
-				return
-			}
-			g, err := observer.LookupChildExecution(ctx, root)
-			if err != nil {
-				t.Fatal("original unresolved grant removed", err)
-			}
-			c, err := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
-			if err != nil {
-				t.Fatal(err)
-			}
-			b, found, err := c.ToolReturns.Find("original-call")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if retirementMode {
-				if store.cuts != 2 || !errors.Is(runErr, cut) || !c.HostCompleted || !found || !b.Unsent || c.ControlCustody != kernel.OwnedCustodyScoped {
-					t.Fatal("original no-send proof missing", runErr, c, b)
-				}
-				stage := strings.TrimPrefix(mode, "retirement-")
-				fault := &returnedRootRetirementFault{managedStorePorts: base.(managedStorePorts), mode: stage}
-				r = mk(ea1StartRuntime(t, fault), ledger, false)
-				original, err := r.RootDeferredCleanupEligibility(ctx, root, cur.Run.Revision)
-				if err != nil || !original.Valid() || original.RetirementOnly() {
-					t.Fatal("original receipt scope missing", err)
-				}
-				_, err = r.ReconcileRootDeferredChildren(ctx, root, cur.Run.Revision, original)
-				if !errors.Is(err, errReturnedRootRetirementCut) || fault.hits != 1 || fault.grant != g {
-					t.Fatal("receipt/retirement cut not reached", err, fault.hits, fault.grant)
-				}
-				rt := ea1StartRuntime(t, reopen())
-				l := reopenLedger()
-				r = mk(rt, l, false)
-				before, err := rt.Load(ctx, root)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, marked, err := agent.FrozenPendingDispatch(before)
-				if err != nil || marked != (stage == "recovery-before") {
-					t.Fatal("unexpected persisted marker", stage, marked, err)
-				}
-				receipt, receiptErr := rt.LoadOwnedRetirement(ctx, g.ID)
-				switch stage {
-				case "finish-ack":
-					if receiptErr != nil {
-						t.Fatal(receiptErr)
+				if mode == "terminal-before" || mode == "terminal-ack" {
+					if !errors.Is(runErr, cut) || fault.failures != 1 || (cur.Run.Status == kernel.RunStatusFailed) != fault.after || saved.FinishedRuns[root] != fault.after {
+						t.Fatal("terminal Run/accounting split at cut", runErr, cur.Run, saved.FinishedRuns)
 					}
-					if !receipt.Valid() || receipt.Evidence.Grant != g || receipt.Evidence.Completion != c {
-						t.Fatal("wrong original retirement", receipt)
+				} else if cur.Run.Status != kernel.RunStatusFailed || !saved.FinishedRuns[root] {
+					t.Fatal("native denial did not close original lifetime", runErr, cur.Run)
+				}
+				if mode == "parented" && saved.RunCancelled("dispatch-denial-parent") {
+					t.Fatal("native child denial cancelled its parent")
+				}
+				if mode == "projection-failure" {
+					// Native no-send/terminal accounting is known, but the
+					// original Host projection never acknowledged its return.
+					if !errors.Is(runErr, cut) || !errors.Is(runErr, agent.ErrRootOutcomeUnknown) {
+						t.Fatal("failed projection acquired completed return", runErr)
 					}
-				default:
-					if !errors.Is(receiptErr, kernel.ErrNotFound) {
-						t.Fatal("premature retirement", receiptErr)
+					g, err := rt.LookupChildExecution(ctx, root)
+					if err != nil {
+						t.Fatal("unknown projection lost original grant", err)
 					}
-				}
-				if err = rt.VerifyReturnedRootSettlement(ctx, before); err != nil {
-					t.Fatal("exact returned original scope not observable", stage, err)
-				}
-				next, err := r.RootDeferredCleanupEligibility(ctx, root, before.Run.Revision)
-				if err != nil || !original.Matches(next) || next.RetirementOnly() == marked {
-					t.Fatal("same original retirement scope not selected", stage, err)
-				}
-				if _, err = r.ReconcileRootDeferredChildren(ctx, root, before.Run.Revision, agent.RootDeferredCleanupScope{}); !errors.Is(err, kernel.ErrExecutionConflict) {
-					t.Fatal("foreign cleanup scope accepted", err)
-				}
-				before, err = r.ReconcileRootDeferredChildren(ctx, root, before.Run.Revision, original)
-				if err != nil {
-					t.Fatal("receipt-only retirement did not converge", stage, err)
-				}
-				final, err := rt.Cancel(ctx, root, before.Run.Revision, "finish original elected cancellation")
-				if err != nil || final.Run.Status != kernel.RunStatusCancelled || physical != 0 || policies != 0 || reads != 0 || len(m.calls) != 1 {
-					t.Fatal("original retirement did not permit elected control", err, final.Run, physical, reads)
-				}
-				acked, err := rt.LoadOwnedRetirement(ctx, g.ID)
-				if err != nil || !acked.Valid() || acked.Evidence.Grant != g || acked.Evidence.Completion != c || (receiptErr == nil && acked.Identity() != receipt.Identity()) {
-					t.Fatal("original retirement identity changed", err, acked)
+					c, err := rt.LookupPhysicalCallbackReturn(ctx, g)
+					if err != nil || c.HostCompleted || c.ControlCustody != "" || r.VerifiedDeferredRootControl(ctx, rt, cur) {
+						t.Fatal("failed projection manufactured control custody", err, c)
+					}
+					if err = r.ReconcilePhysicalExecution(ctx, root); !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+						t.Fatal("replacement retired unknown original projection", err)
+					}
+					return
 				}
 				if _, err = rt.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
-					t.Fatal("original grant retained", err)
+					t.Fatal("known pre-dispatch denial retained physical custody", err)
 				}
 				return
 			}
-			if mode == "cleanup-cas" {
-				if store.cuts != 2 || !errors.Is(runErr, cut) || !c.HostCompleted || !found || !b.Unsent || b.ReceiptDigest != "" || b.PendingKind != "" {
-					t.Fatal("qualified original no-send proof lost on cleanup failure", runErr, c, b, store.cuts)
+			if mode != "actual-handler-error" && fault.failures != 1 {
+				t.Fatal("native dispatch commit fault not reached", runErr)
+			}
+			committed := mode != "dispatch-write-before"
+			_, pending, err := agent.FrozenPendingDispatch(cur)
+			if err != nil || pending != committed || exists != committed || committed && (!res.Dispatched || res.Status != budget.ReservationHeld || len(res.Receipt) != 0 || res.Usage != (budget.Usage{})) || saved.FinishedRuns[root] {
+				t.Fatal("Store/handler error certified speculative no-send", runErr, res, pending)
+			}
+			if committed {
+				if _, err = r.Resume(ctx, root, cur.Run.Revision); !errors.Is(err, agent.ErrToolOutcomeUnknown) || physical != wantPhysical || len(m.calls) != 1 {
+					t.Fatal("unknown admitted dispatch replayed", err, physical)
 				}
-				rt := ea1StartRuntime(t, reopen())
-				l := reopenLedger()
-				r = mk(rt, l, false)
-				staged, err := r.Resume(ctx, root, cur.Run.Revision)
-				if err != nil || !bytes.Contains(staged.State, []byte(`"phase":"unsent"`)) || physical != 0 || reads != 0 {
-					t.Fatal("original native refusal could not recover without verifier", err, staged.Run, physical, reads)
+				if _, err = rt.Cancel(ctx, root, cur.Run.Revision, "unknown effects"); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+					t.Fatal("unknown dispatch permitted cancellation", err)
 				}
-				if _, err = rt.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
-					t.Fatal("recovered no-send marker retained grant", err)
-				}
-				final, err := rt.Cancel(ctx, root, staged.Run.Revision, "finish elected cancellation")
-				if err != nil || final.Run.Status != kernel.RunStatusCancelled {
-					t.Fatal("original elected control still blocked", err, final.Run)
-				}
-				return
-			}
-			if !errors.Is(runErr, agent.ErrRootOutcomeUnknown) || outcome.Kind() == agent.PhysicalCallSettled || b.Unsent || cur.Run.Status != kernel.RunStatusRunning {
-				t.Fatal("unknown/opaque callback was qualified as unsent", runErr, c, b, cur.Run)
-			}
-			if mode == "projection-failure" && projection != 1 {
-				t.Fatal("projection fault not reached", projection)
-			}
-			if mode == "timeline-failure" && (timeline.starts != 1 || timeline.ends != 1) {
-				t.Fatal("timeline fault not reached", timeline)
-			}
-			if mode == "opaque-before" || mode == "opaque-pass" || mode == "opaque-mask" || mode == "opaque-augment" || mode == "opaque-forged-result" {
-				if opaque != 1 {
-					t.Fatal("opaque layer not entered", opaque)
-				}
-			}
-			if mode == "dispatch-write-before" && res.Dispatched || (mode == "dispatch-write-ack" || mode == "actual-handler-error") && !res.Dispatched {
-				t.Fatal("unexpected actual dispatch fact", mode, res)
-			}
-			rt := ea1StartRuntime(t, reopen())
-			l := reopenLedger()
-			r = mk(rt, l, false)
-			_, err = r.Resume(ctx, root, cur.Run.Revision)
-			if !errors.Is(err, agent.ErrToolOutcomeUnknown) || physical != wantPhysical || reads != 0 {
-				t.Fatal("unknown mode redispatched or used unqualified receipt", mode, err, physical, reads)
-			}
-			if _, err = rt.Cancel(ctx, root, cur.Run.Revision, "unknown effects"); !errors.Is(err, kernel.ErrChildExecutionBusy) {
-				t.Fatal("unknown grant allowed cancellation", err)
 			}
 		})
 	}

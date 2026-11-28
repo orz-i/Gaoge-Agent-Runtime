@@ -43,17 +43,21 @@ type resumeTurnFaultStore struct {
 	failed atomic.Bool
 }
 
-func (store *resumeTurnFaultStore) Apply(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	for _, event := range mutation.Events {
-		if event.Type == "agent.model_invocation.pending" && store.failed.CompareAndSwap(false, true) {
-			if _, err := store.Store.Apply(ctx, id, revision, mutation); err != nil {
-				return kernel.Snapshot{}, err
+func (store *resumeTurnFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control == nil {
+		for _, event := range commitMutation.Events {
+			if event.Type == "agent.model_invocation.pending" && store.failed.CompareAndSwap(false, true) {
+				if _, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); err != nil {
+					return kernel.Snapshot{}, false, err
+				}
+				return kernel.Snapshot{}, false, errResumeTurnInterrupted
 			}
-			return kernel.Snapshot{}, errResumeTurnInterrupted
 		}
+		return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return store.Store.Apply(ctx, id, revision, mutation)
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func newResumeTurnHarness(t *testing.T, store kernel.Store, sessionStore harness.Store, provider model.Client, clock *resumeTurnClock, configure func(*agent.Dependencies)) (*harness.Runner, *kernel.Runtime) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: clock})
@@ -389,13 +393,13 @@ type interleavedResumeStore struct {
 	onResume func()
 }
 
-func (s *interleavedResumeStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *interleavedResumeStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	if p.Candidate().Grant.AdmissionOperation == "resume" && s.onResume != nil {
 		f := s.onResume
 		s.onResume = nil
 		f()
 	}
-	return s.Store.BeginOwnedPhysicalExecution(ctx, p)
+	return s.Store.BeginPhysicalExecution(ctx, p)
 }
 
 // A Ready delivery may finish the original Agent before the competing

@@ -53,8 +53,11 @@ func TestIssue107TerminalPhysicalSettlementStateMatrix(t *testing.T) {
 		"completed but unconsumed model": func(s *runState) {
 			s.ModelInvocations = []ModelInvocation{{ID: "receipt", Status: ModelInvocationCompleted}}
 		},
-		"unsettled Tool wait":         func(s *runState) { s.ToolDispatchID = "pending-tool"; s.ToolWait = &PendingTool{} },
-		"unsettled deferred children": func(s *runState) { s.DeferredChildren = []deferredChildCall{{}} },
+		"unsettled Tool wait": func(s *runState) {
+			s.ToolDispatchID = "pending-tool"
+			s.ToolReturns = []returnedTool{{CallID: "pending-tool", Wait: &PendingTool{}}}
+		},
+		"unsettled deferred children": func(s *runState) { s.ToolReturns = []returnedTool{{Wait: &PendingTool{}}} },
 		"unconsumed external signals": func(s *runState) { s.ExternalSignals = []ExternalToolResultSignal{{}} },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -89,7 +92,7 @@ func TestIssue107TerminalPhysicalSettlementStateMatrix(t *testing.T) {
 		},
 		"duplicate signal": func(s *runState) { s.ExternalSignals = append(s.ExternalSignals, signal) },
 		"duplicate result": func(s *runState) { s.Messages = append(s.Messages, s.Messages[0]) },
-		"staged result":    func(s *runState) { s.RecoveredTools = []rootToolReceipt{{Call: call}} },
+		"staged result":    func(s *runState) { s.ToolReturns = []returnedTool{{CallID: call.ID, Outcome: &toolOutcomeReceipt{}}} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			state := history

@@ -115,7 +115,7 @@ func TestModelInvocationKnownRejectionHasOneToolFreeTerminalRepair(t *testing.T)
 				t.Fatalf("known completion usage lost: %+v", view.Budget.Usage)
 			}
 			for _, invocation := range view.ModelInvocations {
-				if invocation.Status != agent.ModelInvocationConsumed || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.Usage == nil || invocation.Response.Usage == nil || invocation.ExecutionLeaseUntil != nil {
+				if invocation.Status != agent.ModelInvocationConsumed || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.Response.Usage == nil || invocation.ExecutionLeaseUntil != nil {
 					t.Fatalf("known completion left pending: %+v", invocation)
 				}
 				if invocation.ErrorCode != "" && (invocation.Response.Content != "" ||
@@ -153,7 +153,7 @@ func TestNamedRejectedResponseWithoutPhysicalIDIsNotBillable(t *testing.T) {
 		state.Budget.Usage.OutputTokens != 0 || len(state.ModelInvocations) != 1 ||
 		state.ModelInvocations[0].Status != agent.ModelInvocationPending ||
 		state.ModelInvocations[0].ProviderResponseID != "" ||
-		state.ModelInvocations[0].Usage != nil || state.ModelInvocations[0].Response.ResponseID != "" ||
+		state.ModelInvocations[0].Response.Usage != nil || state.ModelInvocations[0].Response.ResponseID != "" ||
 		len(state.ModelInvocations[0].Response.ToolCalls) != 0 {
 		t.Fatalf("ID-less unverified completion was persisted/billed: budget=%+v invocations=%+v",
 			state.Budget.Usage, state.ModelInvocations)
@@ -430,9 +430,8 @@ func TestModelInvocationPersistsStreamingResponseMetadata(t *testing.T) {
 	}
 	invocation := view.ModelInvocations[0]
 	if invocation.Provider != "fault-test-provider" || invocation.ProviderResponseID != "resp_stream_1" ||
-		invocation.Response.ResponseID != "resp_stream_1" || invocation.Usage == nil ||
-		invocation.Usage.InputTokens != 7 || invocation.Usage.OutputTokens != 3 ||
-		invocation.Response.Usage == nil || invocation.Response.Usage.InputTokens != 7 {
+		invocation.Response.ResponseID != "resp_stream_1" || invocation.Response.Usage == nil ||
+		invocation.Response.Usage.InputTokens != 7 || invocation.Response.Usage.OutputTokens != 3 {
 		t.Fatalf("durable provider metadata = %#v", invocation)
 	}
 	if invocation.RequestHash == "" || invocation.SourceRevision == 0 || invocation.CreatedAt.IsZero() ||
@@ -449,29 +448,46 @@ type modelInvocationFaultStore struct {
 	failed      bool
 }
 
-func (store *modelInvocationFaultStore) Apply(
-	ctx context.Context,
-	runID string,
-	expectedRevision uint64,
-	mutation kernel.StoreMutation,
-) (kernel.Snapshot, error) {
-	store.mu.Lock()
-	shouldFail := !store.failed && mutationHasEvent(mutation.Events, store.eventType)
-	if shouldFail {
-		store.failed = true
+func (store *modelInvocationFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		store.mu.Lock()
+		shouldFail := !store.failed && mutationHasEvent(commitMutation.Events, store.eventType)
+		if shouldFail {
+			store.failed = true
+		}
+		store.mu.Unlock()
+		if !shouldFail {
+			return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		}
+		if !store.afterCommit {
+			return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
+		}
+		snapshot, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return snapshot, false, err
+		}
+		return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
 	}
-	store.mu.Unlock()
-	if !shouldFail {
-		return store.Store.Apply(ctx, runID, expectedRevision, mutation)
+	if commitAuth.Recovery != nil || commitAuth.Lease != nil {
+		store.mu.Lock()
+		fail := !store.failed && mutationHasEvent(commitMutation.Events, store.eventType)
+		if fail {
+			store.failed = true
+		}
+		store.mu.Unlock()
+		if fail && !store.afterCommit {
+			return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
+		}
+		out, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return out, false, err
+		}
+		if fail {
+			return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
+		}
+		return out, false, nil
 	}
-	if !store.afterCommit {
-		return kernel.Snapshot{}, errInjectedModelInvocationCrash
-	}
-	snapshot, err := store.Store.Apply(ctx, runID, expectedRevision, mutation)
-	if err != nil {
-		return snapshot, err
-	}
-	return kernel.Snapshot{}, errInjectedModelInvocationCrash
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func mutationHasEvent(events []kernel.EventDraft, eventType string) bool {

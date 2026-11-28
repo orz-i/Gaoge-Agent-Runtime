@@ -31,23 +31,26 @@ type sqlA2AControlPause struct {
 	once      sync.Once
 }
 
-func (s *sqlA2AControlPause) Apply(ctx context.Context, runID string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snapshot, err := s.Store.Apply(ctx, runID, rev, m)
-	if err != nil {
-		return snapshot, err
-	}
-	for _, event := range m.Events {
-		if event.Type != s.event {
-			continue
+func (s *sqlA2AControlPause) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		snapshot, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return snapshot, false, err
 		}
-		s.once.Do(func() { close(s.committed) })
-		select {
-		case <-s.release:
-		case <-ctx.Done():
-			return snapshot, ctx.Err()
+		for _, event := range commitMutation.Events {
+			if event.Type != s.event {
+				continue
+			}
+			s.once.Do(func() { close(s.committed) })
+			select {
+			case <-s.release:
+			case <-commitCtx.Done():
+				return snapshot, false, commitCtx.Err()
+			}
 		}
+		return snapshot, false, nil
 	}
-	return snapshot, nil
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type sqlA2AControlRemote struct {

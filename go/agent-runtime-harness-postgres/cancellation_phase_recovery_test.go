@@ -20,6 +20,7 @@ type cancellationPhaseCut struct {
 	phase, intentID string
 	armed, hit      bool
 	relations       *runrelation.Registry
+	budget          *harness.BudgetAuthority
 }
 
 func (s *cancellationPhaseCut) setGenerationRelations(relations *runrelation.Registry) {
@@ -47,24 +48,44 @@ func (s *cancellationPhaseCut) AppendItem(ctx context.Context, item harness.Item
 	return saved, fresh, err
 }
 
-func (s *cancellationPhaseCut) SaveBudget(ctx context.Context, ledger budget.Ledger, revision uint64) error {
-	cut := s.armed && !s.hit && strings.HasPrefix(s.phase, "budget-") && ledger.View("").Cancelled
-	if cut && strings.HasSuffix(s.phase, "before") {
-		s.hit = true
-		return errCancellationPhaseCut
+// Preserve the real backend's native capabilities while injecting only the
+// first terminal control COMMIT. Accounting is part of this transaction.
+type generationKernelPorts interface {
+	kernel.Store
+	kernel.ExecutionStore
+	kernel.PhysicalExecutionStore
+	kernel.ExecutionCustodyStore
+	kernel.ExecutionQuarantineStore
+	budget.LedgerStore
+}
+type generationControlCut struct {
+	generationKernelPorts
+	phase *cancellationPhaseCut
+}
+
+func (s *cancellationPhaseCut) setGenerationBudget(b *harness.BudgetAuthority) { s.budget = b }
+func (s *cancellationPhaseCut) wrapGenerationKernel(k kernel.Store) kernel.Store {
+	return &generationControlCut{generationKernelPorts: k.(generationKernelPorts), phase: s}
+}
+func (s *generationControlCut) Commit(ctx context.Context, id string, revision uint64, m kernel.StoreMutation, a kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	p := s.phase
+	cut := p.armed && !p.hit && strings.HasPrefix(p.phase, "control-") && a.Control != nil && a.Control.Kind == kernel.ControlCancel
+	if cut && strings.HasSuffix(p.phase, "before") {
+		p.hit = true
+		return kernel.Snapshot{}, false, errCancellationPhaseCut
 	}
-	err := s.generationStore.SaveBudget(ctx, ledger, revision)
+	out, applied, err := s.generationKernelPorts.Commit(ctx, id, revision, m, a)
 	if err == nil && cut {
-		s.hit = true
-		return errCancellationPhaseCut
+		p.hit = true
+		return kernel.Snapshot{}, false, errCancellationPhaseCut
 	}
-	return err
+	return out, applied, err
 }
 
 func TestNativeRootCancellationReplaysEveryDurablePhase(t *testing.T) {
 	for _, backend := range generationBackends {
 		for _, replacement := range []bool{false, true} {
-			for _, phase := range []string{"intent-before", "intent-ack-loss", "budget-before", "budget-ack-loss", "projection-before", "projection-ack-loss", "completion-before", "completion-ack-loss"} {
+			for _, phase := range []string{"control-before", "control-ack-loss", "projection-before", "projection-ack-loss"} {
 				name := backend + "/original/" + phase
 				if replacement {
 					name = backend + "/replacement/" + phase
@@ -98,11 +119,8 @@ func TestNativeRootCancellationReplaysEveryDurablePhase(t *testing.T) {
 					}
 					// Reconstruct the Harness/controller over the persisted original
 					// route and Store. No remembered phase or fresh intent is used.
-					shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Ledgers: store, Relations: cut.relations, Clock: generationClock{}})
-					if err != nil {
-						t.Fatal(err)
-					}
-					route, err := handoff.NewDeferredAgent(native)
+					shared := cut.budget
+					route, err := handoff.New(handoff.Config{Local: native, PrepareLocal: true})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -157,7 +175,7 @@ func TestRootPhaseRecoveryDoesNotBorrowCustomCancellerAuthority(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var cut *cancellationPhaseCut
 			r, store, rt, native, request := newGenerationHarnessBackend(t, backend, &generationModel{}, func(base generationStore) generationStore {
-				cut = &cancellationPhaseCut{generationStore: base, phase: "intent-ack-loss"}
+				cut = &cancellationPhaseCut{generationStore: base, phase: "control-ack-loss"}
 				return cut
 			})
 			started, err := r.StartAgentTurn(t.Context(), request)
@@ -169,7 +187,7 @@ func TestRootPhaseRecoveryDoesNotBorrowCustomCancellerAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			custom := &uncertainPhaseCanceller{}
-			route, err := handoff.NewDeferredAgent(native)
+			route, err := handoff.New(handoff.Config{Local: native, PrepareLocal: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -181,8 +199,18 @@ func TestRootPhaseRecoveryDoesNotBorrowCustomCancellerAuthority(t *testing.T) {
 				t.Fatalf("unknown Host cleanup inherited native proof: calls=%d err=%v", custom.calls, err)
 			}
 			items, err := store.ListItems(t.Context(), started.Turn.ID, 0, 500)
-			if err != nil || !harness.ActiveCancellationFence(items) {
-				t.Fatalf("uncertain Host route lost its protective fence: %v", err)
+			if err != nil || harness.ActiveCancellationFence(items) {
+				t.Fatalf("foreign canceller elected separate authority: %v", err)
+			}
+			root, _ := harness.TopLevelInvocation(started)
+			childID := started.Subtasks[0].RunID
+			parent, pe := rt.Load(t.Context(), root.ExecutionRefID)
+			child, ce := rt.Load(t.Context(), childID)
+			if pe != nil || ce != nil || (parent.Run.Status != kernel.RunStatusCancelled && child.Run.Status != kernel.RunStatusCancelled) {
+				t.Fatalf("lost ACK did not retain original native control fact: parent=%s child=%s %v %v", parent.Run.Status, child.Run.Status, pe, ce)
+			}
+			if out, e := r.Cancel(t.Context(), started.Turn.ID, "resume original native control"); e != nil || out.Turn.Status != harness.TurnCancelled {
+				t.Fatalf("native control could not recover: %s %v", out.Turn.Status, e)
 			}
 		})
 	}

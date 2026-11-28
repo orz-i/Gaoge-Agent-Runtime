@@ -117,7 +117,7 @@ func TestAnthropicRejectedContentBadDeltaNeverCertifiesAgentCompletion(t *testin
 				len(view.ModelInvocations) != 2 ||
 				view.ModelInvocations[1].Status != agent.ModelInvocationPending ||
 				view.ModelInvocations[1].ProviderResponseID != "" ||
-				view.ModelInvocations[1].Usage != nil ||
+				view.ModelInvocations[1].Response.Usage != nil ||
 				len(view.ModelInvocations[1].Response.ToolCalls) != 0 ||
 				view.ModelInvocations[1].Response.ProviderReplay != nil {
 				t.Fatalf("malformed SSE minted durable paid ModelInvocation: budget=%+v invocations=%+v",

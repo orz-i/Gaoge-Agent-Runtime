@@ -49,7 +49,7 @@ func TestUnstartedRetryCancellationPreservesHistoricalHandoffProof(t *testing.T)
 	}
 	all := append(append([]Item(nil), facts...), intent)
 	accepted := func(children ...Invocation) bool {
-		return ValidUndispatchedRootCancellationEvidence(next, turn, all, true, &ledger, children)
+		return validUnstartedRetryHistoricalChildren(next, children, all, &ledger)
 	}
 	if !accepted(completedChild) {
 		t.Fatal("complete terminal Handoff from previous Attempt blocked its unstarted successor cancellation")
@@ -78,7 +78,7 @@ func TestUnstartedRetryCancellationPreservesHistoricalHandoffProof(t *testing.T)
 	all[len(all)-1].Seq = 7
 	all[len(all)-1].RunID = third.ExecutionRefID
 	all[len(all)-1].Payload = json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"third-root-run"}`)
-	if !ValidUndispatchedRootCancellationEvidence(third, turn, all, true, &ledger, []Invocation{completedChild}) {
+	if !validUnstartedRetryHistoricalChildren(third, []Invocation{completedChild}, all, &ledger) {
 		t.Fatal("multi-Attempt original terminal Handoff chain incorrectly rejected")
 	}
 
@@ -115,7 +115,7 @@ func TestUnstartedRetryCancellationPreservesHistoricalHandoffProof(t *testing.T)
 			items := append([]Item(nil), all...)
 			currentLedger := budget.CloneLedger(ledger)
 			tc.change(&child, &items, &currentLedger)
-			if ValidUndispatchedRootCancellationEvidence(third, turn, items, true, &currentLedger, []Invocation{child}) {
+			if validUnstartedRetryHistoricalChildren(third, []Invocation{child}, items, &currentLedger) {
 				t.Fatal("unverified historical Handoff escaped the original physical effect fence")
 			}
 		})

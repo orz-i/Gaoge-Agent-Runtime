@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -14,6 +15,7 @@ var errReturnedRootRetirementCut = errors.New("original returned Root retirement
 
 type returnedRootRetirementFault struct {
 	managedStorePorts
+	budget.LedgerStore
 	mode, recoveryCallID string
 	dead                 bool
 	hits                 int
@@ -37,19 +39,26 @@ func (s *returnedRootRetirementFault) matchesRecovery(m kernel.StoreMutation) bo
 	}
 	return false
 }
-func (s *returnedRootRetirementFault) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	if s.dead {
-		return kernel.Snapshot{}, errReturnedRootRetirementCut
+
+func (s *returnedRootRetirementFault) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Recovery != nil {
+		g := commitAuth.Recovery.Grant
+
+		if s.dead {
+			return kernel.Snapshot{}, false, errReturnedRootRetirementCut
+		}
+		if s.mode == "recovery-before" && s.matchesRecovery(commitMutation) {
+			return kernel.Snapshot{}, false, s.cut(g)
+		}
+		next, _, err := s.managedStorePorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.mode == "recovery-ack" && s.matchesRecovery(commitMutation) {
+			return kernel.Snapshot{}, false, s.cut(g)
+		}
+		return next, false, err
 	}
-	if s.mode == "recovery-before" && s.matchesRecovery(m) {
-		return kernel.Snapshot{}, s.cut(g)
-	}
-	next, err := s.managedStorePorts.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
-	if err == nil && s.mode == "recovery-ack" && s.matchesRecovery(m) {
-		return kernel.Snapshot{}, s.cut(g)
-	}
-	return next, err
+	return s.managedStorePorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func (s *returnedRootRetirementFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.dead {
 		return errReturnedRootRetirementCut

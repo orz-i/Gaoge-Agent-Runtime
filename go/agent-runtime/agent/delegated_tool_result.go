@@ -57,9 +57,8 @@ func approvalSourceDigest(q tools.ExecutionRequest, checkpoint *kernel.Checkpoin
 }
 
 func qualifiedOwnerToolReceipt(call tools.Call, result tools.ExecutionResult, approval string) (delegatedToolReceipt, bool) {
-	if !validBindingFingerprint(approval) || result.Receipt.ExecutionID != call.ID ||
-		result.Receipt.Disposition != "committed" || !validBindingFingerprint(result.Receipt.OwnerReceiptDigest) ||
-		result.Pending != nil || tools.ValidateExecutionResult(result) != nil {
+	if !validBindingFingerprint(approval) || !validBindingFingerprint(result.Receipt.OwnerReceiptDigest) ||
+		!validCommittedToolResult(result, call.ID) {
 		return delegatedToolReceipt{}, false
 	}
 	raw, err := encodeToolOutcome(newToolOutcomeReceipt(result, nil))
@@ -139,7 +138,7 @@ func (a *approvedToolCalls) committed(s kernel.Snapshot, state runState, call to
 // pendingReturn captures the actual qualified return before its state CAS.
 // The descriptor selects only the wait transport, never approval custody.
 func (a *approvedToolCalls) pendingReturn(s kernel.Snapshot, state runState, call tools.Call, result tools.ExecutionResult) {
-	kind := qualifiedPendingKind(result, nil, call.ID)
+	_, kind := qualifyToolReturn(result, nil, call.ID)
 	if kind == "" {
 		return
 	}
@@ -167,26 +166,25 @@ func (a *approvedToolCalls) allBound() bool {
 func (r *Runner) VerifyDeferredToolResults(ctx context.Context, rt *kernel.Runtime, child kernel.Snapshot) bool {
 	if r == nil || rt == nil || r.runtime != rt || r.delegatedToolResults == nil ||
 		child.Run.Status != kernel.RunStatusCompleted || !TerminalPhysicalEffectsSettled(child) ||
-		rt.VerifyCompletedToolReturn(ctx, child) != nil {
+		rt.VerifyExecutionCustody(ctx, child, kernel.CustodyCompletedTool) != nil {
 		return false
 	}
 	state, err := decodeState(child.State)
-	return err == nil && len(state.RecoveredTools) == 0 && len(state.DelegatedToolReceipts) > 0 && r.verifyToolHistory(ctx, child.Run.ID, state)
+	return err == nil && state.recoveredToolCount() == 0 && len(state.DelegatedToolReceipts) > 0 && r.verifyToolHistory(ctx, child.Run.ID, state)
 }
 
 func (r *Runner) verifyToolHistory(ctx context.Context, runID string, state runState) bool {
 	if r.delegatedToolResults == nil || len(state.DelegatedToolReceipts) != state.Budget.Usage.ToolCalls {
 		return false
 	}
-	seen := make(map[string]bool, len(state.DelegatedToolReceipts)+len(state.RecoveredTools))
+	seen := make(map[string]bool)
 	verify := func(receipt delegatedToolReceipt) bool {
 		if receipt.Call.ID == "" || seen[receipt.Call.ID] || !validBindingFingerprint(receipt.ResultDigest) {
 			return false
 		}
 		seen[receipt.Call.ID] = true
-		result, err := r.delegatedToolResults.VerifyCommittedTool(ctx, tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(receipt.Call)})
-		if err != nil || result.Receipt.ExecutionID != receipt.Call.ID || result.Receipt.Disposition != "committed" ||
-			result.Pending != nil || tools.ValidateExecutionResult(result) != nil {
+		result, err := verifyCommittedTool(ctx, r.delegatedToolResults, tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(receipt.Call)})
+		if err != nil {
 			return false
 		}
 		if receipt.ApprovalDigest != "" {
@@ -204,9 +202,13 @@ func (r *Runner) verifyToolHistory(ctx context.Context, runID string, state runS
 	// while the business loop has not incremented local usage. These staged
 	// physical facts must independently qualify too; a zero usage count is
 	// not proof that there are no original Tool obligations.
-	for _, staged := range state.RecoveredTools {
-		receipt, ok := qualifiedOwnerToolReceipt(staged.Call, staged.Result, staged.ApprovalDigest)
-		if staged.Rejection != nil || !ok || !verify(receipt) {
+	for _, staged := range state.ToolReturns {
+		if staged.Outcome == nil {
+			continue
+		}
+		call, found := state.pendingCall(staged.CallID)
+		receipt, ok := qualifiedOwnerToolReceipt(call, staged.Outcome.Result, staged.ApprovalDigest)
+		if !found || staged.Outcome.ErrorCode != "" || !ok || !verify(receipt) {
 			return false
 		}
 	}

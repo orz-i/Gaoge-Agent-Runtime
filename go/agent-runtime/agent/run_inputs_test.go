@@ -14,7 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -378,17 +377,20 @@ type runInputACKLossStore struct {
 	lost atomic.Bool
 }
 
-func (store *runInputACKLossStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	result, err := store.Store.ApplyExecution(ctx, lease, revision, mutation)
-	if err != nil {
-		return result, err
-	}
-	for _, event := range mutation.Events {
-		if event.Type == "agent.input_applied" && store.lost.CompareAndSwap(false, true) {
-			return kernel.Snapshot{}, errRunInputACKLost
+func (store *runInputACKLossStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		result, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return result, false, err
 		}
+		for _, event := range commitMutation.Events {
+			if event.Type == "agent.input_applied" && store.lost.CompareAndSwap(false, true) {
+				return kernel.Snapshot{}, false, errRunInputACKLost
+			}
+		}
+		return result, false, nil
 	}
-	return result, nil
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestRunInputCommittedCursorACKLossDoesNotRedeliverOrDispatchEarly(t *testing.T) {
@@ -442,38 +444,5 @@ func TestRunInputCommittedCursorACKLossDoesNotRedeliverOrDispatchEarly(t *testin
 	completed, err := reopened.Resume(t.Context(), current.Run.ID, current.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || calls != 1 {
 		t.Fatalf("could not recover original input once: %v status=%s calls=%d", err, completed.Run.Status, calls)
-	}
-}
-
-var errRunInputHostTail = errors.New("fixture unknown Host middleware tail")
-
-type inputHostTailMiddleware struct{}
-
-func (inputHostTailMiddleware) Name() string { return "fixture.input-host-tail" }
-func (inputHostTailMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	result, err := next(ctx)
-	if err != nil {
-		return result, err
-	}
-	return result, errRunInputHostTail
-}
-
-func TestRunInputBoundaryCannotSettleUnrelatedHostCallbackFailure(t *testing.T) {
-	rt, _ := newTestRuntimeAndApprovals(t)
-	queue, _ := agent.NewMemoryRunInputs("inputs-v1")
-	client := progressModelFunc(func(context.Context, model.Request) (model.Response, error) {
-		return model.Response{Content: "done"}, nil
-	})
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, Inputs: queue,
-		RunMiddleware: []plugin.RunMiddleware{inputHostTailMiddleware{}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := runner.StartRun(t.Context(), startRequest("input-host-tail", "request", "start"))
-	if !errors.Is(err, errRunInputHostTail) || !errors.Is(err, agent.ErrRootOutcomeUnknown) {
-		t.Fatalf("input frame upgraded unrelated Host failure: %v", err)
-	}
-	if _, err = rt.LookupChildExecution(t.Context(), result.Run.ID); err != nil {
-		t.Fatalf("unsettled original callback grant was retired: %v", err)
 	}
 }

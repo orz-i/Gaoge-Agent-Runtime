@@ -18,18 +18,19 @@ type lostPGApplyResponseStore struct {
 	once bool
 }
 
-func (store *lostPGApplyResponseStore) Apply(
-	ctx context.Context, runID string, revision uint64, mutation kernel.StoreMutation,
-) (kernel.Snapshot, error) {
-	committed, err := store.Store.Apply(ctx, runID, revision, mutation)
-	if err != nil {
-		return committed, err
+func (store *lostPGApplyResponseStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		committed, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return committed, false, err
+		}
+		if !store.once {
+			store.once = true
+			return kernel.Snapshot{}, false, errSimulatedLostPGApplyReply
+		}
+		return committed, false, nil
 	}
-	if !store.once {
-		store.once = true
-		return kernel.Snapshot{}, errSimulatedLostPGApplyReply
-	}
-	return committed, nil
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 // The caller learns nothing from a lost SQL response alone. A new PostgreSQL

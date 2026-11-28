@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
@@ -17,11 +18,11 @@ import (
 // This is a hydration-layer vector in the existing Root Start P0/P1 suite.
 // It does not claim that a computed checkpoint proves archive persistence.
 func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store), automatic bool) {
-	for _, mode := range []string{"bounded", "opaque", "foreign-hydration"} {
+	for _, mode := range []string{"bounded", "foreign-hydration"} {
 		t.Run("P1/callback-completion-"+mode, func(t *testing.T) {
 			backing, peer := factory(t)
 			injected := errors.New("original pending intent CAS denied before commit")
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: "agent.model_invocation.pending", injected: injected}
+			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "agent.model_invocation.pending", injected: injected}
 			rt := ea1StartRuntime(t, fault)
 			observer := ea1StartRuntime(t, peer)
 			request := ea1AdmissionRequest()
@@ -30,12 +31,15 @@ func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store,
 			if err != nil {
 				t.Fatal(err)
 			}
-			var middleware plugin.RunMiddleware = bounded
-			if mode == "opaque" {
-				middleware = &ea1AdmissionMiddleware{}
-			}
 			physical := &ea1AdmissionModel{}
-			runner := ea1AdmissionConfiguredRunner(t, rt, physical, middleware, automatic)
+			d := agent.Dependencies{Runtime: rt, Model: physical, BoundedContext: bounded}
+			if !automatic {
+				d.RunExecution = &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}
+			}
+			runner, err := agent.NewRunner(d)
+			if err != nil {
+				t.Fatal(err)
+			}
 			_, firstErr := runner.StartRun(t.Context(), request)
 			if firstErr == nil || physical.calls.Load() != 0 {
 				t.Fatalf("denied callback sent or succeeded: calls=%d err=%v", physical.calls.Load(), firstErr)
@@ -45,7 +49,7 @@ func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store,
 				t.Fatalf("original source lost: %v", err)
 			}
 			if ports.unexpected != 0 {
-				t.Fatal("hydration vector performed archival or preparation operations")
+				t.Fatal("hydration vector performed unexpected archival operations")
 			}
 			if mode != "foreign-hydration" && (!errors.Is(firstErr, injected) || fault.failures != 1) {
 				t.Fatalf("actual pre-intent CAS not reached: %v", firstErr)
@@ -83,7 +87,7 @@ func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store,
 			}
 			ea1CompBarrierUnchanged(t, observer, original)
 			if mode == "foreign-hydration" && (ports.hydrates != 1 || fault.failures != 0) {
-				t.Fatal("foreign hydration reached original Next")
+				t.Fatal("foreign hydration reached original intent CAS")
 			}
 		})
 	}
@@ -123,9 +127,8 @@ func (p *ea1BoundedContextPorts) ResolveWindow(ctx context.Context, request mode
 	plan, err := p.Plan(ctx, request)
 	return plan.ModelWindow, err
 }
-func (p *ea1BoundedContextPorts) Plan(context.Context, model.Request) (agent.BoundedContextPlan, error) {
-	p.unexpected++
-	return agent.BoundedContextPlan{}, errors.New("unexpected preparation")
+func (p *ea1BoundedContextPorts) Plan(_ context.Context, request model.Request) (agent.BoundedContextPlan, error) {
+	return agent.BoundedContextPlan{Request: request}, nil
 }
 func (p *ea1BoundedContextPorts) PutArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, error) {
 	p.unexpected++

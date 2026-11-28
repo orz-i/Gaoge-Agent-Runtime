@@ -14,12 +14,10 @@ import (
 type retirementKernelPorts interface {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
-	kernel.OwnedRetirementStore
-	kernel.ControlStore
-	kernel.PreparedRootSettlementStore
-	kernel.OwnedRootSettlementStore
+
+	kernel.PhysicalExecutionStore
+
+	kernel.ExecutionCustodyStore
 }
 
 var errBeforeRetirementACK = errors.New("process died before retirement ACK commit")
@@ -99,7 +97,7 @@ func TestRetiredCallbackClosurePrecedesEveryNewGeneration(t *testing.T) {
 				if err != nil || !closed.Valid() || closed.Identity() != prior.Identity() {
 					t.Fatalf("original identity was lost or silently rewritten: %+v %v", closed, err)
 				}
-				if err = rt.VerifyOwnedRootSettlement(t.Context(), done); err != nil {
+				if err = rt.VerifyExecutionCustody(t.Context(), done, kernel.CustodyRetired); err != nil {
 					t.Fatalf("completed successor stranded original custody: %v", err)
 				}
 				wantCalls := 11

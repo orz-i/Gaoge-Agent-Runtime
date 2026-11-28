@@ -255,14 +255,15 @@ type lostAllowanceACKStore struct {
 	armed atomic.Bool
 }
 
-func (store *lostAllowanceACKStore) ApplyControl(
-	ctx context.Context, runID string, revision uint64, guard kernel.ControlGuard, change kernel.StoreMutation,
-) (kernel.Snapshot, bool, error) {
-	snapshot, revoked, err := store.Store.ApplyControl(ctx, runID, revision, guard, change)
-	if err == nil && store.armed.CompareAndSwap(true, false) {
-		return kernel.Snapshot{}, revoked, errControlLostACK
+func (store *lostAllowanceACKStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		snapshot, revoked, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && store.armed.CompareAndSwap(true, false) {
+			return kernel.Snapshot{}, revoked, errControlLostACK
+		}
+		return snapshot, revoked, err
 	}
-	return snapshot, revoked, err
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {
@@ -306,6 +307,19 @@ func testNativeAllowanceLostReply(t *testing.T, mode string) {
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
 	paused, err := runner.StartAgentTurn(t.Context(), request)
+	if mode == "missing-authority" {
+		if !errors.Is(err, harness.ErrInvalidRequest) || paused.Turn.ID != "" {
+			t.Fatalf("native admission accepted an independent budget authority: %+v %v", paused.Turn, err)
+		}
+		sessionID, e := harness.SessionID(request.HostThread)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = harnessStore.GetSession(t.Context(), sessionID); !errors.Is(e, harness.ErrNotFound) {
+			t.Fatalf("rejected budget composition created Host identity: %v", e)
+		}
+		return
+	}
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("failed to create paused Agent: %v", err)
 	}
@@ -408,95 +422,6 @@ func testNativeAllowanceLostReply(t *testing.T, mode string) {
 		if phase, valid := harness.VerifiedExecutionDispatchGrant(item); valid && (phase == "grant-call-allowance" || phase == "resume") {
 			t.Fatalf("native command elected Host dispatch: %s", phase)
 		}
-	}
-}
-
-// Even the concrete native Agent can run host-defined middleware. A middleware
-// that returns a public sentinel after an external side effect is NOT native
-// preflight evidence, and must leave Harness cancellation admission blocked.
-type forgedNativeRunMiddleware struct {
-	calls   atomic.Int32
-	wrapped bool
-}
-
-func (*forgedNativeRunMiddleware) Name() string { return "test.forged-no-effect" }
-
-func (m *forgedNativeRunMiddleware) Run(ctx context.Context, invocation plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if invocation.Operation != plugin.RunResolveApproval {
-		return next(ctx)
-	}
-	m.calls.Add(1)
-	if m.wrapped {
-		return kernel.Snapshot{}, errors.Join(agent.ErrControlNoEffect, errors.New("middleware effect may have occurred"))
-	}
-	return kernel.Snapshot{}, agent.ErrControlNoEffect
-}
-
-func TestNativeAgentRunMiddlewareCannotForgeControlNoEffectProof(t *testing.T) {
-	for _, wrapped := range []bool{false, true} {
-		name := "sentinel"
-		if wrapped {
-			name = "wrapped-sentinel"
-		}
-		t.Run(name, func(t *testing.T) {
-			runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
-			if err != nil {
-				t.Fatal(err)
-			}
-			store := harness.NewMemoryStore()
-			policy, err := harness.NewFrozenApprovalPolicy(store)
-			if err != nil {
-				t.Fatal(err)
-			}
-			registry := newApprovalTestRegistry(t)
-			approvals, err := interaction.New(runtime)
-			if err != nil {
-				t.Fatal(err)
-			}
-			middleware := &forgedNativeRunMiddleware{wrapped: wrapped}
-			direct, err := agent.NewRunner(agent.Dependencies{
-				Runtime: runtime, Model: &approvalTestModel{}, Catalog: registry, Executor: registry,
-				Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy},
-				RunMiddleware: []plugin.RunMiddleware{middleware},
-				Limits:        agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 2},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			runner, err := harness.NewRunner(harness.Dependencies{
-				Runtime: runtime, Agent: direct, Store: store, Clock: approvalTestClock{}, Catalog: registry,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			config := harness.ConfigSnapshot{
-
-				ToolPolicies: []harness.ToolPolicySnapshot{{
-					Key: approvalTestToolKey, DefinitionVersion: "v1",
-					ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always",
-				}}, AgentSpec: harness.AgentSpec{ToolKeys: []string{approvalTestToolKey}},
-			}
-			waiting := startApprovalHarness(t, runner, config)
-			owner, _ := harness.TopLevelInvocation(waiting)
-			_, approvalErr := runner.ResolveApproval(t.Context(), waiting.Turn.ID,
-				harness.ResolveApprovalRequest{CheckpointID: latestApprovalCheckpoint(t, waiting), Decision: harness.ApprovalApprove})
-			if middleware.calls.Load() != 1 || !errors.Is(approvalErr, agent.ErrControlNoEffect) {
-				t.Fatalf("middleware did not emit an adversarial marker: calls=%d err=%v", middleware.calls.Load(), approvalErr)
-			}
-			if agent.IsNativeControlNoEffect(approvalErr) {
-				t.Fatal("middleware error was incorrectly identified as native pre-dispatch proof")
-			}
-			items, err := store.ListItems(t.Context(), waiting.Turn.ID, 0, 500)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !harness.PendingExecutionDispatch(items, owner.ID) {
-				t.Fatal("Host middleware bypassed fail-closed admission using an exported sentinel")
-			}
-			if _, err = runner.Cancel(t.Context(), waiting.Turn.ID, "unknown middleware effect"); !errors.Is(err, harness.ErrConflict) {
-				t.Fatalf("unknown middleware side effect was incorrectly cancelled: %v", err)
-			}
-		})
 	}
 }
 

@@ -15,108 +15,66 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// Same frozen Root entry: a known Tool no-effect is not an arbitrary middleware
-// completion proof. Only the concrete first-party lifecycle may settle its layer.
+// Same frozen Root entry: the concrete first-party lifecycle settles a known
+// Tool no-effect only after its actual started and finished timeline writes.
 // Kernel authority uses each real factory; the timeline port is a deterministic
 // in-memory host fixture, not a claim of cross-process Host storage acceptance.
 func ea1RootBoundedTool(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store), automatic bool) {
-	for _, bounded := range []bool{false, true} {
-		name := "opaque-tool"
-		if bounded {
-			name = "bounded-tool-timeline"
+	t.Run("P1/bounded-tool-timeline", func(t *testing.T) {
+		backing, peer := factory(t)
+		wrapped := ea1AgentAdmissionWrap(t, backing)
+		rt := ea1StartRuntime(t, wrapped)
+		observer := ea1StartRuntime(t, peer)
+		request := ea1AdmissionRequest()
+		request.ToolKeys = []string{"effect"}
+		physical := &ea1UnknownAgentPhysical{tool: true, rt: observer}
+		registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "effect", Name: "Effect", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			if req.RunID != request.ID || req.Call.ID != "original-tool-call" || string(req.Call.Arguments) != `{"source":"original"}` {
+				return tools.ExecutionResult{}, errors.New("foreign physical Tool request")
+			}
+			physical.mu.Lock()
+			physical.tools = append(physical.tools, req)
+			physical.mu.Unlock()
+			return tools.RecoverableNoEffectResult(req.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("fixture.known_no_effect", "original request was not applied", nil))
+		})}})
+		if err != nil {
+			t.Fatal(err)
 		}
-		t.Run("P1/"+name, func(t *testing.T) {
-			backing, peer := factory(t)
-			wrapped := ea1AgentAdmissionWrap(t, backing)
-			rt := ea1StartRuntime(t, wrapped)
-			observer := ea1StartRuntime(t, peer)
-			request := ea1AdmissionRequest()
-			request.ToolKeys = []string{"effect"}
-			physical := &ea1UnknownAgentPhysical{tool: true, rt: observer}
-			registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "effect", Name: "Effect", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
-				if req.RunID != request.ID || req.Call.ID != "original-tool-call" || string(req.Call.Arguments) != `{"source":"original"}` {
-					return tools.ExecutionResult{}, errors.New("foreign physical Tool request")
-				}
-				physical.mu.Lock()
-				physical.tools = append(physical.tools, req)
-				physical.mu.Unlock()
-				return tools.RecoverableNoEffectResult(req.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("fixture.known_no_effect", "original request was not applied", nil))
-			})}})
-			if err != nil {
-				t.Fatal(err)
+		ports := &ea1BoundedTimelinePorts{runtime: observer, request: request}
+		timeline, err := agent.NewBoundedToolTimelineAdapter(ports)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var execution *agent.RunExecution
+		if !automatic {
+			execution = &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}
+		}
+		runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: physical, Catalog: registry, Executor: registry, RunExecution: execution, ToolTimeline: timeline})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var origin kernel.Snapshot
+		wrapped.afterCreate = func(_ context.Context, created kernel.Snapshot) error {
+			if !runner.VerifyFrozenStartRequest(created, request) {
+				return errors.New("actual Create did not preserve full original Start policy")
 			}
-			ports := &ea1BoundedTimelinePorts{runtime: observer, request: request}
-			var middleware plugin.ToolMiddleware = ea1OpaqueToolMiddleware{}
-			if bounded {
-				middleware, err = agent.NewBoundedToolTimelineAdapter(ports)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			var execution *agent.RunExecution
-			if !automatic {
-				execution = &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}
-			}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: physical, Catalog: registry, Executor: registry, RunExecution: execution, ToolMiddleware: []plugin.ToolMiddleware{middleware}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			var origin kernel.Snapshot
-			wrapped.afterCreate = func(_ context.Context, created kernel.Snapshot) error {
-				if !runner.VerifyFrozenStartRequest(created, request) {
-					return errors.New("actual Create did not preserve full original Start policy")
-				}
-				origin = created
-				origin.State = append(json.RawMessage(nil), created.State...)
-				return nil
-			}
-			result, callErr := runner.StartRun(t.Context(), request)
-			models, toolCalls := physical.counts()
-			if models != 2 || toolCalls != 1 || result.Run.Status != kernel.RunStatusCompleted {
-				t.Fatalf("original known Tool business result changed: models=%d tools=%d status=%s err=%v", models, toolCalls, result.Run.Status, callErr)
-			}
-			ea1BoundedToolOrigin(t, origin, result, request)
-			if bounded {
-				if callErr != nil || len(ports.items) != 2 || ports.items[0].status != "started" || ports.items[1].status != "failed" || ports.items[1].parent != ports.items[0].id || !tools.ValidRecoverableNoEffectReceipt(ports.items[1].result, tools.NewRecoverableCallErrorAllowCompletion("fixture.known_no_effect", "original request was not applied", nil), "original-tool-call") {
-					t.Fatalf("bounded original timeline not settled: %+v err=%v", ports.items, callErr)
-				}
-				if _, err = observer.LookupChildExecution(t.Context(), request.ID); !errors.Is(err, kernel.ErrNotFound) {
-					t.Fatalf("bounded Tool scope retained: %v", err)
-				}
-				return
-			}
-			if !errors.Is(callErr, agent.ErrRootOutcomeUnknown) {
-				t.Fatalf("opaque Tool error manufactured completion: %v", callErr)
-			}
-			grant, err := observer.LookupChildExecution(t.Context(), request.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			before, err := observer.Load(t.Context(), request.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = runner.ReconcileRootPhysicalExecution(t.Context(), request.ID); !errors.Is(err, agent.ErrRootOutcomeUnknown) {
-				t.Fatalf("opaque callback retired from known Tool receipt alone: %v", err)
-			}
-			same, err := observer.LookupChildExecution(t.Context(), request.ID)
-			if err != nil || same != grant {
-				t.Fatal("unknown reconciliation changed original grant")
-			}
-			ea1CompBarrierUnchanged(t, observer, before)
-			afterModels, afterTools := physical.counts()
-			if afterModels != models || afterTools != toolCalls {
-				t.Fatal("unknown reconciliation redispatched")
-			}
-		})
-	}
-}
-
-type ea1OpaqueToolMiddleware struct{}
-
-func (ea1OpaqueToolMiddleware) Name() string { return "fixture.opaque.tool" }
-func (ea1OpaqueToolMiddleware) Tool(ctx context.Context, _ plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
-	return next(ctx)
+			origin = created
+			origin.State = append(json.RawMessage(nil), created.State...)
+			return nil
+		}
+		result, callErr := runner.StartRun(t.Context(), request)
+		models, toolCalls := physical.counts()
+		if models != 2 || toolCalls != 1 || result.Run.Status != kernel.RunStatusCompleted {
+			t.Fatalf("original known Tool business result changed: models=%d tools=%d status=%s err=%v", models, toolCalls, result.Run.Status, callErr)
+		}
+		ea1BoundedToolOrigin(t, origin, result, request)
+		if callErr != nil || len(ports.items) != 2 || ports.items[0].status != "started" || ports.items[1].status != "failed" || ports.items[1].parent != ports.items[0].id || !tools.ValidRecoverableNoEffectReceipt(ports.items[1].result, tools.NewRecoverableCallErrorAllowCompletion("fixture.known_no_effect", "original request was not applied", nil), "original-tool-call") {
+			t.Fatalf("bounded original timeline not settled: %+v err=%v", ports.items, callErr)
+		}
+		if _, err = observer.LookupChildExecution(t.Context(), request.ID); !errors.Is(err, kernel.ErrNotFound) {
+			t.Fatalf("bounded Tool scope retained: %v", err)
+		}
+	})
 }
 
 type ea1TimelineItem struct {

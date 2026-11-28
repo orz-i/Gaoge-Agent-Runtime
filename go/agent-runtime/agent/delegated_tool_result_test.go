@@ -110,7 +110,7 @@ func TestDeferredToolResultRequiresOriginalCallbackAndOwnerReceipt(t *testing.T)
 			if got := observer.VerifyDeferredToolResults(t.Context(), rt, done); got != tc.witness {
 				t.Fatalf("observed=%t original witness=%t", got, tc.witness)
 			}
-			if !errors.Is(rt.VerifyOwnedRootSettlement(t.Context(), done), kernel.ErrExecutionConflict) || observer.VerifiedDeferredRootControl(t.Context(), rt, done) {
+			if !errors.Is(rt.VerifyExecutionCustody(t.Context(), done, kernel.CustodyRetired), kernel.ErrExecutionConflict) || observer.VerifiedDeferredRootControl(t.Context(), rt, done) {
 				t.Fatal("result observation supplied physical custody")
 			}
 			if executed != 1 {

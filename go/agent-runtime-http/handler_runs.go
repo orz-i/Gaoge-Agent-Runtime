@@ -5,8 +5,8 @@ import (
 	stdhttp "net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 func (handler *Handler) GetRun(context *gin.Context) {
@@ -25,11 +25,7 @@ func (handler *Handler) GetRun(context *gin.Context) {
 		return
 	}
 	handler.releaseTerminalRunFeed(context, snapshot)
-	response := snapshotResponse(snapshot)
-	if handler.pendingToolProjector != nil {
-		response.PendingTool = handler.pendingToolProjector(snapshot)
-	}
-	writeSuccess(context, response)
+	writeSuccess(context, SnapshotResponse(snapshot))
 }
 
 // WriteRunAccessError preserves authentication failures while collapsing an
@@ -65,25 +61,24 @@ func (handler *Handler) CancelRun(context *gin.Context) {
 		invalidBody(context, err)
 		return
 	}
-	snapshot, routed, err := handler.cancellations.cancel(
-		context.Request.Context(), current, request.ExpectedRevision, request.Reason,
-	)
-	if !routed && err == nil {
-		snapshot, err = handler.runtime.Cancel(
-			context.Request.Context(), runID, request.ExpectedRevision, request.Reason,
-		)
+	if current.Run.Revision != request.ExpectedRevision {
+		WriteKernelError(context, "run", kernel.ErrConflict)
+		return
 	}
+	canceller := handler.canceller
+	if canceller == nil {
+		if current.Run.Kind == handoff.RemoteAgentRunKind {
+			writeError(context, stdhttp.StatusServiceUnavailable, "run.unavailable", "remote run owner is unavailable")
+			return
+		}
+		canceller = handler.runtime
+	}
+	snapshot, err := canceller.Cancel(context.Request.Context(), runID, request.ExpectedRevision, request.Reason)
 	if err != nil {
 		WriteKernelError(context, "run", err)
 		return
 	}
-	if handler.feed != nil {
-		_, _ = handler.feed.Publish(context.Request.Context(), snapshot.Run.ID, runfeed.Draft{
-			Type: runfeed.EventRunCancelled, Message: snapshot.Run.ErrorDetail,
-			Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status), Terminal: true,
-		})
-	}
-	writeSuccess(context, CancelRunResponse{Run: PublicRun(snapshot.Run)})
+	writeSuccess(context, SnapshotResponse(snapshot))
 }
 
 func (handler *Handler) releaseTerminalRunFeed(context *gin.Context, snapshot kernel.Snapshot) {

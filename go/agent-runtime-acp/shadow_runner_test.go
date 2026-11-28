@@ -122,7 +122,7 @@ func TestACPHandoffNativeProofAndRemoteSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.New(shadow)
+	c, err := handoff.New(handoff.Config{Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return shadow, nil })})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestACPCancelCannotAcknowledgeOriginalInFlightPrompt(t *testing.T) {
 	if err != nil || pending.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("missing admitted prompt %v", err)
 	}
-	_, err = runner.CancelRun(t.Context(), "cancel", pending.Run.Revision)
+	_, err = runner.CancelRemote(t.Context(), "cancel", pending.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("cancel notification was mistaken for terminal ACK: %v", err)
 	}
@@ -290,13 +290,16 @@ type sessionApplyFenceStore struct {
 	release   chan struct{}
 }
 
-func (s *sessionApplyFenceStore) Apply(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, revision, mutation)
-	if err == nil && revision == 2 && strings.Contains(string(mutation.Record.State), `"sessionID":"session-1"`) {
-		s.committed <- snap
-		<-s.release
+func (s *sessionApplyFenceStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && commitRev == 2 && strings.Contains(string(commitMutation.Record.State), `"sessionID":"session-1"`) {
+			s.committed <- snap
+			<-s.release
+		}
+		return snap, false, err
 	}
-	return snap, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestACPCancelBeatsPromptAdmissionWithoutLatePhysicalSend(t *testing.T) {
@@ -322,7 +325,7 @@ func TestACPCancelBeatsPromptAdmissionWithoutLatePhysicalSend(t *testing.T) {
 	if committed.Run.Revision != 3 {
 		t.Fatalf("wrong committed session revision %d", committed.Run.Revision)
 	}
-	cancelled, cancelErr := runner.CancelRun(t.Context(), committed.Run.ID, committed.Run.Revision)
+	cancelled, cancelErr := runner.CancelRemote(t.Context(), committed.Run.ID, committed.Run.Revision)
 	if !errors.Is(cancelErr, ErrOutcomeUnknown) || cancelled.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("cancel invented a terminal receipt: %+v %v", cancelled.Run, cancelErr)
 	}
@@ -347,11 +350,11 @@ func TestACPCancelAfterOriginalPromptCallbackReturnedDoesNotRetryPrompt(t *testi
 	if !errors.Is(err, ErrOutcomeUnknown) || original.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("lost prompt was settled %+v %v", original.Run, err)
 	}
-	changed, err := runner.CancelRun(t.Context(), original.Run.ID, original.Run.Revision)
+	changed, err := runner.CancelRemote(t.Context(), original.Run.ID, original.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) || changed.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("cancel notification claimed terminal: %+v %v", changed.Run, err)
 	}
-	if _, err = runner.CancelRun(t.Context(), changed.Run.ID, changed.Run.Revision); !errors.Is(err, ErrOutcomeUnknown) {
+	if _, err = runner.CancelRemote(t.Context(), changed.Run.ID, changed.Run.Revision); !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("duplicate Cancel was accepted: %v", err)
 	}
 	opens, prompts, cancels := fake.counts()
@@ -386,7 +389,7 @@ func TestACPPromptReturnsBeforeCancelCallbackCannotPrematurelySettle(t *testing.
 	}
 	cancelDone := make(chan ret, 1)
 	go func() {
-		s, e := runner.CancelRun(context.Background(), snap.Run.ID, snap.Run.Revision)
+		s, e := runner.CancelRemote(context.Background(), snap.Run.ID, snap.Run.Revision)
 		cancelDone <- ret{s, e}
 	}()
 	<-fake.cancelStarted

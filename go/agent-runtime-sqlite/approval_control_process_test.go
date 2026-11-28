@@ -61,8 +61,8 @@ func (s *controlTestFencedCreateStore) Create(ctx context.Context, record kernel
 	record.ExecutionRequired = true
 	return s.Store.Create(ctx, record, events)
 }
-func (s *controlTestFencedCreateStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	v, e := s.Store.BeginOwnedPhysicalExecution(ctx, p)
+func (s *controlTestFencedCreateStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	v, e := s.Store.BeginPhysicalExecution(ctx, p)
 	if e == nil {
 		s.lease = v.Lease
 	}
@@ -203,9 +203,9 @@ func TestFencedApprovalProcessChild(t *testing.T) {
 	}
 	forgedRun := resolved.Run
 	forgedRun.Revision++
-	_, err = store.ApplyExecution(ctx, firstLease, resolved.Run.Revision, kernel.StoreMutation{
+	_, _, err = store.Commit(ctx, (firstLease).RunID, resolved.Run.Revision, kernel.StoreMutation{
 		Record: kernel.Record{Run: forgedRun, State: resolved.State},
-	})
+	}, kernel.LeaseCommit(firstLease))
 	if !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("revoked execution owner committed after %s control: %v", phase, err)
 	}

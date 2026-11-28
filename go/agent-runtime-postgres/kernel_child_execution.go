@@ -2,13 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 )
-
-var _ kernel.ChildExecutionStore = (*KernelStore)(nil)
 
 func pgValidateLiveRunOwners(ctx context.Context, tx *gorm.DB, run kernel.Run) ([]string, error) {
 	var ids []string
@@ -24,7 +22,7 @@ func pgValidateLiveRunOwners(ctx context.Context, tx *gorm.DB, run kernel.Run) (
 		if err != nil {
 			return nil, err
 		}
-		snapshot, err := kernelSnapshotFrom(row)
+		snapshot, err := kernelSnapshotFrom(tx, row)
 		if err != nil {
 			return nil, err
 		}
@@ -39,96 +37,7 @@ func pgValidateLiveRunOwners(ctx context.Context, tx *gorm.DB, run kernel.Run) (
 	})
 }
 
-func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || store.db == nil || ctx == nil || !grant.Identity().Valid() || grant.ExpectedRevision == 0 || grant.IsOwned() {
-		return kernel.ErrInvalidInput
-	}
-	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var child models.KernelRunRecord
-		if err := tx.Where("run_id = ?", grant.ChildRunID).First(&child).Error; err != nil {
-			return translateKernelError(err)
-		}
-		if child.Revision != grant.ExpectedRevision ||
-			(child.Status != string(kernel.RunStatusRunning) && child.Status != string(kernel.RunStatusWaitingInput)) {
-			return kernel.ErrExecutionConflict
-		}
-		var ids []string
-		if child.Kind != "agent" {
-			return kernel.ErrExecutionRequired
-		}
-		if child.ParentRunID != "" {
-			var ancestorErr error
-			source, e := kernelSnapshotFrom(child)
-			if e != nil {
-				return e
-			}
-			ids, ancestorErr = pgValidateLiveRunOwners(ctx, tx, source.Run)
-			if ancestorErr != nil {
-				return ancestorErr
-			}
-		}
-		// The Store always locks the executing child LAST; persist its OWN
-		// fence in addition to every root-to-leaf ancestor so direct Cancel
-		// and unbound Apply cannot change it while the external call runs.
-		ids = append(ids, child.RunID)
-		lockedChild, lockErr := lockKernelRun(tx, grant.ChildRunID)
-		if lockErr != nil {
-			return lockErr
-		}
-		if e := pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
-			return e
-		}
-		if lockedChild.Revision != grant.ExpectedRevision ||
-			lockedChild.ParentRunID != child.ParentRunID ||
-			lockedChild.Kind != child.Kind ||
-			lockedChild.TenantID != child.TenantID ||
-			lockedChild.ActorID != child.ActorID ||
-			lockedChild.ThreadKind != child.ThreadKind ||
-			lockedChild.ThreadID != child.ThreadID ||
-			(lockedChild.Status != string(kernel.RunStatusRunning) &&
-				lockedChild.Status != string(kernel.RunStatusWaitingInput)) {
-			return kernel.ErrExecutionConflict
-		}
-		// Ancestor and child locks serialize contenders; never trust a
-		// pre-lock observation or a uniqueness check as the sole guard.
-		if err := pgReserveGrantIdentity(tx, grant); err != nil {
-			return err
-		}
-		var active int64
-		if err := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("child_run_id = ?", grant.ChildRunID).Count(&active).Error; err != nil {
-			return translateKernelError(err)
-		}
-		if active > 0 {
-			return kernel.ErrChildExecutionBusy
-		}
-		rows := make([]models.KernelChildEffectGrantRecord, 0, len(ids))
-		for _, id := range ids {
-			rows = append(rows, models.KernelChildEffectGrantRecord{GrantID: grant.ID, ParentRunID: id, ChildRunID: grant.ChildRunID, StartRevision: grant.ExpectedRevision})
-		}
-		if err := tx.Create(&rows).Error; err != nil {
-			return translateKernelApplyError(err)
-		}
-		return nil
-	})
-}
-
-// MarkChildExecutionSettled durably records a borrowed Agent callback
-// completion against the original Grant and the exact child revision. The
-// following Finish is a separate recoverable transaction: a crash between
-// the two leaves a provably settled marker, whereas a crash before Mark
-// leaves the physical effect quarantined.
-func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	return store.settleChildExecution(ctx, grant, permit, true)
-}
-
 func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	return store.settleChildExecution(ctx, grant, permit, false)
-}
-
-func (store *KernelStore) settleChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement, markOnly bool) error {
-	if markOnly && grant.IsOwned() {
-		return kernel.ErrExecutionConflict
-	}
 	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return kernel.ErrInvalidInput
 	}
@@ -140,74 +49,35 @@ func (store *KernelStore) settleChildExecution(ctx context.Context, grant kernel
 		if e := pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
 			return e
 		}
-		snapshot, snapshotErr := kernelSnapshotFrom(child)
+		snapshot, snapshotErr := kernelSnapshotFrom(tx, child)
 		if snapshotErr != nil {
 			return snapshotErr
 		}
 		if !permit.Matches(grant, snapshot) {
 			return kernel.ErrExecutionConflict
 		}
-		revision := child.Revision
-		var records []models.KernelChildEffectGrantRecord
-		if err = tx.Where("grant_id = ?", grant.ID).Find(&records).Error; err != nil {
-			return translateKernelError(err)
-		}
-		if len(records) == 0 || child.Revision == 0 {
+		row, e := pgLoadPhysicalGrant(tx, grant.ChildRunID, grant.ID)
+		if errors.Is(e, kernel.ErrNotFound) {
 			return kernel.ErrExecutionConflict
 		}
-		if markOnly {
-			for _, record := range records {
-				if pgPhysicalGrant(record) != grant ||
-					(record.SettledRevision != 0 && record.SettledRevision != revision) {
-					return kernel.ErrExecutionConflict
-				}
-			}
-			updates := map[string]any{"settled_revision": revision}
-			result := tx.Model(&models.KernelChildEffectGrantRecord{}).
-				Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND (settled_revision = 0 OR settled_revision = ?)",
-					grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).UpdateColumns(updates)
-			if result.Error != nil {
-				return translateKernelApplyError(result.Error)
-			}
-			if result.RowsAffected != int64(len(records)) {
-				return kernel.ErrExecutionConflict
-			}
-			return nil
+		if e != nil {
+			return e
 		}
-
-		mark := child.Revision
-		if grant.IsOwned() {
-			mark = 0
-		}
-		for _, record := range records {
-			if pgPhysicalGrant(record) != grant || record.SettledRevision != mark || record.SettlementEvidence != "" {
-				return kernel.ErrExecutionConflict
-			}
-		}
-		if grant.IsOwned() && (len(records) != 1 || records[0].ParentRunID != grant.ChildRunID) {
+		if pgPhysicalGrant(row) != grant {
 			return kernel.ErrExecutionConflict
 		}
-		if grant.IsOwned() {
-			var active int64
-			if e := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ? OR child_run_id = ?", grant.ChildRunID, grant.ChildRunID).Count(&active).Error; e != nil {
-				return translateKernelError(e)
-			}
-			if active != 1 || child.ExecutionEpoch != grant.ExecutionEpoch || child.ExecutionPhysicalEpoch != grant.ExecutionEpoch || child.ExecutionQuarantineRevision != 0 {
-				return kernel.ErrExecutionConflict
-			}
-			if e := pgPersistOwnedRetirement(tx, records[0], grant, snapshot, pgManagedLease(child), permit); e != nil {
-				return e
-			}
+		var active int64
+		if e := pgActiveEffects(tx).Where(activeEffectScope, grant.ChildRunID, grant.ChildRunID).Count(&active).Error; e != nil {
+			return translateKernelError(e)
 		}
-		result := tx.Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND settled_revision = ?",
-			grant.ID, grant.ChildRunID, grant.ExpectedRevision, mark).Delete(&models.KernelChildEffectGrantRecord{})
-		if result.Error != nil {
-			return translateKernelApplyError(result.Error)
-		}
-		if result.RowsAffected != int64(len(records)) {
+		if active != 1 || child.ExecutionEpoch != grant.ExecutionEpoch || child.ExecutionPhysicalEpoch != grant.ExecutionEpoch || child.ExecutionQuarantineRevision != 0 {
 			return kernel.ErrExecutionConflict
 		}
-		return nil
+		receipt, e := pgBuildOwnedRetirement(tx, row, grant, snapshot, pgManagedLease(child), permit)
+		if e != nil {
+			return e
+		}
+		return pgConsumePhysicalGrant(tx, grant, receipt)
 	})
 }
 
@@ -215,21 +85,6 @@ func (store *KernelStore) LookupChildExecution(ctx context.Context, childID stri
 	if store == nil || store.db == nil || ctx == nil || childID == "" {
 		return kernel.ChildExecutionGrant{}, kernel.ErrInvalidInput
 	}
-	var rows []models.KernelChildEffectGrantRecord
-	if err := store.db.WithContext(ctx).Where("child_run_id = ?", childID).Order("grant_id, parent_run_id").Limit(65).Find(&rows).Error; err != nil {
-		return kernel.ChildExecutionGrant{}, translateKernelError(err)
-	}
-	if len(rows) == 0 {
-		return kernel.ChildExecutionGrant{}, kernel.ErrNotFound
-	}
-	original := pgPhysicalGrant(rows[0])
-	if original.IsOwned() && (len(rows) != 1 || rows[0].ParentRunID != childID) {
-		return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
-	}
-	for _, row := range rows {
-		if pgPhysicalGrant(row) != original || original.ExpectedRevision == 0 || row.SettledRevision != rows[0].SettledRevision {
-			return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
-		}
-	}
-	return original, nil
+	row, e := pgLoadPhysicalGrant(store.db.WithContext(ctx), childID, "")
+	return pgPhysicalGrant(row), e
 }

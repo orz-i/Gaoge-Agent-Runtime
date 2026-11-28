@@ -68,7 +68,7 @@ func TestBoundedContextNativeCountCanAdmitLargeBytesWithoutRaisingHostLimit(t *t
 	original := model.Request{RunID: "run", Model: "openai/example", Messages: []model.Message{{
 		Role: model.RoleUser, Content: model.TextParts(strings.Repeat("B", 512)),
 	}}}
-	prepared, err := adapter.Prepare(t.Context(), original)
+	prepared, err := adapter.prepareManaged(t.Context(), original)
 	if err != nil || counter.calls != 1 || !sameBoundedValue(original, prepared) {
 		t.Fatalf("exact native Count could not admit a valid long request within the unchanged hard limit: %v calls=%d", err, counter.calls)
 	}
@@ -78,7 +78,7 @@ func TestBoundedContextNativeCountCanAdmitLargeBytesWithoutRaisingHostLimit(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = without.Prepare(t.Context(), original)
+	_, err = without.prepareManaged(t.Context(), original)
 	if !errors.Is(err, runtimecontext.ErrBudgetExceeded) {
 		t.Fatalf("missing native count silently weakened the byte-hard budget: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestBoundedContextSerializedByteLimitRejectsEvenWithExactTokenCount(t *test
 	request := model.Request{RunID: "run", Model: "openai/example", Messages: []model.Message{{
 		Role: model.RoleUser, Content: model.TextParts(strings.Repeat("B", 4096)),
 	}}}
-	_, err = adapter.Prepare(t.Context(), request)
+	_, err = adapter.prepareManaged(t.Context(), request)
 	var details *BoundedContextBudgetError
 	if !errors.Is(err, runtimecontext.ErrBudgetExceeded) || !errors.As(err, &details) ||
 		details.Assessment.TokenCountSource != runtimecontext.CountExact ||
@@ -129,7 +129,7 @@ func TestBoundedContextBudgetRejectionReportsOriginalAssessmentWithoutInput(t *t
 			request := model.Request{RunID: "run", Model: "openai/example", Messages: []model.Message{{
 				Role: model.RoleUser, Content: model.TextParts(secret + strings.Repeat("A", 512)),
 			}}}
-			_, err = adapter.Prepare(t.Context(), request)
+			_, err = adapter.prepareManaged(t.Context(), request)
 			var details *BoundedContextBudgetError
 			if !errors.Is(err, runtimecontext.ErrBudgetExceeded) || !errors.As(err, &details) ||
 				details.Reason != tc.reason || details.Assessment.HardInputTokens != 48 ||

@@ -85,7 +85,7 @@ func runNativeBudgetControl(t *testing.T, factory func(*testing.T) ExecutionBudg
 			if mode != "cancel" {
 				var grant kernel.ChildExecutionGrant
 				if mode == "reject-active-grant-then-approve" {
-					grant, err = rt.BeginChildExecution(ctx, "child", waiting.Run.Revision)
+					grant, err = AdmitChildFixture(ctx, rt, "child", waiting.Run.Revision)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -97,7 +97,7 @@ func runNativeBudgetControl(t *testing.T, factory func(*testing.T) ExecutionBudg
 					if _, err = c.Reserve(ctx, "scope", q, true); err != nil {
 						t.Fatal(err)
 					}
-					if _, err = c.DispatchTool(ctx, "scope", q); err != nil {
+					if err = DispatchToolFixture(ctx, c, "scope", q); err != nil {
 						t.Fatal(err)
 					}
 					before, err = f.Ledger.LoadBudget(ctx, "scope")
@@ -120,8 +120,8 @@ func runNativeBudgetControl(t *testing.T, factory func(*testing.T) ExecutionBudg
 				if mode == "reject-active-grant-then-approve" {
 					// Test fixture owns this synthetic no-entry Grant and may retire
 					// it; no production observer is permitted to forge such a proof.
-					proof := featurecontrol.Seal(waiting.Run.ID, waiting.Run.Revision, "agent_child_physical_settled", grant.ID, waiting.State, waiting.Checkpoint)
-					if err = rt.MarkChildExecutionSettled(ctx, grant, proof); err != nil {
+					proof := featurecontrol.Seal(waiting.Run.ID, waiting.Run.Revision, "agent_physical_settled", grant.ID, waiting.State, waiting)
+					if err = rt.RecordPhysicalCallbackReturn(ctx, grant, waiting.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(waiting.Run.ID, waiting.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(waiting, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); err != nil {
 						t.Fatal(err)
 					}
 					if err = rt.FinishChildExecution(ctx, grant, proof); err != nil {

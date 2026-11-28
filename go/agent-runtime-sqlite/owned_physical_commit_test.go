@@ -28,7 +28,7 @@ func TestPhysicalAdmissionCommitRollbackSQLite(t *testing.T) {
 			for _, ddl := range []string{
 				"CREATE TABLE admission_commit_parent(id TEXT PRIMARY KEY)",
 				"CREATE TABLE admission_commit_probe(id TEXT REFERENCES admission_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)",
-				"CREATE TRIGGER admission_commit_fault AFTER INSERT ON runtime_child_effect_grants BEGIN INSERT INTO admission_commit_probe VALUES(NEW.grant_id); END",
+				"CREATE TRIGGER admission_commit_fault AFTER UPDATE OF start_revision ON runtime_effects WHEN NEW.start_revision>0 BEGIN INSERT INTO admission_commit_probe VALUES(NEW.grant_id); END",
 			} {
 				if _, e = s.db.ExecContext(t.Context(), ddl); e != nil {
 					t.Fatal(e)

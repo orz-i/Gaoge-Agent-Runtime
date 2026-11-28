@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -14,7 +13,7 @@ import (
 // child or issue any external operation.
 type RootDeferredCleanupScope struct {
 	grant          kernel.ChildExecutionGrant
-	completion     kernel.OwnedPhysicalCallbackCompletion
+	completion     kernel.PhysicalCallbackCompletion
 	retirementOnly bool
 	valid          bool
 }
@@ -75,11 +74,11 @@ func (runner *Runner) RootDeferredCleanupEligibility(ctx context.Context, runID 
 	if inv, ok := activeModelInvocation(state); ok && inv.Status == ModelInvocationPending && inv.DispatchAttempt != 0 {
 		return RootDeferredCleanupScope{}, ErrModelOutcomeUnknown
 	}
-	if state.ToolDispatchID == "" && len(state.DeferredChildren) == 0 {
+	if state.ToolDispatchID == "" && state.deferredToolCount() == 0 {
 		return RootDeferredCleanupScope{}, ErrToolOutcomeUnknown
 	}
 	if state.ToolDispatchID != "" {
-		if state.ToolWait == nil {
+		if state.toolWait() == nil {
 			// An already-returned native no-send denial is an original
 			// admission obligation, not a provider result. Elected control
 			// must be able to consume it without another business Resume.
@@ -91,12 +90,12 @@ func (runner *Runner) RootDeferredCleanupEligibility(ctx context.Context, runID 
 			if err != nil || !found || !b.Unsent {
 				return RootDeferredCleanupScope{}, errors.Join(ErrToolOutcomeUnknown, err)
 			}
-		} else if state.ToolWait.Kind != tools.PendingChildTerminal || state.ToolWait.CallID != state.ToolDispatchID {
+		} else if state.toolWait().Kind != tools.PendingChildTerminal {
 			return RootDeferredCleanupScope{}, ErrToolOutcomeUnknown
 		}
 	}
-	for _, child := range state.DeferredChildren {
-		if child.Wait.Kind != tools.PendingChildTerminal || child.Call.ID != child.Wait.CallID {
+	for _, entry := range state.ToolReturns {
+		if entry.Outcome == nil && entry.Wait != nil && entry.Wait.Kind != tools.PendingChildTerminal {
 			return RootDeferredCleanupScope{}, ErrToolOutcomeUnknown
 		}
 	}
@@ -132,36 +131,17 @@ func (runner *Runner) ReconcileRootDeferredChildren(ctx context.Context, runID s
 	if scope.RetirementOnly() {
 		return snapshot, runner.reconcileRootRetirement(ctx, snapshot, scope.grant, &scope.completion)
 	}
-	if state.ToolDispatchID != "" && state.ToolWait == nil {
-		// Eligibility proved this exact original sealed no-send return.
-		// Reuse the native receipt-only CAS, not a new dispatch/lookup.
-		snapshot, err = runner.reconcileRootToolReceipt(ctx, snapshot, state, scope.grant, state.ToolDispatchID, false)
-		if err != nil {
-			return snapshot, err
-		}
-		state, err = decodeState(snapshot.State)
-		if err != nil {
-			return snapshot, err
-		}
-		if state.ToolDispatchID == "" && len(state.DeferredChildren) == 0 {
-			return snapshot, nil
-		}
+	count := state.deferredToolCount()
+	if state.ToolDispatchID != "" {
+		count++
 	}
-	if runner.toolOutcomeVerifier == nil {
-		return snapshot, ErrToolVerificationRequired
-	}
-	if state.ToolDispatchID == "" && len(state.DeferredChildren) > 0 {
-		snapshot, state, err = runner.stageRootDeferredReceipt(ctx, snapshot, state, scope.grant)
-		if err != nil {
-			return snapshot, err
-		}
-	}
-	count := len(state.DeferredChildren) + 1
 	for i := 0; i < count; i++ {
-		if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingChildTerminal || state.ToolDispatchID != state.ToolWait.CallID {
-			return snapshot, ErrToolOutcomeUnknown
+		if state.ToolDispatchID == "" {
+			if err := state.activateDeferredChild(); err != nil {
+				return snapshot, err
+			}
 		}
-		next, receiptErr := runner.reconcileRootToolReceipt(ctx, snapshot, state, scope.grant, state.ToolDispatchID, false)
+		next, receiptErr := runner.reconcileToolReceipt(ctx, snapshot, state, scope.grant, state.ToolDispatchID)
 		if receiptErr != nil {
 			return next, receiptErr
 		}
@@ -170,28 +150,6 @@ func (runner *Runner) ReconcileRootDeferredChildren(ctx context.Context, runID s
 		if err != nil {
 			return snapshot, err
 		}
-		if state.ToolDispatchID == "" {
-			return snapshot, nil
-		}
 	}
-	return snapshot, ErrToolOutcomeUnknown
-}
-
-// stageRootDeferredReceipt only moves an already-dispatched identity back to
-// the active receipt slot. Pending unsent calls remain pending and untouched.
-func (runner *Runner) stageRootDeferredReceipt(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant) (kernel.Snapshot, runState, error) {
-	if snapshot.Run.Status != kernel.RunStatusRunning {
-		return snapshot, state, ErrToolOutcomeUnknown
-	}
-	if err := state.activateDeferredChild(); err != nil {
-		return snapshot, state, err
-	}
-	encoded, err := encodeState(state)
-	if err != nil {
-		return snapshot, state, err
-	}
-	source := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-	target := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, snapshot.Checkpoint)
-	next, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, kernel.Mutation{Status: snapshot.Run.Status, State: encoded, Checkpoint: snapshot.Checkpoint, ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail}, source, target)
-	return next, state, err
+	return snapshot, nil
 }

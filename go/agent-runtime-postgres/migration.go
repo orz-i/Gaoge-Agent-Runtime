@@ -12,17 +12,17 @@ import (
 )
 
 var ErrNilDatabase = errors.New("postgres kernel store database is nil")
+var ErrUnsupportedSchema = errors.New("unsupported PostgreSQL Kernel profile: stop the previous writer and initialize a fresh profile")
 
 // Models returns the GORM schema models managed by this adapter.
 // Hosts must initialize and upgrade databases through Migrate(db) rather than
 // calling AutoMigrate(Models()...) directly, which skips managed authority and
-// permanent Grant identity backfill.
+// the current profile boundary.
 func Models() []interface{} {
 	return []interface{}{
-		&models.KernelRunRecord{}, &models.KernelRunIdentityRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
-		&models.KernelChildEffectGrantRecord{}, &models.KernelGrantIdentityRecord{},
-		&models.KernelOwnedRetirementRecord{},
-		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedTransferRecord{}, &models.KernelManagedHistoryRecord{},
+		&models.KernelRunRecord{}, &models.KernelStateHistoryRecord{}, &models.KernelRunIdentityRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
+		&models.KernelEffectRecord{}, &models.KernelEffectOwnerRecord{},
+		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedHistoryRecord{},
 		&models.RunRelationRecord{}, &sqlledger.Record{},
 	}
 }
@@ -32,40 +32,24 @@ func Migrate(db *gorm.DB) error {
 		return ErrNilDatabase
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		// A stopped-writer hard cut, never an implicit upgrade of a live
+		// original execution or its permanent identity.
+		for _, old := range []string{"agent_kernel_child_effect_grants", "agent_kernel_grant_identities", "agent_kernel_owned_retirements", "agent_kernel_managed_transfers"} {
+			if tx.Migrator().HasTable(old) {
+				return ErrUnsupportedSchema
+			}
+		}
+		if tx.Migrator().HasTable(&models.KernelRunRecord{}) &&
+			(!tx.Migrator().HasTable(&models.KernelEffectRecord{}) || !tx.Migrator().HasTable(&models.KernelEffectOwnerRecord{}) || !tx.Migrator().HasTable(&models.KernelStateHistoryRecord{})) {
+			return ErrUnsupportedSchema
+		}
 		if err := tx.AutoMigrate(Models()...); err != nil {
 			return err
-		}
-		var pending int64
-		if err := tx.Model(&models.KernelOwnedRetirementRecord{}).Where("phase <> ?", "ACKNOWLEDGED").Count(&pending).Error; err != nil {
-			return err
-		}
-		if pending != 0 {
-			return errors.New("postgres kernel migration requires draining unfinished original retirements with the previous writer")
-		}
-		managed := "jsonb_exists(payload::jsonb,'State') OR jsonb_exists(payload::jsonb->'Selection','ID')"
-		retirement := "jsonb_exists(payload::jsonb,'Phase') OR jsonb_exists(payload::jsonb,'ACKIdentity')"
-		if tx.Name() == "sqlite" {
-			managed = "json_type(payload,'$.State') IS NOT NULL OR json_type(payload,'$.Selection.ID') IS NOT NULL"
-			retirement = "json_type(payload,'$.Phase') IS NOT NULL OR json_type(payload,'$.ACKIdentity') IS NOT NULL"
-		}
-		if err := tx.Raw("SELECT count(*) FROM (SELECT payload FROM agent_kernel_managed_transfers UNION ALL SELECT payload FROM agent_kernel_managed_history) m WHERE " + managed).Scan(&pending).Error; err != nil {
-			return err
-		}
-		if pending != 0 {
-			return errors.New("postgres kernel migration rejects retired managed wire; use a fresh profile")
-		}
-		if err := tx.Raw("SELECT count(*) FROM agent_kernel_owned_retirements WHERE " + retirement).Scan(&pending).Error; err != nil {
-			return err
-		}
-		if pending != 0 {
-			return errors.New("postgres kernel migration rejects retired receipt wire; use a fresh profile")
 		}
 		if err := validateNativeBudgetBindings(tx); err != nil {
 			return err
 		}
-		if err := pgBackfillGrantIdentities(tx); err != nil {
-			return err
-		}
+
 		var namespace [32]byte
 		if _, err := rand.Read(namespace[:]); err != nil {
 			return err

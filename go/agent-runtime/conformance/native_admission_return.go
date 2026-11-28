@@ -26,30 +26,16 @@ func (p admissionCancelPorts) Project(_ context.Context, l budget.Ledger) error 
 	return nil
 }
 
-type admissionOpaqueRun struct{ mode string }
-
-func (admissionOpaqueRun) Name() string { return "fixture.opaque-admission" }
-func (m admissionOpaqueRun) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if m.mode == "opaque-before" {
-		return kernel.Snapshot{}, budget.ErrExhausted
-	}
-	s, err := next(ctx)
-	if m.mode == "opaque-mask" {
-		return s, nil
-	}
-	return s, errors.Join(err, errors.New("unqualified outer callback error"))
-}
-
-// One original native ledger cancellation, with the exact Run middleware
-// invocation and its complete callback lifetime. No typed Host error or
+// One original native ledger cancellation and its complete native lifetime.
+// No typed Host error or
 // failed projection can manufacture a completed Grant.
-func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"tool-only", "run-and-tool", "parented-run-and-tool", "projection-failure", "opaque-before", "opaque-after", "opaque-mask"} {
+func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
+	for _, mode := range []string{"run-and-tool", "parented-run-and-tool", "projection-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			base, peer, reopen := factory(t)
 			observer := ea1StartRuntime(t, peer)
-			ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
+			ledger := newToolTestLedger(t, base)
 			const root = "cancel-admission-root"
 			const scope = "cancel-admission-ledger"
 			limits := budget.Limits{MaxToolCalls: 1}
@@ -79,6 +65,9 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 			mk := func(rt *kernel.Runtime, l budget.LedgerStore, replace bool) *agent.Runner {
 				t.Helper()
 				ports := admissionCancelPorts{capacityAdmissionPorts: capacityAdmissionPorts{settledToolPorts: settledToolPorts{id: scope}, limits: limits}}
+				if mode == "parented-run-and-tool" {
+					ports.parent = "cancel-admission-parent"
+				}
 				if replace && mode == "projection-failure" {
 					ports.projectionErr = projectionErr
 				}
@@ -97,13 +86,7 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 					reads++
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{p}, ToolMiddleware: []plugin.ToolMiddleware{a}, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
-				if mode != "tool-only" {
-					d.RunMiddleware = []plugin.RunMiddleware{a}
-				}
-				if replace && (mode == "opaque-before" || mode == "opaque-after" || mode == "opaque-mask") {
-					d.RunMiddleware = append([]plugin.RunMiddleware{admissionOpaqueRun{mode: mode}}, d.RunMiddleware...)
-				}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{p}, BoundedBudget: a, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
 				r, err := agent.NewRunner(d)
 				if err != nil {
 					t.Fatal(err)
@@ -112,7 +95,7 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 			}
 			req := agent.StartRequest{ID: root, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"read"}}
 			if mode == "parented-run-and-tool" {
-				parent, err := observer.Create(ctx, kernel.CreateRequest{ID: "cancel-admission-parent", Kind: "workflow", Actor: req.Actor, Thread: req.Thread, Goal: "parent", State: json.RawMessage("{}")})
+				parent, err := observer.Create(ctx, kernel.CreateRequest{ID: "cancel-admission-parent", Kind: "workflow", Budget: &budget.RunEnrollment{ScopeID: scope, Limits: limits}, Actor: req.Actor, Thread: req.Thread, Goal: "parent", State: json.RawMessage("{}")})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -126,16 +109,24 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 			if _, err = observer.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
 				t.Fatal("capacity wait retained grant", err)
 			}
-			cancelled, err := coord.CancelRoot(ctx, scope, root)
+			var cancelled budget.Ledger
+			if mode == "parented-run-and-tool" {
+				cancelled, err = coord.CancelRun(ctx, scope, root)
+			} else {
+				cancelled, err = coord.CancelRoot(ctx, scope, root)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			res := cancelled.Reservations["tool:"+root+":original-call"]
-			if res.Status != budget.ReservationReleased || res.Active || res.Dispatched {
-				t.Fatal("original cancellation did not release capacity", res)
+			if !cancelled.RunCancelled(root) || mode == "parented-run-and-tool" && (cancelled.RunCancelled("cancel-admission-parent") || cancelled.RunCancelled("peer")) {
+				t.Fatal("native cancellation escaped original subtree", cancelled)
 			}
-			rt := ea1StartRuntime(t, reopen())
-			l := reopenLedger()
+			if res, exists := cancelled.Reservations["tool:"+root+":original-call"]; exists {
+				t.Fatal("cancelled unsent wait manufactured dispatch accounting", res)
+			}
+			fresh := reopen()
+			rt := ea1StartRuntime(t, fresh)
+			l := newToolTestLedger(t, fresh)
 			r := mk(rt, l, true)
 			got, outcome, resumeErr := r.ObservePhysicalCall(ctx, root, plugin.RunResume, func(c context.Context) (kernel.Snapshot, error) { return r.Resume(c, root, initial.Run.Revision) })
 			cur, err := rt.Load(ctx, root)
@@ -145,13 +136,7 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 			if physical != 0 || policy != 1 || len(m.calls) != 1 || reads != 0 {
 				t.Fatal("cancelled scope dispatched new work", physical, policy, reads)
 			}
-			if mode == "tool-only" {
-				if !errors.Is(resumeErr, budget.ErrExhausted) || got.Run.Status != kernel.RunStatusFailed || outcome.Kind() != agent.PhysicalCallSettled {
-					t.Fatal("tool-only original denial changed", resumeErr, got.Run, outcome.Kind())
-				}
-				return
-			}
-			if mode == "run-and-tool" || mode == "parented-run-and-tool" {
+			if mode != "projection-failure" {
 				if !errors.Is(resumeErr, budget.ErrExhausted) || errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || errors.Is(resumeErr, kernel.ErrChildExecutionBusy) || !reflect.DeepEqual(initial, cur) || !reflect.DeepEqual(got, cur) || outcome.Kind() != agent.PhysicalCallSettled {
 					t.Fatal("native no-entry return not qualified", resumeErr, got.Run, cur.Run, outcome.Kind())
 				}
@@ -170,7 +155,7 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 				if err != nil {
 					t.Fatal("unknown grant removed", err)
 				}
-				c, err := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, err := rt.LookupPhysicalCallbackReturn(ctx, g)
 				if err != nil || c.HostCompleted {
 					t.Fatal("unknown callback got original Host completion", err, c)
 				}

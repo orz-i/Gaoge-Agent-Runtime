@@ -1,5 +1,5 @@
 // Package callbackscope is the Runtime-owned callback lifecycle journal. It is
-// internal: host middleware cannot construct a layer receipt or a completion.
+// internal: only fixed Runtime stages can construct a receipt or completion.
 package callbackscope
 
 import (
@@ -78,29 +78,21 @@ func RootToolFrame(ctx context.Context) any {
 	return value.frame
 }
 
-// Model-call authority is Runtime-owned and travels with the actual Next
-// chain, even when a Host middleware supplies a replacement Context.
+// Model-call authority stays inside the fixed physical invocation.
 type modelCallKey struct{}
 
 func BindModelCall(ctx context.Context, authority any) context.Context {
 	return context.WithValue(ctx, modelCallKey{}, authority)
 }
 func ModelCall(ctx context.Context) any { return ctx.Value(modelCallKey{}) }
-func InheritModel(ctx, original context.Context) context.Context {
-	return BindModelCall(Inherit(ctx, original), ModelCall(original))
-}
 
-// Tool-call authority follows the actual Next chain even if middleware
-// supplies an unrelated Context. It is independent of the whole Grant journal.
+// Tool-call authority is independent of the whole Grant journal.
 type toolCallKey struct{}
 
 func BindToolCall(ctx context.Context, authority any) context.Context {
 	return context.WithValue(ctx, toolCallKey{}, authority)
 }
 func ToolCall(ctx context.Context) any { return ctx.Value(toolCallKey{}) }
-func InheritTool(ctx, original context.Context) context.Context {
-	return BindToolCall(Inherit(ctx, original), ToolCall(original))
-}
 
 func Enter(ctx context.Context, runID string, adapter any, input any) (context.Context, *Ticket) {
 	return enter(ctx, runID, adapter, input, nil)

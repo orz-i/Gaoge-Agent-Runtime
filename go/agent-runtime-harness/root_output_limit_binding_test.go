@@ -122,7 +122,7 @@ func TestRootModelOutputCeilingRejectsDifferentRunBeforeResume(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					options.Runtime, options.Context.ManagedRecovery = rt, true
+					options.Runtime = rt
 				}
 				before, err := options.Runtime.Load(t.Context(), f.invocation.ExecutionRefID)
 				if err != nil {

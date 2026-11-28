@@ -69,7 +69,7 @@ func (r *Runner) externalToolDelegationParent(ctx context.Context, owner Invocat
 		return "", ErrRuntimeCancellationUnverified
 	}
 	d, parent, err := r.localHandoffCancellationAuthority(ctx, owner, s)
-	if err != nil || !coordinator.UsesLocalAgentForDelegation(r.runtime, original, d) {
+	if err != nil || d.Remote || original == nil || coordinator.LocalAgent(r.runtime) != original {
 		return "", errors.Join(ErrRuntimeCancellationUnverified, err)
 	}
 	relation, err := r.relationReader.GetByChild(ctx, s.Run.ID)
@@ -86,6 +86,7 @@ func (r *Runner) verifyExternalCancellationElection(ctx context.Context, turn Tu
 	}
 	receipts := cancellationFenceReceipts(items)
 	count := 0
+	var elected Item
 	for _, item := range items {
 		if item.ParentItemID != CancellationFenceParentItemID || VerifiedCancellationFenceReceipt(item, receipts[item.ID]) {
 			continue
@@ -95,13 +96,22 @@ func (r *Runner) verifyExternalCancellationElection(ctx context.Context, turn Tu
 			return ErrConflict
 		}
 		count++
+		elected = item
 	}
 	if count != 1 {
 		return ErrConflict
 	}
 	ledger, err := r.loadTurnBudget(ctx, turn)
-	if err != nil || ledger != nil && !ledger.RunCancelled(target) {
+	if err != nil || ledger != nil && !ledger.RunCancelled(target) && !r.nativeBudget() {
 		return errors.Join(ErrConflict, err)
+	}
+	if r.nativeBudget() && (ledger == nil || !ledger.RunCancelled(target)) {
+		for _, item := range items {
+			if validDeferredChildGrantCancellation(item, elected) {
+				return nil
+			}
+		}
+		return ErrConflict
 	}
 	return nil
 }

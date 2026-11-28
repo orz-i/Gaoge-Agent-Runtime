@@ -15,7 +15,6 @@ product host
   ├─ finite child-route resolver
   │    ├─ local member -> local child runner
   │    └─ a2a:<public-id> -> A2A plugin -> durable shadow runner
-  ├─ optional Group Chat participant mapping (visible identity remains product-owned)
   └─ optional A2A server handler mounted on a host-owned router
 
 agent-runtime-a2a plugin
@@ -29,7 +28,8 @@ agent-runtime kernel
 
 The plugin is statically constructed with `NewPlugin`. It does not scan for
 code, register globally, open a listener, or resolve arbitrary services.
-`handoff.NewRouted` accepts a finite host-owned `ChildRunnerResolver`; only the
+`handoff.New(handoff.Config{Remote: plugin})` accepts the finite host-owned
+`ChildRunnerResolver`; only the
 reserved `a2a:` member prefix may be delegated to this plugin. Unknown or
 malformed reserved targets fail closed.
 
@@ -39,11 +39,10 @@ execution freezes the binding revision into the shadow Run. Recovery requests
 that exact revision, so an Agent Card update cannot silently change an existing
 durable run.
 
-A host may use the same `a2a:<public-id>` route for a visible Group Chat speaker.
-The Group Chat feature remains protocol-neutral: it receives a frozen execution
-member identity plus a separate visible author identity and does not import A2A
-protocol types. Conversation membership, user-facing author snapshots and remote
-allowlists remain product-owned.
+Like ACP, A2A uses `handoff.RemoteShadowObserver` and the `agent.remote` Run
+kind through `handoff.Config.Remote`. Task/Context/Message identities and A2A
+input/auth waits remain protocol-specific; a local commit is not a remote
+transaction. Visible author identity and remote allowlists remain Host-owned.
 
 ## Beta.2 support matrix
 
@@ -109,6 +108,9 @@ request time without changing a frozen public discovery revision.
   shadow at the expected durable revision and resolves the immutable target
   binding from the shadow state; hosts must not parse private shadow state or
   substitute a newer Agent Card revision.
+- Direct `ShadowRunner.ResumeRun` also requires the original expected revision.
+  Both A2A and ACP use `ShadowRunner.CancelRemote(ctx, runID, expectedRevision)`;
+  the duplicate `CancelRun` entrypoints are removed, without aliases.
 
 ## Upgrade from Beta.1
 
@@ -117,7 +119,8 @@ plugin. Existing direct client use remains available, but product integrations
 should make these changes:
 
 1. Reserve `a2a:<public-id>` for remote handoff routes and use
-   `handoff.NewRouted` with a finite resolver.
+   `handoff.New(handoff.Config{Local: loop, Remote: plugin})`. The Host must
+   freeze `Delegation.Remote` for the selected remote member before dispatch.
 2. Construct `Plugin` with a product-owned `BindingResolver`; persist and
    resolve immutable discovery revisions.
 3. Move credentials, SSRF decisions and remote-agent availability out of

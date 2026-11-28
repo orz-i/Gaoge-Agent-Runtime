@@ -159,26 +159,26 @@ func nativePendingToolReceipt(t *testing.T, parented bool) {
 		t.Fatalf("Pending Tool was reexecuted: effects=%d err=%v", effects, e)
 	}
 	grant, e := rt.LookupChildExecution(t.Context(), first.Run.ID)
-	if e != nil || grant.IsOwned() == parented {
+	if e != nil || !grant.IsOwned() {
 		t.Fatalf("wrong original Grant: %v err=%v", grant, e)
 	}
 	if _, e = runner.ReconcileToolOutcome(t.Context(), first.Run.ID, first.Run.Revision, "late-call"); !errors.Is(e, agent.ErrToolOutcomeUnknown) || effects != 1 {
 		t.Fatalf("unverified result was accepted: %v effects=%d", e, effects)
 	}
 	if parented {
-		if e = deps.Runtime.RequireExecution(t.Context(), first.Run.ID); e != nil || verifyCalls != 1 {
+		if e = deps.Runtime.RequireExecution(t.Context(), first.Run.ID); e != nil || verifyCalls != 0 {
 			t.Fatalf("read-only lookup released borrowed lease: %v calls=%d", e, verifyCalls)
 		}
 		if retained, e := rt.LookupChildExecution(t.Context(), first.Run.ID); e != nil || retained != grant {
 			t.Fatalf("unknown Tool changed original Grant: %v %v", retained, e)
 		}
-		if e = rt.ReleaseExecution(t.Context(), lease); e != nil {
-			t.Fatal(e)
+		if e = rt.ReleaseExecution(t.Context(), lease); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+			t.Fatalf("original unknown effect allowed standalone lease release: %v", e)
 		}
 		return
 	}
-	// Failed and mismatched provider verifications must each release the
-	// read-only reconciliation lease; no Tool reentry is permitted.
+	// Failed and mismatched provider verifications preserve the exact original
+	// lease and callback; recovery never acquires an independent owner.
 	if _, e = runner.ReconcileToolOutcome(t.Context(), first.Run.ID, first.Run.Revision, "late-call"); !errors.Is(e, agent.ErrToolReceiptMismatch) || effects != 1 {
 		t.Fatalf("wrong provider receipt was committed: err=%v effects=%d", e, effects)
 	}

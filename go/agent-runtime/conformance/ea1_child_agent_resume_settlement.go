@@ -31,24 +31,29 @@ type ea1ChildResumeSettlementStore struct {
 	mode                    string
 	fault                   error
 	beforeBegin             func(kernel.ChildExecutionGrant)
+	afterBegin              func(context.Context)
 	marks, finishes, begins int
 }
 
-func (s *ea1ChildResumeSettlementStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *ea1ChildResumeSettlementStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	g := p.Candidate().Grant
 	if s.beforeBegin != nil {
 		s.beforeBegin(g)
 	}
-	e := s.ChildExecutionStore.BeginChildExecution(ctx, g)
+	result, e := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	if e == nil {
 		s.begins++
+		if s.afterBegin != nil {
+			s.afterBegin(ctx)
+		}
 	}
-	return e
+	return result, e
 }
-func (s *ea1ChildResumeSettlementStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *ea1ChildResumeSettlementStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if s.mode == "P3" {
 		return s.fault
 	}
-	e := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	e := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 		if s.mode == "P4" {
@@ -58,33 +63,14 @@ func (s *ea1ChildResumeSettlementStore) MarkChildExecutionSettled(ctx context.Co
 	return e
 }
 func (s *ea1ChildResumeSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	if s.mode == "P4" {
+		return s.fault
+	}
+	e := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
 	}
 	return e
-}
-
-type ea1ChildSettlementHost struct {
-	operation plugin.RunOperation
-	name      string
-	request   agent.StartRequest
-	physical  *ea1StartSettlementPhysical
-	before    func()
-}
-
-func (h *ea1ChildSettlementHost) Name() string { return h.name }
-func (h *ea1ChildSettlementHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if i.Operation != h.operation || i.RunID != h.request.ID || i.ParentRunID != h.request.ParentRunID || i.Actor != h.request.Actor || i.Thread != h.request.Thread || i.Goal != h.request.Goal {
-		return kernel.Snapshot{}, agent.ErrInvalidRequest
-	}
-	h.physical.mu.Lock()
-	h.physical.hostCalls++
-	h.physical.mu.Unlock()
-	if h.before != nil {
-		h.before()
-	}
-	return next(ctx)
 }
 
 type ea1ChildResumeSettlementFixture struct {
@@ -95,7 +81,6 @@ type ea1ChildResumeSettlementFixture struct {
 	request                                agent.StartRequest
 	parent, grandparent, created, prepared kernel.Snapshot
 	physical                               *ea1StartSettlementPhysical
-	host                                   *ea1ChildSettlementHost
 	definition                             tools.Definition
 	registry                               *tools.Registry
 }
@@ -137,7 +122,6 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.host = &ea1ChildSettlementHost{operation: plugin.RunResume, name: "ea1.original.child.resume", request: f.request, physical: f.physical}
 	setup := f.runner(rt, "prepare-owner", false)
 	st.afterCreate = func(_ context.Context, s kernel.Snapshot) error {
 		f.created = s
@@ -153,7 +137,7 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 	if _, e = rt.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatal("Prepare scope not retired", e)
 	}
-	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || f.physical.hostCalls != 0 || st.begins != 1 || st.marks != 1 || st.finishes != 1 {
+	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || st.begins != 1 || st.marks != 1 || st.finishes != 1 {
 		t.Fatal("Prepare did not finish its separate zero-send callback")
 	}
 	st.begins, st.marks, st.finishes = 0, 0, 0
@@ -162,11 +146,7 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 	return f
 }
 func (f *ea1ChildResumeSettlementFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	var middleware []plugin.RunMiddleware
-	if host {
-		middleware = []plugin.RunMiddleware{f.host}
-	}
-	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, RunMiddleware: middleware, ToolMiddleware: []plugin.ToolMiddleware{f.physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
+	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
 	if e != nil {
 		f.t.Fatal(e)
 	}
@@ -184,14 +164,14 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || f.store.begins != 1 {
+	if e != nil || !g.IsOwned() || !g.MatchesExecution(f.store.acquired) || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || f.store.begins != 1 {
 		t.Fatal("not original Child Resume grant", e)
 	}
 	if (phase == "P3" && f.store.marks != 0) || (phase == "P4" && f.store.marks != 1) || f.store.finishes != 0 {
 		t.Fatal("wrong actual Mark/Finish boundary")
 	}
 	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)
-	if f.physical.intents[0].SourceRevision < f.prepared.Run.Revision || f.store.acquired.RunID != f.request.ID || f.store.acquired.OwnerID != "original-resume-owner" || f.store.acquired.LeaseID == "" || f.store.acquired.Epoch == 0 || f.store.acquireCalls != 1 || f.store.releaseCalls != 1 {
+	if f.physical.intents[0].SourceRevision < f.prepared.Run.Revision || f.store.acquired.RunID != f.request.ID || f.store.acquired.OwnerID != "original-resume-owner" || f.store.acquired.LeaseID == "" || f.store.acquired.Epoch == 0 || f.store.atomicClaims != 2 || f.store.acquireCalls != 0 || f.store.releaseCalls != 0 {
 		t.Fatal("receipt not from original actual Resume native attempt")
 	}
 	ea1ChildRecoveryPhaseControls(t, f.rt, before, f.parent, f.grandparent, g)
@@ -199,7 +179,7 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 	ar := ea1StartRuntime(t, a)
 	fresh := f.runner(ar, "fresh-recovery", true)
 	ea1ChildRecoveryPhaseUnchanged(t, ar, before, f.parent, f.grandparent, g)
-	e = fresh.ReconcileChildPhysicalGrant(t.Context(), f.request.ID)
+	e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID)
 	if phase == "P3" {
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatal("Child recovery invented uncommitted marker", e)
@@ -219,7 +199,7 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if e != nil {
 			t.Fatal("original committed marker could not recover", e)
 		}
-		if e = fresh.ReconcileChildPhysicalGrant(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		if e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID); e != nil {
 			t.Fatal("original marker replayed", e)
 		}
 		ea1CompBarrierUnchanged(t, ar, before)
@@ -230,13 +210,13 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 }
 func ea1ChildResumeElection(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), deadline bool) {
 	f := ea1NewChildResumeSettlement(t, factory, false, deadline)
-	ea1ChildSettlementElection(t, f.reopen, f.request, f.prepared, f.parent, f.grandparent, f.physical, f.definition, f.host, f.runner, nil, deadline)
+	ea1ChildSettlementElection(t, f.reopen, f.request, f.prepared, f.parent, f.grandparent, f.physical, f.definition, f.runner, nil, deadline)
 }
 
 // Both controls compete for the exact same original borrowed grant. Approval
 // differs from Resume only in its callback, preflight, and lease assertions.
 func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kernel.Store), request agent.StartRequest, source, parent, grandparent kernel.Snapshot,
-	physical *ea1StartSettlementPhysical, definition tools.Definition, host *ea1ChildSettlementHost, runner func(*kernel.Runtime, string, bool) *agent.Runner, approval *ea1ChildApprovalSettlementFixture, deadline bool) {
+	physical *ea1StartSettlementPhysical, definition tools.Definition, runner func(*kernel.Runtime, string, bool) *agent.Runner, approval *ea1ChildApprovalSettlementFixture, deadline bool) {
 	t.Helper()
 	a, b := reopen()
 	sa := &ea1ChildResumeSettlementStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, a)}
@@ -249,7 +229,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	begin := make(chan struct{}, 2)
 	allowBegin := make(chan struct{})
 	barrier := func(g kernel.ChildExecutionGrant) {
-		if g.ChildRunID != request.ID || g.ExpectedRevision != source.Run.Revision || g.IsOwned() {
+		if g.ChildRunID != request.ID || g.ExpectedRevision != source.Run.Revision || !g.IsOwned() {
 			t.Error("wrong original Child admission candidate")
 		}
 		begin <- struct{}{}
@@ -261,12 +241,17 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	sa.beforeBegin, sb.beforeBegin = barrier, barrier
 	enteredHost := make(chan struct{}, 1)
 	releaseHost := make(chan struct{})
-	host.before = func() {
+	hold := func(context.Context) {
 		enteredHost <- struct{}{}
 		select {
 		case <-releaseHost:
 		case <-t.Context().Done():
 		}
+	}
+	if approval != nil {
+		sa.afterBegin, sb.afterBegin = hold, hold
+	} else {
+		sa.afterAdmission, sb.afterAdmission = hold, hold
 	}
 	type outcome struct {
 		s kernel.Snapshot
@@ -324,7 +309,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 		t.Fatal(e)
 	}
 	g, e := ar.LookupChildExecution(t.Context(), request.ID)
-	if e != nil || g.IsOwned() || g.ExpectedRevision != source.Run.Revision || g.ChildRunID != request.ID {
+	if e != nil || !g.IsOwned() || g.ExpectedRevision != source.Run.Revision || g.ChildRunID != request.ID {
 		t.Fatal("winner scope not original", e)
 	}
 	ea1CompBarrierUnchanged(t, ar, source)
@@ -332,13 +317,13 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	if lease.LeaseID == "" {
 		lease = sb.acquired
 	}
-	if approval == nil && (lease.RunID != request.ID || lease.LeaseID == "" || lease.Epoch == 0 || sa.acquireCalls+sb.acquireCalls != 1) {
+	if lease.RunID != request.ID || lease.LeaseID == "" || lease.Epoch == 0 || !g.MatchesExecution(lease) || sa.atomicClaims+sb.atomicClaims != 1 || sa.acquireCalls+sb.acquireCalls != 0 {
 		t.Fatal("winner native authority missing or loser claimed")
 	}
 	ea1ChildRecoveryPhaseControls(t, ar, current, parent, grandparent, g)
 	if approval == nil {
-		if e = a.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); e != nil {
-			t.Fatal("rejected competing controls revoked winner epoch", e)
+		if e = a.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); !errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy) {
+			t.Fatal("atomic admission permitted execution before original entry", e)
 		}
 	}
 	if deadline {
@@ -375,7 +360,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 		}
 		approval.assertReceipt(winner.s)
 	} else {
-		if sa.acquireCalls+sb.acquireCalls != 1 || sa.releaseCalls+sb.releaseCalls != 1 {
+		if sa.atomicClaims+sb.atomicClaims != 1 || sa.acquireCalls+sb.acquireCalls != 0 || sa.releaseCalls+sb.releaseCalls != 0 {
 			t.Fatal("unique Resume did not preserve native lease lifecycle")
 		}
 		ea1AssertStartSettlementReceipt(t, physical, request, definition, winner.s, false)

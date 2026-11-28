@@ -123,7 +123,7 @@ func TestShadowCancelRejectsForeignTaskResponseWithoutSettling(t *testing.T) {
 			foreign.Terminal = true
 			tc.corrupt(&foreign)
 			remote.cancelReply = &foreign
-			returned, err := runner.CancelRun(t.Context(), started.Run.ID)
+			returned, err := runner.CancelRemote(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID))
 			if !errors.Is(err, ErrRemoteBindingChanged) || remote.cancelCalls != 1 {
 				t.Fatalf("foreign CancelTask accepted: err=%v calls=%d", err, remote.cancelCalls)
 			}
@@ -139,7 +139,7 @@ func TestShadowCancelRejectsForeignTaskResponseWithoutSettling(t *testing.T) {
 				returned.Run.Revision != current.Run.Revision || current.Result != nil {
 				t.Fatalf("foreign cancellation response poisoned original intent: %+v %+v %v %v", current.Run, state, loadErr, proofErr)
 			}
-			if _, retryErr := runner.CancelRun(t.Context(), started.Run.ID); !errors.Is(retryErr, ErrRemoteOutcomeUnknown) || remote.cancelCalls != 1 {
+			if _, retryErr := runner.CancelRemote(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID)); !errors.Is(retryErr, ErrRemoteOutcomeUnknown) || remote.cancelCalls != 1 {
 				t.Fatalf("foreign cancellation outcome was retried: %v (%d calls)", retryErr, remote.cancelCalls)
 			}
 		})
@@ -166,7 +166,7 @@ func TestShadowResumeRejectsForeignMessageIdentityWithoutCompleting(t *testing.T
 				ID: "reply", TaskID: tc.taskID, ContextID: tc.contextID, Role: "agent",
 				Parts: []ContentPart{{Kind: ContentPartText, Text: "done"}},
 			}, Raw: json.RawMessage(`{"messageId":"reply"}`)}
-			returned, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+			returned, err := runner.ResumeRun(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID), "approved")
 			if tc.name == "valid-bound-identity" {
 				if err != nil || returned.Run.Status != kernel.RunStatusCompleted {
 					t.Fatalf("valid bound message refused: status=%s err=%v", returned.Run.Status, err)
@@ -216,7 +216,7 @@ func TestShadowResumeRejectsForeignTaskResponseWithoutPoisoningBinding(t *testin
 			foreign := completedTask()
 			tc.corrupt(&foreign)
 			remote.sendReply = &Interaction{Task: &foreign, Raw: append(json.RawMessage(nil), foreign.Raw...)}
-			returned, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+			returned, err := runner.ResumeRun(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID), "approved")
 			if !errors.Is(err, ErrRemoteBindingChanged) {
 				t.Fatalf("foreign Task accepted: status=%s err=%v", returned.Run.Status, err)
 			}
@@ -248,7 +248,7 @@ func TestShadowCancelRejectsForeignGetTaskBeforeDispatchingCancel(t *testing.T) 
 		t.Fatal(err)
 	}
 	remote.task.ContextID = "foreign-context"
-	observed, err := runner.CancelRun(t.Context(), started.Run.ID)
+	observed, err := runner.CancelRemote(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID))
 	if !errors.Is(err, ErrRemoteBindingChanged) || remote.cancelCalls != 0 {
 		t.Fatalf("Cancel dispatched despite foreign GetTask response: err=%v calls=%d", err, remote.cancelCalls)
 	}
@@ -359,7 +359,7 @@ func TestShadowRejectsAmbiguousMessageAndTaskResult(t *testing.T) {
 	remote.sendReply = &Interaction{Task: &correct, Message: &MessageSnapshot{
 		ID: "alien-reply", TaskID: "foreign-task", ContextID: "foreign-context",
 	}, Raw: json.RawMessage(`{"id":"remote-1"}`)}
-	observed, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+	observed, err := runner.ResumeRun(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID), "approved")
 	if !errors.Is(err, ErrInvalidResult) {
 		t.Fatalf("ambiguous union accepted: status=%s err=%v", observed.Run.Status, err)
 	}

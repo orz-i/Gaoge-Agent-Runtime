@@ -55,26 +55,6 @@ type ClientDependencies struct {
 	Observers []plugin.Observer
 }
 
-func cloneStreamEvent(event StreamEvent) StreamEvent {
-	event.Raw = append(json.RawMessage(nil), event.Raw...)
-	if event.Task != nil {
-		task := *event.Task
-		cloneTaskSnapshotValue(&task)
-		event.Task = &task
-	}
-	if event.Message != nil {
-		message := *event.Message
-		message = cloneMessageSnapshot(message)
-		event.Message = &message
-	}
-	if event.Artifact != nil {
-		artifact := *event.Artifact
-		cloneArtifactSnapshot(&artifact)
-		event.Artifact = &artifact
-	}
-	return event
-}
-
 func projectStreamEvent(event a2asdk.Event) (StreamEvent, error) {
 	if event == nil {
 		return StreamEvent{}, ErrInvalidResult
@@ -134,7 +114,7 @@ func newStreamEvent(projected StreamEvent, source any) (StreamEvent, error) {
 		return StreamEvent{}, err
 	}
 	projected.Raw = append(json.RawMessage(nil), raw...)
-	return cloneStreamEvent(projected), nil
+	return projected, nil
 }
 
 func projectArtifactEvent(event *a2asdk.TaskArtifactUpdateEvent) (ArtifactSnapshot, error) {
@@ -680,7 +660,7 @@ func projectTaskPage(response *a2asdk.ListTasksResponse) (TaskPage, error) {
 		}
 		page.Tasks = append(page.Tasks, projected)
 	}
-	return cloneTaskPage(page), nil
+	return page, nil
 }
 
 func cloneTime(value *time.Time) *time.Time {
@@ -1035,7 +1015,7 @@ func projectInteraction(result a2asdk.SendMessageResult) (Interaction, error) {
 	default:
 		return Interaction{}, fmt.Errorf("%w: %T", ErrInvalidResult, result)
 	}
-	return cloneInteraction(interaction), nil
+	return interaction, nil
 }
 
 func projectMessage(message *a2asdk.Message) (MessageSnapshot, error) {
@@ -1071,7 +1051,7 @@ func projectMessage(message *a2asdk.Message) (MessageSnapshot, error) {
 			projected.ReferenceTaskIDs = append(projected.ReferenceTaskIDs, id)
 		}
 	}
-	return cloneMessageSnapshot(projected), nil
+	return projected, nil
 }
 
 func projectTask(task *a2asdk.Task) (TaskSnapshot, error) {
@@ -1103,7 +1083,6 @@ func projectTask(task *a2asdk.Task) (TaskSnapshot, error) {
 		}
 		projected.Artifacts = append(projected.Artifacts, artifactItem)
 	}
-	cloneTaskSnapshotValue(&projected)
 	return projected, nil
 }
 
@@ -1170,7 +1149,6 @@ func projectArtifact(
 		}
 		projected.Parts = append(projected.Parts, content)
 	}
-	cloneArtifactSnapshot(&projected)
 	return projected, nil
 }
 
@@ -1210,7 +1188,7 @@ func projectContentPart(part *a2asdk.Part) (ContentPart, error) {
 	default:
 		return ContentPart{}, ErrInvalidResult
 	}
-	return cloneContentPart(projected), nil
+	return projected, nil
 }
 
 func cloneDiscovery(discovery Discovery) Discovery {
@@ -1235,80 +1213,6 @@ func cloneDiscovery(discovery Discovery) Discovery {
 		discovery.Skills[index].OutputModes = append([]string(nil), discovery.Skills[index].OutputModes...)
 	}
 	return discovery
-}
-
-func cloneInteraction(interaction Interaction) Interaction {
-	interaction.Raw = append(json.RawMessage(nil), interaction.Raw...)
-	if interaction.Message != nil {
-		message := cloneMessageSnapshot(*interaction.Message)
-		interaction.Message = &message
-	}
-	if interaction.Task != nil {
-		task := *interaction.Task
-		cloneTaskSnapshotValue(&task)
-		interaction.Task = &task
-	}
-	return interaction
-}
-
-func cloneMessageSnapshot(message MessageSnapshot) MessageSnapshot {
-	message.Raw = append(json.RawMessage(nil), message.Raw...)
-	message.Metadata = append(json.RawMessage(nil), message.Metadata...)
-	message.Extensions = append([]string(nil), message.Extensions...)
-	message.ReferenceTaskIDs = append([]string(nil), message.ReferenceTaskIDs...)
-	message.Parts = append([]ContentPart(nil), message.Parts...)
-	for index := range message.Parts {
-		message.Parts[index] = cloneContentPart(message.Parts[index])
-	}
-	return message
-}
-
-func cloneTaskSnapshotValue(task *TaskSnapshot) {
-	if task == nil {
-		return
-	}
-	task.Raw = append(json.RawMessage(nil), task.Raw...)
-	task.Metadata = append(json.RawMessage(nil), task.Metadata...)
-	if task.StatusMessage != nil {
-		message := cloneMessageSnapshot(*task.StatusMessage)
-		task.StatusMessage = &message
-	}
-	task.History = append([]MessageSnapshot(nil), task.History...)
-	for index := range task.History {
-		task.History[index] = cloneMessageSnapshot(task.History[index])
-	}
-	task.Artifacts = append([]ArtifactSnapshot(nil), task.Artifacts...)
-	for index := range task.Artifacts {
-		cloneArtifactSnapshot(&task.Artifacts[index])
-	}
-}
-
-func cloneArtifactSnapshot(artifact *ArtifactSnapshot) {
-	if artifact == nil {
-		return
-	}
-	artifact.Raw = append(json.RawMessage(nil), artifact.Raw...)
-	artifact.Metadata = append(json.RawMessage(nil), artifact.Metadata...)
-	artifact.Parts = append([]ContentPart(nil), artifact.Parts...)
-	for index := range artifact.Parts {
-		artifact.Parts[index] = cloneContentPart(artifact.Parts[index])
-	}
-}
-
-func cloneContentPart(part ContentPart) ContentPart {
-	part.Raw = append([]byte(nil), part.Raw...)
-	part.Data = append(json.RawMessage(nil), part.Data...)
-	part.Metadata = append(json.RawMessage(nil), part.Metadata...)
-	return part
-}
-
-func cloneTaskPage(page TaskPage) TaskPage {
-	page.Raw = append(json.RawMessage(nil), page.Raw...)
-	page.Tasks = append([]TaskSnapshot(nil), page.Tasks...)
-	for index := range page.Tasks {
-		cloneTaskSnapshotValue(&page.Tasks[index])
-	}
-	return page
 }
 
 func decodeMetadata(raw json.RawMessage) (map[string]any, error) {

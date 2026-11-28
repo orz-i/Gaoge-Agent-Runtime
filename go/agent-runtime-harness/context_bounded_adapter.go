@@ -13,9 +13,23 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
-// NewBoundedContextAdapter opts into Runtime-owned lifecycle orchestration.
-// Host authorization, ancestry, archive storage and checkpoint CAS remain the
-// same ports as the ordinary constructors, which remain ordinary middleware.
+// ModelWindowResolver supplies the routed model's real window for an exact
+// sampling request. It must not invent a default; an unknown limit fails closed.
+// This is a read-only measurement dependency: it must not generate model output
+// or perform business effects. Recovery may repeat an unreturned resolution.
+type ModelWindowResolver func(context.Context, model.Request) (runtimecontext.ModelWindow, error)
+
+func hasContextArtifactReader(request model.Request) bool {
+	for _, definition := range request.Tools {
+		if definition.Key == ContextArtifactToolKey {
+			return true
+		}
+	}
+	return false
+}
+
+// NewBoundedContextAdapter supplies Host authorization, ancestry, archive
+// storage and checkpoint operations to the fixed Runtime Context stage.
 func NewBoundedContextAdapter(store Store, manager *runtimecontext.Manager, resolve ModelWindowResolver, relations ContextRunRelationSource) (*agent.BoundedContextAdapter, error) {
 	if store == nil || manager == nil || resolve == nil {
 		return nil, ErrInvalidRequest
@@ -37,7 +51,7 @@ func (p boundedContextPorts) ContextSummaryRecoveryHost() kernel.ManagedRecovery
 }
 
 func (p boundedContextPorts) Hydrate(ctx context.Context, invocation plugin.RunInvocation) (context.Context, agent.BoundedContextHydration, error) {
-	hydrated, err := (contextRunMiddleware{store: p.store, relations: p.relations}).hydrate(ctx, invocation.RunID)
+	hydrated, err := p.hydrate(ctx, invocation.RunID)
 	if err != nil {
 		return ctx, agent.BoundedContextHydration{}, err
 	}

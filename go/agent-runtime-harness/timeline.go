@@ -9,16 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
-
-type ToolTimelineMiddleware struct {
-	store Store
-	clock Clock
-	feed  *TurnFeed
-}
 
 func appendHostedToolStartedItem(
 	ctx context.Context,
@@ -28,29 +23,20 @@ func appendHostedToolStartedItem(
 	turn Turn,
 	invocation Invocation,
 	runID string,
-	state hostedToolStreamState,
 	call model.HostedToolCall,
 ) error {
 	payload, err := json.Marshal(hostedToolTimelinePayload{
-		CallID: state.CallID, ToolKey: state.ToolKey, Status: "in_progress",
+		CallID: strings.TrimSpace(call.ID), ToolKey: strings.TrimSpace(call.ToolKey), Status: "in_progress",
 	})
 	if err != nil {
 		return err
 	}
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
-		ID: state.ItemID, TurnID: turn.ID, Kind: ItemTool, Status: ItemStarted, RunID: runID, InvocationID: invocation.ID,
+		ID: hostedStreamItemID(turn.ID, call), TurnID: turn.ID, Kind: ItemTool, Status: ItemStarted, RunID: runID, InvocationID: invocation.ID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err
-}
-
-type hostedToolStreamState struct {
-	ItemID    string
-	CallID    string
-	ToolKey   string
-	InputHash string
-	Closed    bool
 }
 
 type hostedToolStreamEventPayload struct {
@@ -59,13 +45,8 @@ type hostedToolStreamEventPayload struct {
 	Status  string `json:"status,omitempty"`
 }
 
-type hostedToolStreamTracker struct {
-	turnID string
-	states []hostedToolStreamState
-}
-
-func newHostedToolStreamTracker(turnID string) *hostedToolStreamTracker {
-	return &hostedToolStreamTracker{turnID: strings.TrimSpace(turnID)}
+func hostedStreamItemID(turnID string, call model.HostedToolCall) string {
+	return stableID("hihts", turnID, strings.TrimSpace(call.ToolKey), strings.TrimSpace(call.ID))
 }
 
 func agentMessagePreviewEvent(event model.StreamEvent) (model.StreamEvent, bool) {
@@ -73,214 +54,79 @@ func agentMessagePreviewEvent(event model.StreamEvent) (model.StreamEvent, bool)
 	return event, event.Delta != "" || event.Reasoning != nil || event.Usage != nil || strings.TrimSpace(event.ResponseID) != ""
 }
 
-func (middleware *ModelTimelineMiddleware) recordHostedToolStreamEvent(
-	ctx context.Context,
-	turn Turn,
-	invocation Invocation,
-	runID string,
-	tracker *hostedToolStreamTracker,
-	call model.HostedToolCall,
-) error {
-	if strings.TrimSpace(call.ID) == "" {
-		return nil
-	}
-	state, created := tracker.resolveStream(call)
-	if created {
-		if err := appendHostedToolStartedItem(ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, runID, state, call); err != nil {
-			return err
-		}
-	}
-	if middleware.feed != nil {
-		raw, err := json.Marshal(hostedToolStreamEventPayload{
-			ID: strings.TrimSpace(call.ID), ToolKey: strings.TrimSpace(call.ToolKey), Status: strings.TrimSpace(call.Status),
-		})
-		if err != nil {
-			return err
-		}
-		_, _ = middleware.feed.Publish(ctx, turn.ID, TurnEventDraft{
-			Type: EventItemDelta, ItemID: state.ItemID, ItemKind: ItemTool,
-			Data: raw, Status: string(ItemStarted),
-		})
-	}
-	tracker.markStreamStatus(state.ItemID, call.Status)
-	return nil
+// ModelTimelineObserver projects best-effort live facts. Committed Model
+// receipts are projected by the ordinary Harness snapshot synchronization.
+type ModelTimelineObserver struct {
+	store   Store
+	runtime *kernel.Runtime
+	clock   Clock
+	feed    *TurnFeed
 }
 
-func (tracker *hostedToolStreamTracker) resolveStream(call model.HostedToolCall) (hostedToolStreamState, bool) {
-	callID := strings.TrimSpace(call.ID)
-	toolKey := strings.TrimSpace(call.ToolKey)
-	inputHash := hashTimelineBytes(call.Input)
-	if index := tracker.stateIndexByCallID(callID); index >= 0 {
-		state := &tracker.states[index]
-		if state.InputHash == "" && inputHash != "" {
-			state.InputHash = inputHash
-		}
-		return *state, false
+func NewModelTimelineObserver(store Store, runtime *kernel.Runtime, clock Clock, feed *TurnFeed) (*ModelTimelineObserver, error) {
+	if store == nil || runtime == nil || clock == nil {
+		return nil, ErrInvalidRequest
 	}
-	state := hostedToolStreamState{
-		ItemID: stableID("hihts", tracker.turnID, toolKey, callID),
-		CallID: callID, ToolKey: toolKey, InputHash: inputHash,
-	}
-	tracker.states = append(tracker.states, state)
-	return state, true
+	return &ModelTimelineObserver{store: store, runtime: runtime, clock: clock, feed: feed}, nil
 }
+func (*ModelTimelineObserver) Name() string { return "harness.timeline.model" }
 
-func (tracker *hostedToolStreamTracker) stateIndexByCallID(callID string) int {
-	if callID == "" {
-		return -1
-	}
-	for index := range tracker.states {
-		if tracker.states[index].CallID == callID {
-			return index
-		}
-	}
-	return -1
-}
-
-func (tracker *hostedToolStreamTracker) markStreamStatus(itemID, status string) {
-	if !hostedToolTerminalStatus(status) {
+func (p *ModelTimelineObserver) Observe(ctx context.Context, event plugin.Event) {
+	if event.Type != agent.EventModelStarted && event.Type != agent.EventModelDelta {
 		return
 	}
-	for index := range tracker.states {
-		if tracker.states[index].ItemID == itemID {
-			tracker.states[index].Closed = true
+	turn, invocation, active, err := timelineTurn(ctx, p.store, event.RunID)
+	if err != nil || !active || invocation.ParentItemID != "" || event.Message == "" {
+		return
+	}
+	if event.Type == agent.EventModelDelta {
+		var stream model.StreamEvent
+		if json.Unmarshal(event.Data, &stream) != nil {
 			return
 		}
-	}
-}
-
-func (tracker *hostedToolStreamTracker) finalParent(call model.HostedToolCall) string {
-	callID := strings.TrimSpace(call.ID)
-	if index := tracker.stateIndexByCallID(callID); index >= 0 {
-		return tracker.states[index].ItemID
-	}
-	return ""
-}
-
-func hostedToolTerminalStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "completed", "complete", "failed", "error", "cancelled", "canceled":
-		return true
-	default:
-		return false
-	}
-}
-
-func NewToolTimelineMiddleware(store Store, clock Clock, feed *TurnFeed) (*ToolTimelineMiddleware, error) {
-	if store == nil || clock == nil {
-		return nil, ErrInvalidRequest
-	}
-	return &ToolTimelineMiddleware{store: store, clock: clock, feed: feed}, nil
-}
-
-func (*ToolTimelineMiddleware) Name() string { return "harness.timeline.tool" }
-
-func (middleware *ToolTimelineMiddleware) Tool(
-	ctx context.Context,
-	invocation plugin.ToolInvocation,
-	next plugin.ToolNext,
-) (tools.ExecutionResult, error) {
-	turn, agentInvocation, harnessRun, err := timelineTurn(ctx, middleware.store, invocation.Run.ID)
-	if err != nil {
-		return tools.ExecutionResult{}, err
-	}
-	if !harnessRun {
-		return next(ctx)
-	}
-	startedID, err := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, agentInvocation, invocation, tools.ExecutionResult{}, ItemStarted, "",
-	)
-	if err != nil {
-		return tools.ExecutionResult{}, err
-	}
-	result, executeErr := next(ctx)
-	if executeErr == nil && strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
-		return result, nil
-	}
-	status := ItemCompleted
-	if executeErr != nil {
-		status = ItemFailed
-	}
-	_, itemErr := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, agentInvocation, invocation, result, status, startedID,
-	)
-	return result, errors.Join(executeErr, itemErr)
-}
-
-type ModelTimelineMiddleware struct {
-	store Store
-	clock Clock
-	feed  *TurnFeed
-}
-
-func NewModelTimelineMiddleware(store Store, clock Clock, feed *TurnFeed) (*ModelTimelineMiddleware, error) {
-	if store == nil || clock == nil {
-		return nil, ErrInvalidRequest
-	}
-	return &ModelTimelineMiddleware{store: store, clock: clock, feed: feed}, nil
-}
-
-func (*ModelTimelineMiddleware) Name() string { return "harness.timeline.model" }
-
-func (middleware *ModelTimelineMiddleware) Model(
-	ctx context.Context,
-	request model.Request,
-	emit model.StreamSink,
-	next plugin.ModelNext,
-) (model.Response, error) {
-	turn, invocation, harnessRun, err := timelineTurn(ctx, middleware.store, request.RunID)
-	if err != nil {
-		return model.Response{}, err
-	}
-	if !harnessRun || invocation.ParentItemID != "" {
-		return next(ctx, request, emit)
-	}
-	messageItemID, hasMessageItem, err := activeAgentMessageItemID(ctx, middleware.store, turn)
-	if err != nil {
-		return model.Response{}, err
-	}
-	if !hasMessageItem {
-		messageItemID = stableID("him", turn.ID, request.RunID, strconv.Itoa(len(request.Messages)))
-		if middleware.feed != nil {
-			_, _ = middleware.feed.Publish(ctx, turn.ID, TurnEventDraft{
-				Type: EventItemStarted, ItemID: messageItemID, ItemKind: ItemAgentMessage, Status: string(ItemStarted),
-			})
-		}
-	}
-	hostedTools := newHostedToolStreamTracker(turn.ID)
-	stream := func(event model.StreamEvent) error {
-		if event.HostedToolCall != nil {
-			if streamErr := middleware.recordHostedToolStreamEvent(ctx, turn, invocation, request.RunID, hostedTools, *event.HostedToolCall); streamErr != nil {
-				return streamErr
-			}
-		}
-		if middleware.feed != nil {
-			preview, ok := agentMessagePreviewEvent(event)
-			if ok {
-				raw, marshalErr := json.Marshal(preview)
-				if marshalErr == nil {
-					_, _ = middleware.feed.Publish(ctx, turn.ID, TurnEventDraft{
-						Type: EventItemDelta, ItemID: messageItemID, ItemKind: ItemAgentMessage,
-						Delta: preview.Delta, Data: raw, Status: string(ItemStarted),
-					})
+		if call := stream.HostedToolCall; call != nil && strings.TrimSpace(call.ID) != "" {
+			// The immutable started fact, not an in-memory tracker, links
+			// observed progress to the eventual original receipt.
+			if err := appendHostedToolStartedItem(ctx, p.store, p.clock, p.feed, turn, invocation, event.RunID, *call); err == nil && p.feed != nil {
+				raw, err := json.Marshal(hostedToolStreamEventPayload{ID: strings.TrimSpace(call.ID), ToolKey: strings.TrimSpace(call.ToolKey), Status: strings.TrimSpace(call.Status)})
+				if err == nil {
+					_, _ = p.feed.Publish(ctx, turn.ID, TurnEventDraft{Type: EventItemDelta, ItemID: hostedStreamItemID(turn.ID, *call), ItemKind: ItemTool, Data: raw, Status: string(ItemStarted)})
 				}
 			}
 		}
-		if emit != nil {
-			return emit(event)
+		preview, ok := agentMessagePreviewEvent(stream)
+		if p.feed != nil && ok {
+			messageID, _, err := activeAgentMessageItemID(ctx, p.store, turn)
+			if err != nil {
+				return
+			}
+			if messageID == "" {
+				messageID = stableID("him", turn.ID, event.RunID, event.Message)
+			}
+			if raw, err := json.Marshal(preview); err == nil {
+				_, _ = p.feed.Publish(ctx, turn.ID, TurnEventDraft{Type: EventItemDelta, ItemID: messageID, ItemKind: ItemAgentMessage, Delta: preview.Delta, Data: raw, Status: string(ItemStarted)})
+			}
 		}
-		return nil
+		return
 	}
-	response, callErr := next(ctx, request, stream)
-	if callErr != nil {
-		return response, callErr
+	snapshot, err := p.runtime.Load(ctx, event.RunID)
+	if err != nil {
+		return
 	}
-	if err = appendModelTimelineItems(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, request, response, hostedTools,
-	); err != nil {
-		return response, err
+	view, err := agent.ViewState(snapshot)
+	if err != nil || len(view.ModelInvocations) == 0 {
+		return
 	}
-	return response, nil
+	original := view.ModelInvocations[len(view.ModelInvocations)-1]
+	if original.ID != event.Message || original.Purpose == agent.ModelInvocationContextSummary {
+		return
+	}
+	if p.feed != nil {
+		_, found, err := activeAgentMessageItemID(ctx, p.store, turn)
+		if err == nil && !found {
+			_, _ = p.feed.Publish(ctx, turn.ID, TurnEventDraft{Type: EventItemStarted, ItemID: stableID("him", turn.ID, event.RunID, event.Message), ItemKind: ItemAgentMessage, Status: string(ItemStarted)})
+		}
+	}
 }
 
 type toolTimelinePayload struct {
@@ -326,55 +172,39 @@ func timelineTurn(ctx context.Context, store Store, executionRefID string) (Turn
 	return turn, invocation, err == nil, err
 }
 
-func appendToolTimelineItem(
-	ctx context.Context,
-	store Store,
-	clock Clock,
-	feed *TurnFeed,
-	turn Turn,
-	agentInvocation Invocation,
-	invocation plugin.ToolInvocation,
-	result tools.ExecutionResult,
-	status ItemStatus,
-	parentItemID string,
-) (string, error) {
-	payload, err := json.Marshal(toolTimelinePayload{
-		CallID: invocation.Request.Call.ID, ToolKey: invocation.Definition.Key,
-		ArgumentsHash: hashTimelineBytes(invocation.Request.Call.Arguments),
-		ContentHash:   hashTimelineBytes(result.Content), ExecutionID: result.Receipt.ExecutionID,
-		Disposition: result.Receipt.Disposition,
-	})
-	if err != nil {
-		return "", err
+// Project immutable receipts, including consumed invocations whose executable
+// Request was intentionally discarded. Refresh uses this same projection,
+// so an interrupted append never requires a new Provider call.
+func (runner *Runner) recordModelTimelineItems(ctx context.Context, turn Turn, invocation Invocation, snapshot kernel.Snapshot) error {
+	if invocation.ParentItemID != "" || snapshot.Run.Kind != agent.RunKind {
+		return nil
 	}
-	itemID := stableID("hit", turn.ID, invocation.Request.Call.ID, string(status))
-	now := clock.Now().UTC()
-	_, err = appendItemFact(ctx, store, feed, Item{
-		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: invocation.Run.ID, InvocationID: agentInvocation.ID,
-		ParentItemID: parentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now,
-	})
-	return itemID, err
-}
-
-func appendModelTimelineItems(
-	ctx context.Context,
-	store Store,
-	clock Clock,
-	feed *TurnFeed,
-	turn Turn,
-	invocation Invocation,
-	request model.Request,
-	response model.Response,
-	hostedTools *hostedToolStreamTracker,
-) error {
-	for _, artifact := range response.Artifacts {
-		if err := appendArtifactTimelineItem(ctx, store, clock, feed, turn, invocation, request.RunID, artifact); err != nil {
+	view, err := agent.ViewState(snapshot)
+	if err != nil {
+		// Preserve the existing opaque AgentStarter projection contract; only
+		// a decodable native Agent receipt can create these facts.
+		if _, native := runner.agent.(*agent.Runner); native {
 			return err
 		}
+		return nil
 	}
-	for index, call := range response.HostedToolCalls {
-		if err := appendHostedToolTimelineItem(ctx, store, clock, feed, turn, invocation, request, call, hostedTools, index); err != nil {
-			return err
+	for _, receipt := range view.ModelInvocations {
+		if receipt.Purpose == agent.ModelInvocationContextSummary || receipt.ErrorCode != "" ||
+			(receipt.Status != agent.ModelInvocationCompleted && receipt.Status != agent.ModelInvocationConsumed) {
+			continue
+		}
+		if receipt.RunID != snapshot.Run.ID {
+			return ErrConflict
+		}
+		for _, artifact := range receipt.Response.Artifacts {
+			if err = appendArtifactTimelineItem(ctx, runner.store, runner.clock, runner.turnFeed, turn, invocation, receipt.RunID, artifact); err != nil {
+				return err
+			}
+		}
+		for index, call := range receipt.Response.HostedToolCalls {
+			if err = appendHostedToolTimelineItem(ctx, runner.store, runner.clock, runner.turnFeed, turn, invocation, receipt.RunID, receipt.ID, call, index); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -437,9 +267,8 @@ func appendHostedToolTimelineItem(
 	feed *TurnFeed,
 	turn Turn,
 	invocation Invocation,
-	request model.Request,
+	runID, modelInvocationID string,
 	call model.HostedToolCall,
-	tracker *hostedToolStreamTracker,
 	ordinal int,
 ) error {
 	status := hostedToolItemStatus(call.Status)
@@ -459,19 +288,35 @@ func appendHostedToolTimelineItem(
 	}
 	identity := strings.TrimSpace(call.ID)
 	if identity == "" {
-		identity = hashTimelineBytes(call.Input)
+		// Anonymous observations have no remote effect identity. Distinguish
+		// receipt-local facts without guessing a physical execution ID.
+		identity = stableID("hihta", modelInvocationID, strconv.Itoa(ordinal+1))
 	}
+	itemID := stableID("hiht", turn.ID, call.ToolKey, identity, string(status))
 	parentItemID := ""
-	if tracker != nil {
-		parentItemID = tracker.finalParent(call)
-	}
-	if identity == "" {
-		identity = firstNonEmpty(parentItemID, strconv.Itoa(ordinal+1))
+	if strings.TrimSpace(call.ID) != "" {
+		id := hostedStreamItemID(turn.ID, call)
+		started, err := store.GetItem(ctx, id)
+		if err == nil {
+			if started.TurnID != turn.ID || started.RunID != runID || started.InvocationID != invocation.ID || started.Kind != ItemTool || started.Status != ItemStarted {
+				return ErrConflict
+			}
+			parentItemID = id
+			// A later live start must not rewrite an already projected receipt.
+			if existing, e := store.GetItem(ctx, itemID); e == nil {
+				if existing.ParentItemID == "" {
+					parentItemID = ""
+				}
+			} else if !errors.Is(e, ErrNotFound) {
+				return e
+			}
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
 	}
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
-		ID: stableID("hiht", turn.ID, call.ToolKey, identity, string(status)), TurnID: turn.ID,
-		Kind: ItemTool, Status: status, RunID: request.RunID, InvocationID: invocation.ID, ParentItemID: parentItemID,
+		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: runID, InvocationID: invocation.ID, ParentItemID: parentItemID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err

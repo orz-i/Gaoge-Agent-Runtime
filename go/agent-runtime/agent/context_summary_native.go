@@ -26,15 +26,20 @@ func summaryNativeBridge(value any, name string, runtime *kernel.Runtime) bool {
 	return ok && runtime.UsesManagedRecoveryHost(storage.ContextSummaryRecoveryHost())
 }
 
-func validManagedDependencies(d Dependencies) bool {
+// Storage binding is validated independently from whether this composition
+// qualifies to take over a returned or suspended native continuation.
+func validManagedStores(d Dependencies) bool {
 	a := d.BoundedContext
 	return d.Runtime != nil && d.Runtime.SupportsManagedRecovery() && d.Runtime.HasManagedRecoveryHost() &&
-		a != nil && d.PrepareModelRequest == nil && len(d.RunMiddleware) == 0 &&
-		len(d.ModelMiddleware) == 0 && len(d.ToolMiddleware) == 0 && len(d.Observers) == 0 && len(d.Telemetry) == 0 && len(d.CompletionPolicies) == 0 &&
-		d.NormalizeModelPolicy == nil && d.ToolDiscovery == nil &&
-		summaryNativeBridge(a.ports, "boundedContextPorts", d.Runtime) &&
+		a != nil && summaryNativeBridge(a.ports, "boundedContextPorts", d.Runtime) &&
 		(d.ContextSummary == nil || summaryNativeBridge(d.ContextSummary.ports, "contextSummaryPorts", d.Runtime)) &&
-		(d.BoundedBudget == nil || (d.Runtime.UsesLedgerStore(d.BoundedBudget.coordinator.Store) && summaryNativeBridge(d.BoundedBudget.ports, "boundedBudgetPorts", d.Runtime)))
+		(d.BoundedBudget == nil || (d.Runtime.UsesLedgerStore(d.BoundedBudget.store) && summaryNativeBridge(d.BoundedBudget.ports, "boundedBudgetPorts", d.Runtime)))
+}
+
+func validManagedDependencies(d Dependencies) bool {
+	return validManagedStores(d) && d.PrepareModelRequest == nil && d.ModelAdmissionBarrier == nil && d.ToolTimeline == nil &&
+		len(d.Observers) == 0 && len(d.Telemetry) == 0 && len(d.CompletionPolicies) == 0 &&
+		d.NormalizeModelPolicy == nil && d.ToolDiscovery == nil
 }
 
 func validSummaryNativePhase(state runState) bool {

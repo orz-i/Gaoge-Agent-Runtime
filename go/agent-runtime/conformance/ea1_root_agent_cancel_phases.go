@@ -18,7 +18,7 @@ func RunEA1RootAgentCancelPhases(t *testing.T, factory func(*testing.T) (kernel.
 		t.Run("P0/"+v, func(t *testing.T) { ea1RootCancelPreflight(t, factory, v) })
 	}
 	t.Run("P1/active-original-callback", func(t *testing.T) { ea1RootCancelActive(t, factory) })
-	for _, k := range []string{"host", "model", "tool"} {
+	for _, k := range []string{"model", "tool"} {
 		t.Run("P2/"+k, func(t *testing.T) { ea1RootCancelUnknown(t, factory, k) })
 	}
 	// Reproduce slow, successful Model-side intent reads independently
@@ -168,15 +168,12 @@ func ea1RootCancelActive(t *testing.T, factory func(*testing.T) (kernel.Store, k
 		}
 	}
 	f.store.afterOwned = func(ctx context.Context, _ kernel.ChildExecutionGrant) error {
-		if f.host.calls != 0 {
-			t.Fatal("late admission cut")
-		}
 		check(ctx, false)
 		return nil
 	}
-	f.host.before = func(ctx context.Context) error { check(ctx, true); return nil }
+	f.store.afterEntry = func(ctx context.Context) error { check(ctx, true); return nil }
 	out, e := f.runner(f.rt, "original", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
-	if e != nil || hits != 2 || f.host.calls != 1 {
+	if e != nil || hits != 2 {
 		t.Fatalf("original callback could not finish: %v", e)
 	}
 	ea1CancelRejected(t, f.observer, out, kernel.ChildExecutionGrant{}, kernel.ErrTerminal)

@@ -180,11 +180,11 @@ func TestPR82HandoffResumedMemberAndRoleExcludeSupervisorContext(t *testing.T) {
 			if _, _, err = store.CreateInvocation(t.Context(), child); err != nil {
 				t.Fatal(err)
 			}
-			middleware, err := NewContextRunMiddleware(store, nil)
+			middleware, err := newContextHydrationProbe(store, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = middleware.Run(t.Context(), plugin.RunInvocation{
+			_, err = middleware.check(t.Context(), plugin.RunInvocation{
 				Operation: plugin.RunResume, Kind: agent.RunKind, RunID: child.ExecutionRefID,
 			}, func(ctx context.Context) (kernel.Snapshot, error) {
 				if _, hasCheckpoint := CurrentContextCheckpoint(ctx); hasCheckpoint {

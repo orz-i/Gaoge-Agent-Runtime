@@ -27,10 +27,9 @@ type ManagedRecoveryStoreFixture struct {
 type managedStorePorts interface {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
-	kernel.OwnedRetirementStore
+
+	kernel.PhysicalExecutionStore
+
 	kernel.ExecutionQuarantineStore
 	kernel.ManagedRecoveryStore
 }
@@ -97,11 +96,7 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 		t.Fatal(err)
 	}
 	dispatchID := "nativecmd_original-dispatch"
-	g, err := admitBorrowed(t.Context(), bound, v, "start", dispatchID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scoped, err := bound.WithPhysicalGrant(t.Context(), g, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_owner", g.ID, v.State, v.Checkpoint))
+	scoped, g, err := admitBorrowed(t.Context(), bound, v, "start", dispatchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +195,7 @@ func runManagedStoreLiveOwnerAndClaimCompetition(t *testing.T, factory func(*tes
 				}
 				f.backend.AdvanceTo(f.lease.ExpiresAt.Add(100 * time.Millisecond))
 			}
-			if _, e := f.backend.Peer.(managedStorePorts).BeginOwnedPhysicalExecution(t.Context(), admission); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if _, e := f.backend.Peer.(managedStorePorts).BeginPhysicalExecution(t.Context(), admission); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("native admission %s: %v", mode, e)
 			}
 			managedStoreSame(t, f, before)
@@ -285,7 +280,7 @@ type managedEnableRequest struct {
 
 func enableManagedRecovery(ctx context.Context, s managedStorePorts, q managedEnableRequest) (kernel.ManagedTransfer, error) {
 	p := q.Selection.OwnedAdmission(kernel.ExecutionAcquireRequest{RunID: q.RunID, OwnerID: q.OwnerID, LeaseDuration: q.LeaseDuration}, q.LeaseID, q.GrantID)
-	v, e := s.BeginOwnedPhysicalExecution(ctx, p)
+	v, e := s.BeginPhysicalExecution(ctx, p)
 	if e != nil {
 		return kernel.ManagedTransfer{}, e
 	}
@@ -296,13 +291,31 @@ func enableManagedRecovery(ctx context.Context, s managedStorePorts, q managedEn
 	return t, nil
 }
 
+// CancelManagedFixture submits the same native control as the Agent and
+// reads the original history only after a successful commit.
+func CancelManagedFixture(ctx context.Context, rt *kernel.Runtime, p kernel.ManagedAdmissionProof) (kernel.ManagedTransfer, error) {
+	point := p.Point()
+	if _, _, err := rt.ApplyControl(ctx, point.Host.RunID, point.Source.Run.Revision, p.CancellationGuard(), kernel.Mutation{}, nil); err != nil {
+		return kernel.ManagedTransfer{}, err
+	}
+	return rt.LoadManagedRecoveryByID(ctx, point.ID)
+}
+
+func cancelManagedStoreFixture(ctx context.Context, store managedStorePorts, p kernel.ManagedAdmissionProof) (kernel.ManagedTransfer, error) {
+	point := p.Point()
+	if _, _, err := store.Commit(ctx, point.Host.RunID, point.Source.Run.Revision, kernel.StoreMutation{}, kernel.ControlCommit(p.CancellationGuard())); err != nil {
+		return kernel.ManagedTransfer{}, err
+	}
+	return store.LoadManagedRecoveryByID(ctx, point.ID)
+}
+
 func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	for _, mode := range []kernel.ManagedRecoveryMode{kernel.ManagedResume, kernel.ManagedCancel} {
 		t.Run(string(mode), func(t *testing.T) {
 			f := managedStoreSetup(t, factory)
 			proof, parked := managedStoreSelection(t, f, mode)
 			enable := managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "owner", LeaseID: "lease", GrantID: "successor", LeaseDuration: time.Minute, Selection: proof}
-			cancel := kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, Selection: proof}
+			cancel := proof
 			if mode == kernel.ManagedCancel {
 				if _, e := enableManagedRecovery(t.Context(), f.store, enable); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("CANCEL authorized send: %v", e)
@@ -323,12 +336,12 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				if e != nil {
 					t.Fatal(e)
 				}
-				req := kernel.CreateRequest{ID: "competing-logical-child", LogicalParentRunID: f.source.Run.ID, Kind: "agent", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, Goal: "competing child", State: json.RawMessage("{}")}
+				req := kernel.CreateRequest{ID: "competing-logical-child", LogicalParentRunID: f.source.Run.ID, Kind: "agent", ExecutionRequired: true, Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, Goal: "competing child", State: json.RawMessage("{}")}
 				child, e := peer.Create(t.Context(), req)
 				if e != nil {
 					t.Fatal(e)
 				}
-				if _, e = f.store.CommitManagedCancellation(t.Context(), cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = cancelManagedStoreFixture(t.Context(), f.store, cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("CANCEL bypassed native descendant: %v", e)
 				}
 				managedStoreSame(t, f, parked)
@@ -338,7 +351,7 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				if _, e = peer.Cancel(t.Context(), child.Run.ID, child.Run.Revision, "settle original child"); e != nil {
 					t.Fatal(e)
 				}
-				result, e := f.store.CommitManagedCancellation(t.Context(), cancel)
+				result, e := cancelManagedStoreFixture(t.Context(), f.store, cancel)
 				if e != nil || !result.Resolved() || result.Selection.Mode != kernel.ManagedCancel {
 					t.Fatalf("cancel: %v", e)
 				}
@@ -346,13 +359,13 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				if _, e = peer.Create(t.Context(), req); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("child crossed committed ancestor CANCEL: %v", e)
 				}
-				again, e := f.store.CommitManagedCancellation(t.Context(), cancel)
+				again, e := cancelManagedStoreFixture(t.Context(), f.store, cancel)
 				if e != nil || kernel.ManagedDigest(again) != kernel.ManagedDigest(result) {
 					t.Fatalf("cancel ACK: %v", e)
 				}
 				foreignCancel := cancel
-				foreignCancel.Selection = different
-				if _, e = f.store.CommitManagedCancellation(t.Context(), foreignCancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+				foreignCancel = different
+				if _, e = cancelManagedStoreFixture(t.Context(), f.store, foreignCancel); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("different cancellation overwrote selection: %v", e)
 				}
 				if kernel.ManagedDigest(result.Terminal.State) != kernel.ManagedDigest(f.source.State) || result.Terminal.EventHead != f.source.EventHead+1 {
@@ -361,7 +374,7 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				managedStoreReopenEqual(t, f, result)
 				return
 			}
-			if _, e := f.store.CommitManagedCancellation(t.Context(), cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if _, e := cancelManagedStoreFixture(t.Context(), f.store, cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("RESUME authorized cancel: %v", e)
 			}
 			managedStoreSame(t, f, parked)
@@ -392,12 +405,16 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 func runManagedStoreCallbackEntry(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	f := managedStoreSetup(t, factory)
 	selection, _ := managedStoreSelection(t, f, kernel.ManagedResume)
-	timed, e := enableManagedRecovery(t.Context(), f.store, managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "entry-owner", LeaseID: "entry-lease", GrantID: "entry-grant", LeaseDuration: 3 * time.Second, Selection: selection})
+	scoped, admitted, e := f.runtime.AdmitManagedContinuation(t.Context(), selection, "entry-owner", 3*time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
-	g, l := timed.SuccessorGrant, timed.SuccessorLease
-	port := f.backend.Peer.(kernel.OwnedPhysicalExecutionStore)
+	g, l := admitted.Grant, admitted.Lease
+	timed, e := f.store.LoadManagedRecoveryByID(t.Context(), f.point.ID)
+	if e != nil || timed.SuccessorGrant != g || timed.SuccessorLease != l {
+		t.Fatalf("lost original admission: %v", e)
+	}
+	port := f.backend.Peer.(kernel.PhysicalExecutionStore)
 	f.grant = g
 	foreign := f.source
 	foreign.EventHead++
@@ -405,14 +422,7 @@ func runManagedStoreCallbackEntry(t *testing.T, factory func(*testing.T) Managed
 		t.Fatalf("changed source admitted: %v", e)
 	}
 	managedStoreSame(t, f, timed)
-	bound, e := f.runtime.WithExecution(l)
-	if e != nil {
-		t.Fatal(e)
-	}
-	scoped, e := bound.WithPhysicalGrant(t.Context(), g, featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_physical_owner", g.ID, f.source.State, f.source.Checkpoint))
-	if e != nil {
-		t.Fatal(e)
-	}
+
 	if _, e = scoped.Apply(t.Context(), f.source.Run.ID, f.source.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"unsafe":"before-entry"}`)}); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("enabled grant bypassed entry: %v", e)
 	}
@@ -426,7 +436,7 @@ func runManagedStoreCallbackEntry(t *testing.T, factory func(*testing.T) Managed
 	}
 	start := make(chan struct{})
 	results := make(chan entryResult, 2)
-	for _, contender := range []kernel.OwnedPhysicalExecutionStore{f.store, port} {
+	for _, contender := range []kernel.PhysicalExecutionStore{f.store, port} {
 		go func() {
 			<-start
 			w, e := contender.CheckOwnedPhysicalEntry(t.Context(), g, l, f.source)
@@ -467,7 +477,7 @@ func runManagedStoreCallbackEntry(t *testing.T, factory func(*testing.T) Managed
 		t.Fatalf("entered successor re-admitted: %v", e)
 	}
 	managedStoreSame(t, f, left)
-	if _, e = f.store.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+	if _, e = f.store.LookupPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("entry fabricated callback return: %v", e)
 	}
 	if _, e = f.store.LoadOwnedRetirement(t.Context(), g.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -478,18 +488,14 @@ func runManagedStoreCallbackEntry(t *testing.T, factory func(*testing.T) Managed
 func runManagedStoreFinishClosesHistoricalTransfer(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	f := managedStoreSetup(t, factory)
 	selection, _ := managedStoreSelection(t, f, kernel.ManagedResume)
-	enabled, e := enableManagedRecovery(t.Context(), f.store, managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "owner", LeaseID: "lease", GrantID: "successor", LeaseDuration: time.Minute, Selection: selection})
+	scoped, admitted, e := f.runtime.AdmitManagedContinuation(t.Context(), selection, "owner", time.Minute)
 	if e != nil {
 		t.Fatal(e)
 	}
-	bound, e := f.runtime.WithExecution(enabled.SuccessorLease)
-	if e != nil {
-		t.Fatal(e)
-	}
-	g := enabled.SuccessorGrant
-	scoped, e := bound.WithPhysicalGrant(t.Context(), g, featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_physical_owner", g.ID, f.source.State, f.source.Checkpoint))
-	if e != nil {
-		t.Fatal(e)
+	g := admitted.Grant
+	enabled, e := f.store.LoadManagedRecoveryByID(t.Context(), f.point.ID)
+	if e != nil || enabled.SuccessorGrant != g || enabled.SuccessorLease != admitted.Lease {
+		t.Fatalf("lost original admission: %v", e)
 	}
 	if _, e = scoped.CheckOwnedPhysicalEntry(t.Context(), f.source); e != nil {
 		t.Fatal(e)
@@ -519,7 +525,7 @@ func runManagedStoreFinishClosesHistoricalTransfer(t *testing.T, factory func(*t
 	}
 	receipt := retirementFinish(t, retired)
 	original, e := f.store.LoadManagedRecoveryByID(t.Context(), f.point.ID)
-	if e != nil || !original.Resolved() || original.Selection.Mode != kernel.ManagedResume || original.Terminal == nil || kernel.ManagedDigest(*original.Terminal) != kernel.ManagedDigest(next) || len(receipt.Closures) != 1 || kernel.ManagedDigest(receipt.Closures[0]) != kernel.ManagedDigest(original) {
+	if e != nil || !original.Resolved() || original.Selection.Mode != kernel.ManagedResume || original.Terminal == nil || kernel.ManagedDigest(*original.Terminal) != kernel.ManagedDigest(next) || !receipt.MatchesManagedClosure(original, next) {
 		t.Fatalf("Finish did not atomically close exact transfer: %v", e)
 	}
 
@@ -529,16 +535,12 @@ func runManagedStoreFinishClosesHistoricalTransfer(t *testing.T, factory func(*t
 	if e != nil {
 		t.Fatal(e)
 	}
-	bound, e = f.runtime.WithExecution(lease)
+	bound, e := f.runtime.WithExecution(lease)
 	if e != nil {
 		t.Fatal(e)
 	}
 	dispatchID := "nativecmd_later-dispatch"
-	later, e := admitBorrowed(t.Context(), bound, next, "resume", dispatchID)
-	if e != nil {
-		t.Fatal(e)
-	}
-	scoped, e = bound.WithPhysicalGrant(t.Context(), later, featurecontrol.Seal(next.Run.ID, next.Run.Revision, "agent_physical_owner", later.ID, next.State, next.Checkpoint))
+	scoped, later, e := admitBorrowed(t.Context(), bound, next, "resume", dispatchID)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -614,30 +616,37 @@ type managedStoreACK struct {
 	hits int
 }
 
-func (s *managedStoreACK) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	value, e := s.managedStorePorts.ApplyExecution(ctx, l, r, m)
-	if e == nil && s.mode == "t0" && m.ManagedSafePoint.Present() {
-		s.hits++
-		return kernel.Snapshot{}, errManagedStoreACK
+func (s *managedStoreACK) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		value, _, e := s.managedStorePorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if e == nil && s.mode == "t0" && commitMutation.ManagedSafePoint.Present() {
+			s.hits++
+			return kernel.Snapshot{}, false, errManagedStoreACK
+		}
+		return value, false, e
 	}
-	return value, e
+	if commitAuth.Control != nil {
+		g := *commitAuth.Control
+
+		v, revoke, e := s.managedStorePorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if _, managed, _ := g.ManagedCancellation(commitID, commitRev, commitMutation); e == nil && s.mode == "cancel" && managed {
+			s.hits++
+			return kernel.Snapshot{}, false, errManagedStoreACK
+		}
+		return v, revoke, e
+	}
+	return s.managedStorePorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
-func (s *managedStoreACK) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	v, e := s.managedStorePorts.BeginOwnedPhysicalExecution(ctx, p)
+
+func (s *managedStoreACK) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	v, e := s.managedStorePorts.BeginPhysicalExecution(ctx, p)
 	if e == nil && s.mode == "enable" && p.IsManagedRecovery() {
 		s.hits++
 		return v, p.CommitOutcome(errManagedStoreACK)
 	}
 	return v, e
 }
-func (s *managedStoreACK) CommitManagedCancellation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
-	v, e := s.managedStorePorts.CommitManagedCancellation(ctx, q)
-	if e == nil && s.mode == "cancel" {
-		s.hits++
-		return kernel.ManagedTransfer{}, errManagedStoreACK
-	}
-	return v, e
-}
+
 func runManagedStoreTransactionACK(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	for _, mode := range []string{"t0", "enable", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
@@ -682,11 +691,11 @@ func runManagedStoreTransactionACK(t *testing.T, factory func(*testing.T) Manage
 				}
 
 			} else {
-				q := kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, Selection: proof}
-				if _, e = fault.CommitManagedCancellation(t.Context(), q); !errors.Is(e, errManagedStoreACK) {
+				q := proof
+				if _, e = cancelManagedStoreFixture(t.Context(), fault, q); !errors.Is(e, errManagedStoreACK) {
 					t.Fatalf("CANCEL fault: %v", e)
 				}
-				retry, e = peer.CommitManagedCancellation(t.Context(), q)
+				retry, e = cancelManagedStoreFixture(t.Context(), peer, q)
 			}
 			if e != nil || fault.hits != 1 {
 				t.Fatalf("exact original recovery failed/hit=%d: %v", fault.hits, e)
@@ -769,7 +778,7 @@ func runManagedResumeCancelElection(t *testing.T, factory func(*testing.T) Manag
 			}
 			managedStoreSame(t, f, source)
 			q := managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "owner", LeaseID: "lease", GrantID: "successor", LeaseDuration: time.Minute, Selection: resume}
-			c := kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, Selection: cancel}
+			c := cancel
 			var result kernel.ManagedTransfer
 			var e error
 			peer := f.backend.Peer.(managedStorePorts)
@@ -778,7 +787,7 @@ func runManagedResumeCancelElection(t *testing.T, factory func(*testing.T) Manag
 				if e != nil {
 					t.Fatal(e)
 				}
-				if _, e = peer.CommitManagedCancellation(t.Context(), c); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = cancelManagedStoreFixture(t.Context(), peer, c); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("losing cancel mutated original: %v", e)
 				}
 				if result.Resolved() || result.Selection.Mode != kernel.ManagedResume || result.SuccessorLease.Epoch != f.lease.Epoch+1 {
@@ -787,7 +796,7 @@ func runManagedResumeCancelElection(t *testing.T, factory func(*testing.T) Manag
 				f.grant = result.SuccessorGrant
 				managedStoreSame(t, f, result)
 			} else {
-				result, e = f.store.CommitManagedCancellation(t.Context(), c)
+				result, e = cancelManagedStoreFixture(t.Context(), f.store, c)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -810,17 +819,21 @@ func runManagedStoreAncestorGate(t *testing.T, factory func(*testing.T) ManagedR
 	for _, winner := range []string{"admission", "child"} {
 		t.Run(winner, func(t *testing.T) {
 			f := managedStoreSetup(t, factory)
-			child, e := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: "managed-child", Kind: "agent", Goal: "original managed child", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, ParentRunID: f.source.Run.ID, State: json.RawMessage(`{"child":"original"}`)})
+			child, e := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: "managed-child", Kind: "agent", ExecutionRequired: true, Goal: "original managed child", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, ParentRunID: f.source.Run.ID, State: json.RawMessage(`{"child":"original"}`)})
 			if e != nil {
 				t.Fatal(e)
 			}
 			grant := kernel.ChildExecutionGrant{ID: "child-grant", ChildRunID: child.Run.ID, ExpectedRevision: child.Run.Revision}
 			peer := f.backend.Peer.(managedStorePorts)
+			childRuntime, e := kernel.New(kernel.Dependencies{Store: peer, IDs: fixedGrantIDs{grant.ID}})
+			if e != nil {
+				t.Fatal(e)
+			}
 			selection, candidate := managedStoreSelection(t, f, kernel.ManagedResume)
 			managedStoreSame(t, f, candidate)
 			q := managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "owner", LeaseID: "lease", GrantID: "successor", LeaseDuration: time.Minute, Selection: selection}
 			if winner == "child" {
-				if e = peer.BeginChildExecution(t.Context(), grant); e != nil {
+				if grant, e = AdmitChildFixture(t.Context(), childRuntime, child.Run.ID, child.Run.Revision); e != nil {
 					t.Fatal(e)
 				}
 				if _, e = enableManagedRecovery(t.Context(), f.store, q); !errors.Is(e, kernel.ErrExecutionConflict) {
@@ -835,7 +848,7 @@ func runManagedStoreAncestorGate(t *testing.T, factory func(*testing.T) ManagedR
 				if e != nil {
 					t.Fatal(e)
 				}
-				if e = peer.BeginChildExecution(t.Context(), grant); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = AdmitChildFixture(t.Context(), childRuntime, child.Run.ID, child.Run.Revision); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("child passed admitted ancestor: %v", e)
 				}
 				if _, e = peer.LookupChildExecution(t.Context(), child.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -882,7 +895,7 @@ func runForeignGrantErasure(t *testing.T, factory func(*testing.T) ManagedRecove
 	if e != nil {
 		t.Fatal(e)
 	}
-	other, e := admitBorrowed(ctx, b, v, "start", "")
+	_, other, e := admitBorrowed(ctx, b, v, "start", "")
 	if !errors.Is(e, kernel.ErrInvalidInput) || other != (kernel.ChildExecutionGrant{}) {
 		t.Fatalf("foreign deterministic dispatch identity admitted: %+v %v", other, e)
 	}
@@ -907,13 +920,13 @@ func runForeignGrantErasure(t *testing.T, factory func(*testing.T) ManagedRecove
 			t.Fatalf("valid transfer failed: %v", err)
 		}
 	case kernel.ManagedCancel:
-		out, err := f.store.CommitManagedCancellation(ctx, kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, Selection: selection})
+		out, err := cancelManagedStoreFixture(ctx, f.store, selection)
 		if err != nil || !out.Resolved() || out.Selection.Mode != kernel.ManagedCancel {
 			t.Fatalf("valid cancellation failed: %v", err)
 		}
 	}
 	// Neither successful transfer nor cancellation releases the original ID.
-	if _, e = admitBorrowed(ctx, b, v, "start", ""); !errors.Is(e, kernel.ErrInvalidInput) {
+	if _, _, e = admitBorrowed(ctx, b, v, "start", ""); !errors.Is(e, kernel.ErrInvalidInput) {
 		t.Fatalf("managed consumption released original identity: %v", e)
 	}
 	if _, e = rt.LookupChildExecution(ctx, v.Run.ID); !errors.Is(e, kernel.ErrNotFound) {

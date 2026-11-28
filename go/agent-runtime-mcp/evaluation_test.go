@@ -126,9 +126,8 @@ func (executor mcpScenarioExecutor) invalidArgumentsFenced(ctx context.Context) 
 	caller := &registryCaller{}
 	registry, err := NewRegistry(caller, Discovery{
 		ProtocolVersion: ProtocolVersion,
-		Catalog:         CatalogSnapshot{Endpoint: testRegistryEndpoint},
+		Endpoint:        testRegistryEndpoint,
 		Tools: []DiscoveredTool{{
-			Name: testLookupTool,
 			Definition: tools.Definition{
 				Key: testLookupTool, Name: testLookupTool,
 				InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1}}}`),

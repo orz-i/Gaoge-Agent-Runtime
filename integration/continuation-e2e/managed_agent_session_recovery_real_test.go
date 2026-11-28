@@ -27,7 +27,6 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -402,10 +401,10 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	if phase == "" {
 		t.Skip("subprocess helper")
 	}
-	starting := phase == "crash" || phase == "opaque-crash"
+	starting := phase == "crash" || phase == "unmanaged-crash"
 	retirementCut := ""
 	switch phase {
-	case "crash", "opaque-crash", "resume", "resume-closed", "refresh-closed":
+	case "crash", "unmanaged-crash", "resume", "resume-closed", "refresh-closed":
 	case "resume-finish-before", "resume-finish-after":
 		retirementCut = strings.TrimPrefix(phase, "resume-")
 	default:
@@ -417,7 +416,7 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := newManagedRecoverySessionWithComposition(t, db, files, starting, phase != "opaque-crash", facade, retirementCut)
+	session := newManagedRecoverySessionWithComposition(t, db, files, starting, phase != "unmanaged-crash", facade, retirementCut)
 	if starting {
 		_, err := session.Prompt(t.Context(), managedRecoveryTurn, managedRecoveryPrompt)
 		t.Fatalf("expected process exit after second model intent commit, got %v", err)
@@ -550,19 +549,22 @@ type managedRecoveryCrashStore struct {
 	modelIntents int
 }
 
-func (store *managedRecoveryCrashStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	snapshot, err := store.KernelStore.ApplyExecution(ctx, lease, revision, mutation)
-	if err == nil {
-		for _, event := range mutation.Events {
-			if event.Type == "agent.model_invocation.pending" {
-				store.modelIntents++
-				if store.modelIntents == 2 {
-					os.Exit(managedRecoveryCrashExit)
+func (store *managedRecoveryCrashStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		snapshot, _, err := store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil {
+			for _, event := range commitMutation.Events {
+				if event.Type == "agent.model_invocation.pending" {
+					store.modelIntents++
+					if store.modelIntents == 2 {
+						os.Exit(managedRecoveryCrashExit)
+					}
 				}
 			}
 		}
+		return snapshot, false, err
 	}
-	return snapshot, err
+	return store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type managedRecoveryRetirementCrashStore struct {
@@ -602,7 +604,11 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	} else if len(retirementCut) == 1 && retirementCut[0] != "" {
 		kernelStore = &managedRecoveryRetirementCrashStore{KernelStore: postgresadapter.NewKernelStore(db), cut: retirementCut[0]}
 	}
-	runtime, err := kernel.New(kernel.Dependencies{Store: kernelStore, ManagedRecoveryHost: hostStore})
+	deps := kernel.Dependencies{Store: kernelStore}
+	if managed {
+		deps.ManagedRecoveryHost = hostStore
+	}
+	runtime, err := kernel.New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +648,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 			Inputs:  inputs,
 			Runtime: runtime, Store: hostStore, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
 			LocalTools: managedRecoverySessionTools(files), Session: options,
-			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ManagedRecovery: managed, ReadArtifacts: true},
+			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ReadArtifacts: true},
 			Execution: execution, RunExecution: runExecution,
 		})
 		if err != nil {
@@ -662,18 +668,8 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	}
 	dependencies := agent.Dependencies{
 		Runtime: runtime, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
-		Catalog: registry, Executor: registry, BoundedContext: bounded, ManagedRecovery: managed,
-		RunMiddleware: []plugin.RunMiddleware{bounded},
-		RunExecution:  runExecution, Execution: execution,
-	}
-	if !managed {
-		ordinary, ordinaryErr := harness.NewContextRunMiddleware(hostStore, nil)
-		if ordinaryErr != nil {
-			t.Fatal(ordinaryErr)
-		}
-		dependencies.BoundedContext = nil
-		dependencies.RunMiddleware = []plugin.RunMiddleware{ordinary}
-		dependencies.PrepareModelRequest = bounded.Prepare
+		Catalog: registry, Executor: registry, BoundedContext: bounded,
+		RunExecution: runExecution, Execution: execution,
 	}
 	direct, err := agent.NewRunner(dependencies)
 	if err != nil {

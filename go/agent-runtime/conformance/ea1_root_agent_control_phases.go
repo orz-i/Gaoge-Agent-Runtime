@@ -88,21 +88,6 @@ func (a *ea1ControlApproval) ResolveToolApproval(cp *kernel.Checkpoint, r plugin
 	return out, e
 }
 
-type ea1ControlHost struct {
-	t       *testing.T
-	request agent.StartRequest
-	calls   int
-}
-
-func (*ea1ControlHost) Name() string { return "ea1.actual.approval.host" }
-func (h *ea1ControlHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	h.calls++
-	if i.Operation != plugin.RunResolveApproval || i.RunID != h.request.ID || i.ParentRunID != "" || i.Actor != h.request.Actor || i.Thread != h.request.Thread || i.Goal != h.request.Goal {
-		h.t.Fatal("actual approval Host source mismatch")
-	}
-	return next(ctx)
-}
-
 type ea1ControlFixture struct {
 	t                *testing.T
 	peer             kernel.Store
@@ -114,7 +99,6 @@ type ea1ControlFixture struct {
 	registry         *tools.Registry
 	definition       tools.Definition
 	approval         *ea1ControlApproval
-	host             *ea1ControlHost
 	request          agent.StartRequest
 	created, waiting kernel.Snapshot
 	approved         kernel.Snapshot
@@ -130,7 +114,7 @@ type ea1ControlFixture struct {
 func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), external bool) *ea1ControlFixture {
 	backing, peer, reopen := factory(t)
 	s := ea1AgentAdmissionWrap(t, backing)
-	fault := &ea1AgentReceiptFault{Store: s, ExecutionStore: s, ControlStore: s, ChildExecutionStore: s, ExecutionQuarantineStore: s, OwnedPhysicalExecutionStore: s}
+	fault := &ea1AgentReceiptFault{Store: s, ExecutionStore: s, ExecutionQuarantineStore: s, PhysicalExecutionStore: s}
 	rt := ea1StartRuntime(t, fault)
 	approvals, e := interaction.New(rt)
 	if e != nil {
@@ -160,7 +144,6 @@ func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		t.Fatal(e)
 	}
 	f.request = agent.StartRequest{ID: "root-control", RequestID: "original-request", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original controlled effect", Instructions: "Use original call only.", Model: "fixture-model", ToolKeys: []string{"effect"}}
-	f.host = &ea1ControlHost{t: t, request: f.request}
 	// Setup performs the same real Store reads under callback deadlines.
 	setup := f.runner(rt, true, false)
 	s.afterCreate = func(_ context.Context, v kernel.Snapshot) error {
@@ -175,7 +158,7 @@ func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		t.Fatal(e)
 	}
 	m, n := f.physical.counts()
-	if m != 1 || (!external && n != 0) || (external && n != 1) || f.host.calls != 0 || f.approval.calls != 0 {
+	if m != 1 || (!external && n != 0) || (external && n != 1) || f.approval.calls != 0 {
 		t.Fatal("setup dispatched measured control callback")
 	}
 	if !setup.VerifyFrozenStartRequest(f.waiting, f.request) {
@@ -216,9 +199,6 @@ func (f *ea1ControlFixture) runner(rt *kernel.Runtime, native, host bool) *agent
 	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, Clock: ea1UnknownAgentClock{offset: f.offset}, Execution: ea1StoreBackedExecutionPolicy()}
 	if native {
 		d.RunExecution = &agent.RunExecution{OwnerID: "control-owner", LeaseDuration: 2 * time.Second}
-	}
-	if host {
-		d.RunMiddleware = []plugin.RunMiddleware{f.host}
 	}
 	if !f.external {
 		d.ApprovalPolicies = []plugin.ApprovalPolicy{ea1ControlPolicy{}}
@@ -284,7 +264,7 @@ func ea1ApprovalPreflight(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	}
 	out, e := r.ResolveApproval(t.Context(), id, rev, response)
 	if vector == "native-success" || vector == "default-success" {
-		if e != nil || f.approval.calls != 1 || f.host.calls != 1 {
+		if e != nil || f.approval.calls != 1 {
 			t.Fatalf("real approval failed: %v", e)
 		}
 		m, n := f.physical.counts()
@@ -315,11 +295,11 @@ func ea1ApprovalPreflight(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		t.Fatal("rejected approval sent")
 	}
 	if vector == "invalid-decision" || vector == "foreign-checkpoint" {
-		if f.approval.calls != 1 || f.host.calls != 1 {
+		if f.approval.calls != 1 {
 			t.Fatal("handler validation not reached")
 		}
 	} else {
-		if f.approval.calls != 0 || f.host.calls != 0 {
+		if f.approval.calls != 0 {
 			t.Fatal("preflight entered callbacks")
 		}
 		if _, e = f.observer.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -405,7 +385,7 @@ func ea1ApprovalBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			t.Fatal("approval changed admitted scope")
 		}
 		ea1ControlFence(t, f, f.waiting, g, l, entered)
-		if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+		if _, e = f.observer.LookupPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatal("active approval fabricated callback return")
 		}
 		m, n := f.physical.counts()
@@ -414,7 +394,7 @@ func ea1ApprovalBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 		}
 	}
 	f.store.afterOwned = func(context.Context, kernel.ChildExecutionGrant) error {
-		if f.host.calls != 0 || f.approval.calls != 0 {
+		if f.approval.calls != 0 {
 			t.Fatal("post-admission cut too late")
 		}
 		check(false)
@@ -422,7 +402,7 @@ func ea1ApprovalBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	}
 	f.approval.before = func() { check(true) }
 	out, e := r.ResolveApproval(t.Context(), f.request.ID, f.waiting.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
-	if e != nil || checks != 2 || f.host.calls != 1 || f.approval.calls != 1 || out.Run.Status != kernel.RunStatusRunning {
+	if e != nil || checks != 2 || f.approval.calls != 1 || out.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("same original approval could not finish after rejected controls: %v", e)
 	}
 	if !ea1RecoveryJSONEqual(out.Checkpoint, f.approval.resolved) {
@@ -486,12 +466,12 @@ func ea1ApprovalUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	if g.AdmissionOperation != "approval" || g.ExpectedRevision != f.waiting.Run.Revision || g.ExecutionLeaseID != l.LeaseID || g.ExecutionEpoch != l.Epoch || g.ExecutionOwnerID != l.OwnerID {
 		t.Fatal("unknown approval source changed")
 	}
-	c, e := f.rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
-	if e != nil || c.HostCompleted {
-		t.Fatal("unknown approval Host falsely completed")
+	c, e := f.rt.LookupPhysicalCallbackReturn(t.Context(), g)
+	if e != nil || c.HostCompleted != (kind == "tool") {
+		t.Fatal("actual callback return was misclassified")
 	}
 	m, n := f.physical.counts()
-	if m != 1 || f.approval.calls != 1 || f.host.calls != 1 || (kind == "handler" && (f.approval.sends != 1 || n != 0)) || (kind == "tool" && (n != 1 || f.fault.failures != 1)) {
+	if m != 1 || f.approval.calls != 1 || (kind == "handler" && (f.approval.sends != 1 || n != 0)) || (kind == "tool" && (n != 1 || f.fault.failures != 1)) {
 		t.Fatal("unknown fixture substituted callback")
 	}
 	if kind == "handler" {
@@ -523,12 +503,12 @@ func ea1ApprovalUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	if e != nil || same != g {
 		t.Fatal("TTL changed original approval scope")
 	}
-	after, e := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+	after, e := freshRT.LookupPhysicalCallbackReturn(t.Context(), g)
 	if e != nil || !ea1RecoveryJSONEqual(c, after) {
 		t.Fatal("TTL upgraded callback outcome")
 	}
 	a, b := f.physical.counts()
-	if a != m || b != n || f.host.calls != 1 || f.approval.calls != 1 {
+	if a != m || b != n || f.approval.calls != 1 {
 		t.Fatal("approval retry replayed")
 	}
 }
@@ -545,7 +525,7 @@ func ea1ToolWaitPhase(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 	if g.AdmissionOperation != "start" || g.ChildRunID != f.request.ID || g.ExecutionOwnerID != l.OwnerID || g.ExecutionLeaseID != l.LeaseID || g.ExecutionEpoch != l.Epoch || g.AdmissionSourceHash == "" {
 		t.Fatal("ToolWait lost original Start scope/native source")
 	}
-	c, e := f.rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+	c, e := f.rt.LookupPhysicalCallbackReturn(t.Context(), g)
 	if e != nil || !c.HostCompleted {
 		t.Fatal("pending Tool lacks actual returned Host scope")
 	}
@@ -555,7 +535,7 @@ func ea1ToolWaitPhase(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 		if e != nil || same != g {
 			t.Fatal("ToolWait changed original physical scope")
 		}
-		co, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+		co, e := rt.LookupPhysicalCallbackReturn(t.Context(), g)
 		if e != nil || !ea1RecoveryJSONEqual(co, c) {
 			t.Fatal("ToolWait changed original callback fact")
 		}

@@ -951,6 +951,9 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 	if IsManagedDispatchClosure(value) {
 		return Item{}, false, ErrConflict
 	}
+	if !ValidNativeNoRunProjection(ctx, value, store.invocationExecutionRefs[value.RunID] != "") {
+		return Item{}, false, ErrConflict
+	}
 	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
 		switch value.ParentItemID {
 		case CancellationFenceParentItemID:

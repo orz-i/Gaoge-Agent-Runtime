@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -39,7 +38,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		return snapshot, ErrModelOutcomeUnknown
 	}
 	active, ok := activeModelInvocation(state)
-	if !ok || (active.Status != ModelInvocationPending && active.Status != ModelInvocationCompleted) || active.DispatchAttempt == 0 {
+	if !ok || active.DispatchAttempt == 0 {
 		return snapshot, ErrModelOutcomeUnknown
 	}
 	inv := *active
@@ -47,7 +46,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, err)
 	}
-	completion, err := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	completion, err := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, ErrRootOutcomeUnknown, err)
 	}
@@ -59,14 +58,14 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	}
 	// The verifier only sees the exact committed physical request. A missing
 	// plan after dispatch is not evidence that logical and physical were equal.
-	if inv.SamplingPlan == nil || !inv.SamplingPlan.valid(inv.Request) {
+	if inv.SamplingPlan == nil || !inv.SamplingPlan.valid(inv.Request) || inv.SamplingPlan.LedgerID != snapshot.Run.BudgetScopeID {
 		return snapshot, ErrModelOutcomeUnknown
 	}
 	request := inv.SamplingPlan.request(inv.Request)
 	response, receiptErr := runner.recoveryModelReceipt(ctx, inv, request, completion.HostCompleted)
 	originalInvocation := inv
 	var ledgerMutation *budget.LedgerMutation
-	if a := runner.atomicModelBudget(inv.SamplingPlan); a != nil && completion.HostCompleted && inv.Status == ModelInvocationPending {
+	if a := runner.modelBudget(inv.SamplingPlan); a != nil && completion.HostCompleted && inv.Status == ModelInvocationPending {
 		res, loadErr := runner.originalModelReservation(ctx, inv)
 		if loadErr != nil {
 			return snapshot, errors.Join(ErrModelOutcomeUnknown, loadErr)
@@ -90,18 +89,18 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if originalInvocation.Status == ModelInvocationCompleted {
 		// Immutable original evidence: neither another receipt nor another
 		// verifier response may overwrite it, even under the same call ID.
-		if !samePersistedModelResponse(originalInvocation.Response, inv.Response) || !reflect.DeepEqual(originalInvocation.Usage, inv.Usage) || originalInvocation.ProviderResponseID != inv.ProviderResponseID || originalInvocation.ErrorCode != inv.ErrorCode {
+		if !samePersistedModelResponse(originalInvocation.Response, inv.Response) || originalInvocation.ProviderResponseID != inv.ProviderResponseID || originalInvocation.ErrorCode != inv.ErrorCode {
 			return snapshot, ErrInvalidModelResponse
 		}
 		if !completion.HostCompleted {
 			return snapshot, ErrRootOutcomeUnknown
 		}
-		if err = runner.ReconcileRootPhysicalExecution(ctx, runID); err != nil {
+		if err = runner.ReconcilePhysicalExecution(ctx, runID); err != nil {
 			return snapshot, err
 		}
 		return snapshot, nil
 	}
-	if !validModelInvocationReceipt(inv) || !replaceLastModelInvocation(&state, inv) {
+	if !replaceLastModelInvocation(&state, inv) {
 		return snapshot, ErrInvalidModelResponse
 	}
 	encoded, err := encodeState(state)
@@ -119,13 +118,11 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		// transcript, Tool authorization, wakeup or Host settlement is minted.
 		return evidence, ErrRootOutcomeUnknown
 	}
-	source := featurecontrol.Seal(runID, revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-	target := featurecontrol.Seal(runID, revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, kernel.ReceiptRecoveryTarget(snapshot.Checkpoint, ledgerMutation))
-	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, revision, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{{Type: "agent.model_invocation.completed", Message: inv.ID, Wakeup: true}}}, source, target)
+	repaired, err := runner.commitReturnedState(ctx, snapshot, grant, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{{Type: "agent.model_invocation.completed", Message: inv.ID, Wakeup: true}}})
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, err)
 	}
-	if err = runner.ReconcileRootPhysicalExecution(ctx, runID); err != nil {
+	if err = runner.ReconcilePhysicalExecution(ctx, runID); err != nil {
 		return repaired, err
 	}
 	return repaired, nil
@@ -152,28 +149,9 @@ func (runner *Runner) qualifiedRecoveredModelReceipt(state runState, inv ModelIn
 	if !rejected && !model.ValidResponse(response) {
 		return ModelInvocation{}, errors.Join(ErrModelOutcomeUnknown, ErrInvalidModelResponse)
 	}
-	if rejected {
-		response = model.BillingOnlyResponse(response)
-	}
-	inv.Status = ModelInvocationCompleted
-	inv.ProviderResponseID = strings.TrimSpace(response.ResponseID)
-	inv.Response = model.CloneResponse(response)
-	inv.Usage = model.CloneUsage(response.Usage)
-	inv.ExecutionLeaseUntil = nil
-	inv.RetryAfter = nil
+	inv = completeModelInvocation(inv, response, receiptErr, rejected, runner.clock.Now().UTC())
 	if clearDiagnostic {
-		inv.OutcomeErrorCode = ""
-		inv.OutcomeErrorDetail = ""
-	}
-	completedAt := runner.clock.Now().UTC()
-	if inv.CompletedAt == nil {
-		inv.CompletedAt = &completedAt
-	}
-	if rejected {
-		inv.ErrorCode = model.ClassifiedErrorCode(receiptErr)
-		if inv.ErrorCode == "" {
-			inv.ErrorCode = rejectedModelResponseCode
-		}
+		inv.OutcomeErrorCode, inv.OutcomeErrorDetail = "", ""
 	}
 	if !validModelInvocationReceipt(inv) {
 		return ModelInvocation{}, ErrInvalidModelResponse
@@ -187,14 +165,14 @@ func (runner *Runner) qualifiedRecoveredModelReceipt(state runState, inv ModelIn
 // its committed rejection. Reads never acquire or alter budget rights.
 func (runner *Runner) originalModelReservation(ctx context.Context, inv ModelInvocation) (budget.Reservation, error) {
 	plan := inv.SamplingPlan
-	if plan == nil || plan.LedgerID == "" || !plan.valid(inv.Request) || runner.samplingBudget == nil {
+	if plan == nil || plan.LedgerID == "" || !plan.valid(inv.Request) || runner.boundedBudget == nil {
 		return budget.Reservation{}, ErrInvalidRequest
 	}
 	expected, err := plan.reservation(inv.Request)
 	if err != nil {
 		return budget.Reservation{}, err
 	}
-	ledger, err := runner.samplingBudget.coordinator.Store.LoadBudget(ctx, plan.LedgerID)
+	ledger, err := runner.boundedBudget.bindReceiptScope(ctx, inv.RunID, plan.LedgerID)
 	if err != nil {
 		return budget.Reservation{}, err
 	}
@@ -220,9 +198,7 @@ func (runner *Runner) recoveryModelReceipt(ctx context.Context, inv ModelInvocat
 		if res.Status == budget.ReservationSettled {
 			return budget.DecodeModelReceipt(res)
 		}
-		if hostCompleted && runner.atomicModelBudget(inv.SamplingPlan) == nil {
-			return model.Response{}, budget.ErrWaiting
-		}
+
 	}
 	if runner.modelOutcomeVerifier == nil {
 		return model.Response{}, ErrModelOutcomeUnknown
@@ -267,7 +243,7 @@ func matchesSettledModelReceipt(inv ModelInvocation, res budget.Reservation) err
 		response = model.BillingOnlyResponse(response)
 	}
 	if !samePersistedModelResponse(inv.Response, response) ||
-		!reflect.DeepEqual(inv.Usage, response.Usage) || inv.ProviderResponseID != strings.TrimSpace(response.ResponseID) {
+		inv.ProviderResponseID != strings.TrimSpace(response.ResponseID) {
 		return errors.Join(ErrModelOutcomeUnknown, ErrInvalidModelResponse)
 	}
 	return nil

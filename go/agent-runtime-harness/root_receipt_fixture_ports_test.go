@@ -3,6 +3,8 @@ package harness
 import (
 	"context"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -18,65 +20,26 @@ func (s *receiptFaultStore) ReleaseExecution(ctx context.Context, l kernel.Execu
 func (s *receiptFaultStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
 	return s.Store.(kernel.ExecutionStore).CheckExecution(ctx, id, l)
 }
-func (s *receiptFaultStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
 
-	for _, event := range m.Events {
-		if !s.fired && event.Type == "agent.model_invocation.completed" {
-			s.fired = true
-			if s.afterCommit {
-				if _, err := s.Store.(kernel.ExecutionStore).ApplyExecution(ctx, l, r, m); err != nil {
-					return kernel.Snapshot{}, err
-				}
-			}
-			return kernel.Snapshot{}, errBudgetResponseRejected
-		}
-	}
-	return s.Store.(kernel.ExecutionStore).ApplyExecution(ctx, l, r, m)
-
-}
-func (s *receiptFaultStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
-}
-func (s *receiptFaultStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	return s.Store.(kernel.ChildExecutionStore).BeginChildExecution(ctx, g)
-}
 func (s *receiptFaultStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
-	return s.Store.(kernel.ChildExecutionStore).LookupChildExecution(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
 }
-func (s *receiptFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	return s.Store.(kernel.ChildExecutionStore).MarkChildExecutionSettled(ctx, g, p)
-}
+
 func (s *receiptFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g, p)
+	return s.Store.(kernel.PhysicalExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *receiptFaultStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, p)
+func (s *receiptFaultStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	return s.Store.(kernel.PhysicalExecutionStore).BeginPhysicalExecution(ctx, p)
 }
 func (s *receiptFaultStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
+	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
-func (s *receiptFaultStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-
-	for _, event := range m.Events {
-		if !s.fired && event.Type == "agent.model_invocation.completed" {
-			s.fired = true
-			if s.afterCommit {
-				if _, err := s.Store.(kernel.OwnedPhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p); err != nil {
-					return kernel.Snapshot{}, err
-				}
-			}
-			return kernel.Snapshot{}, errBudgetResponseRejected
-		}
-	}
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
-
+func (s *receiptFaultStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	return s.Store.(kernel.PhysicalExecutionStore).RecordPhysicalCallbackReturn(ctx, g, r, o, p)
 }
-func (s *receiptFaultStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).RecordOwnedPhysicalCallbackReturn(ctx, g, r, o, p)
-}
-func (s *receiptFaultStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).LookupOwnedPhysicalCallbackReturn(ctx, g)
+func (s *receiptFaultStore) LookupPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
+	return s.Store.(kernel.PhysicalExecutionStore).LookupPhysicalCallbackReturn(ctx, g)
 }
 func (s *receiptFaultStore) QuarantineExecution(ctx context.Context, q kernel.ExecutionQuarantine) error {
 	return s.Store.(kernel.ExecutionQuarantineStore).QuarantineExecution(ctx, q)
@@ -87,9 +50,18 @@ func (s *receiptFaultStore) RepairExecutionQuarantine(ctx context.Context, q ker
 
 // Preserve the backend's atomic retirement authority through this fault decorator.
 func (s *receiptFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 
 func (s *receiptFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
+}
+
+// Fault injection changes only the receipt commit; the native budget
+// port must retain the same underlying Store and transaction.
+func (s *receiptFaultStore) LoadBudget(ctx context.Context, scope string) (budget.Ledger, error) {
+	return s.Store.(budget.LedgerStore).LoadBudget(ctx, scope)
+}
+func (s *receiptFaultStore) SaveBudget(ctx context.Context, l budget.Ledger, rev uint64) error {
+	return s.Store.(budget.LedgerStore).SaveBudget(ctx, l, rev)
 }

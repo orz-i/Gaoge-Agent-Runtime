@@ -51,8 +51,7 @@ func TestAutoAllowanceCommittedWakeupResumesThroughSchedulerAndWorker(t *testing
 		Goal:          "produce a corrected answer",
 		Actor:         kernel.ActorRef{TenantID: "tenant", ActorID: "owner"},
 		Thread:        kernel.ThreadRef{Kind: "conversation", ID: "worker-thread"},
-		CallAllowance: &agent.CallAllowance{LLMCalls: 1},
-		AutoAllowance: &agent.AutoAllowancePolicy{ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1},
+		CallAllowance: &agent.CallAllowance{LLMCalls: 1, Renewal: &agent.AutoAllowancePolicy{ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1}},
 	}
 	granted, err := direct.StartRun(t.Context(), request)
 	if err != nil || granted.Run.Status != kernel.RunStatusRunning ||

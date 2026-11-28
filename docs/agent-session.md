@@ -11,6 +11,7 @@ go run ./go/agent-runtime-harness/examples/agent-session
 The first Turn calls one release-check Tool. The second recalls the previous
 answer through the Host's transcript. The [complete example](../go/agent-runtime-harness/examples/agent-session/main.go)
 uses Memory Stores and a fixture model; it does not survive process exit.
+It also subscribes to the same Runner's retained completion events by Host Turn ID.
 
 ## Supported composition
 
@@ -47,7 +48,8 @@ session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 
 The Root and each Named Agent share one `AgentSpec`: Model, options,
 Instructions, strict output contract, selected Skills, local/hosted Tools and
-limits. A Root can select a provider Hosted Tool by giving a versioned
+limits. Root limits are selected only in `Session.Config.AgentSpec.Limits`;
+there is no second `AgentSessionOptions.Limits` default to reconcile. A Root can select a provider Hosted Tool by giving a versioned
 `HostedToolGrants` in `Config.AgentSpec` and the matching `HostedTools` catalog
 in `AgentSessionOptions`; a Named Agent selects its own independent grants
 and `OutputContract`. Handoff freezes each member's output schema and verifies
@@ -107,7 +109,8 @@ For the recommended **Named Agent** path, the Host sets
 `ModelOptions`/`Instructions`, its own `Tools` (each with a `SessionTool`
 policy), `ToolKeys` from other already-selected Root/Member registrations,
 `Skills`, `HostedToolGrants`, `Limits` and `MaxModelOutputTokens`. Supply a
-`Relations` registry and `Config.DelegationPolicy.MaxDepth > 0`. No separate
+`Relations` registry. Omit `Config.DelegationPolicy.MaxDepth` to use the same
+Runner-owned default as other Turns, or select a tighter positive depth. No separate
 Role or Skill Runner is constructed: the single native Agent Loop executes the
 original child Handoff. The model-facing `harness.delegate_agent` arguments
 contain **only** member ID and goal; the model cannot supply its own tool,
@@ -142,7 +145,7 @@ or a second custom `DelegationPolicy`; the advanced explicit composition path
 remains available when a Host requires a separate routing/authorization port.
 
 For SubAgents, the Host supplies `Relations`, `DelegationPolicy` and
-`Config.DelegationPolicy.MaxDepth > 0`. `OpenAgentSession` registers the existing
+optionally a tighter `Config.DelegationPolicy.MaxDepth`. `OpenAgentSession` registers the existing
 `harness.delegate_agent` Tool and selects one local Agent Runner by default for
 root and children. `Handoffs` can instead be supplied for an explicitly
 selected independent ChildRunner **only without a shared budget**. The Host
@@ -150,7 +153,7 @@ still authorizes the named child via `DelegationToolPolicy`; the model does not
 choose its own tools, credentials or route.
 
 Register tools callable by the root in `LocalTools`. For specialist-only tools,
-use separate `MemberTools` with `ExecutionMode: "local_dispatch"`, and freeze
+use separate `MemberTools` (`ExecutionMode` defaults to `"local_dispatch"`), and freeze
 `Config.DelegationPolicy.LocalToolGrants` specifying each exact `MemberID`,
 `MemberRevision` and `ToolKey`. These definitions are registered for child
 execution but **never appear in the root Agent's Tool list**. Missing, orphaned,
@@ -196,10 +199,12 @@ exists. Only the native Adapter may dispatch and settle physical effects.
 Ordinary `WorkingStateSummary` can use `SharedBudget`. Summary and business
 sampling share the original ledger, physical sampling plan and receipt
 settlement; the summary retains its separate source validation and installation.
-Reopen a budgeted summary Turn with summary support configured. A summary is
+The recommended composition always binds the same summary adapter, including
+when a new handle's summary policy is nil; only the original Turn's sealed
+policy can enable summary work. A summary is
 optional and is skipped if the shared ledger cannot admit it while retaining a
-call for business work. The single `Context.ManagedRecovery` choice can
-carry Context, optional Summary, `SharedBudget` and `Inputs` through
+call for business work. The registered recovery store can carry Context,
+optional Summary, `SharedBudget` and `Inputs` through
 the original first-party managed transfer. The ownership unit is an independently admitted native Root execution
 segment, not the lifetime of the Run or its first Start. For an already
 created first-party Run, Resume and scoped root Approval submit the original
@@ -367,6 +372,7 @@ source delta. Persist completed replies in the Host before the next Turn.
 | --- | --- |
 | `Prompt(ctx, turnID, text)` | Starts a new Turn or replays admission with the **same** ID and original seed/config. Changed inputs are rejected. |
 | `LoadState` / `Timeline` | Bounded status / paged history reads. `Load` is the complete snapshot. |
+| `Subscribe(ctx, turnID, afterSeq)` | Authenticated retained/live Turn events from the executing Runner's existing `TurnFeed`; no model call or new delivery loop. |
 | `Refresh` | Repairs committed Harness projections; does not dispatch model or Tool effects. |
 | `Resume` | Continues the original Run of a running Turn; does not create a new attempt. Approvals and budget waits need their original controls. |
 | `ResolveApproval` / `ResolveSubtaskApproval` | Resolves the exact original Tool or Child checkpoint after checking the Session Actor. |
@@ -382,13 +388,29 @@ original Turn configuration, committed Context and frozen pending model intent;
 it does not reread Host history or replace the ceiling with the new handle's
 configuration. It does not approve pending Tools or grant budget.
 
-Before resuming through this constructor, the original sealed Turn must also
-fit the supported composition. A new simple handle cannot bypass a previously
+Both `OpenAgentSession` and explicit `Runner.OpenSession` bindings check the
+original sealed selection before continuation. A new simple handle cannot bypass a previously
 required shared-budget ledger/meter, selected Tools or original delegation
 route.
 Unsupported original Turns remain available through the read/Refresh APIs;
 continue execution with their original explicit composition. The ordinary
 Harness default delegation depth alone does not require a delegation engine.
+Native continuation verifies the original Run, model ceiling, recovery authority
+and pending catalog; Session does not repeat those checks by reconstructing a
+Run mode. A terminal `Resume` may return committed state after recovery support
+changes, without dispatch or mutation. The pre-effect guard against contradictory
+delegation/interaction/budget Items remains necessary in this base.
+
+For subscription, supply `AgentSessionOptions.TurnFeed` (or `Dependencies.TurnFeed`
+for an explicit Runner). `Subscribe` uses Host Turn IDs, like `Load`, and checks
+the frozen Actor/Thread before and after opening the existing transport. Close
+the returned `TurnSubscription` when finished. A missing feed is
+`ErrInvalidRequest`; expired cursors retain the existing `runfeed.ErrCursorExpired`
+contract. Recover durable state with `LoadState`/`Timeline`, not another Prompt.
+The existing `feed.go:translateTurnSubscription` has a live-tail closure race:
+it can observe closed `inner.Errors` before draining buffered terminal Events.
+This cut does not change that generic delivery loop. Treat stream closure as a
+reason to reconcile committed state; terminal retained replay remains available.
 
 Context Checkpoints use the required `lossless-json-v1` content hash encoding.
 Automatic summaries use the `working-state-summary-v3` recipe. Deploy this cut
@@ -430,13 +452,12 @@ declarations or token ceiling. New invocations use the latest ledger limits.
 Recovery reuses the committed plan without rerunning Context preparation or
 the admission meter.
 
-Ordinary bounded composition is the default. Explicit
-`Context.ManagedRecovery: true` selects the first-party Runtime recovery
-lifecycle for the original Agent, including optional Summary. Before opening, construct the Runtime with its original
-`kernel.Dependencies.ManagedRecoveryHost` bound to that exact Harness Store;
-unsupported or mismatched Stores are rejected. Persistent Kernel and Harness
-Stores plus the original provider/Tool bindings remain Host responsibilities.
-Selecting the flag does not make Memory durable or add a recovery authority.
+The Runtime derives first-party recovery capability from its actual registered
+`kernel.Dependencies.ManagedRecoveryHost` and matching Harness Context,
+Summary and Budget stores. Unsupported or mismatched registered Stores are
+rejected; the original Run cannot change recovery authority on reopen.
+Persistent Kernel and Harness Stores plus original provider/Tool bindings
+remain Host responsibilities.
 Unknown external outcomes continue to require trusted reconciliation.
 
 For mid-task user input, pass the Host's authenticated log as `Inputs` and use
@@ -444,6 +465,14 @@ the [steering guide](run-inputs-and-parallel-reads.md). The managed
 lifecycle can preserve the committed input binding and cursor; the Host must
 retain that log across restarts. A queued input is not an applied input and
 cannot rewrite an already frozen invocation.
+Use `SessionClient.Steer(ctx, turnID, runID, inputID, text)` with the same
+Host input log when it also implements
+`Submit(context.Context, kernel.Run, string, string) (agent.RunInput, error)`.
+The Session verifies its frozen Actor, Thread, original Run/Attempt and input
+binding before invoking that writer. A read-only input source cannot queue input.
+Reuse the original input ID on retry; the committed native input cursor alone
+proves application. The Host remains responsible for authenticating the caller,
+retaining the input log, and persisting admitted user input in its transcript.
 
 Hosts can now supply bounded, source-bound task data through
 `ContextSeed.WorkingState`. See [Explicit WorkingState](working-state.md) for
@@ -455,7 +484,7 @@ frozen `WorkingStateSummary` policy. They add a model invocation inside the
 original Run, before the first business call, and preserve exact raw Artifacts.
 See [Automatic WorkingState](automatic-working-state.md) for input/call limits,
 Host-state priority, ordinary recovery and the shared, restricted
-`Context.ManagedRecovery` hard-crash option.
+source-bound hard-crash recovery.
 
 ## Migrating Session callers
 
@@ -467,14 +496,53 @@ Session constructors and their option types.
 | `OpenTextAgentSession` | Omit `LocalTools`. Supply `Context.ResolveWindow` and a positive `Config.MaxModelOutputTokens`. |
 | `OpenToolAgentSession` | Pass selected Tools as `LocalTools` with their policies. Move `ResolveModelWindow` and `Counter` to `Context.ResolveWindow` and `Context.Counter`. Explicitly enable `ReadArtifacts` and `ExploreReads` when needed. |
 | Separate Tool inventory and selection | Supply paired `LocalTools`. The constructor derives `Config.ToolKeys` and `Config.ToolPolicies`. |
+| `AgentSessionOptions.Limits` | Move to `Session.Config.AgentSpec.Limits`; the same frozen selection configures native defaults and the root request. |
+| `Config.DelegationPolicy.NamedAgents` as constructor input | Use `AgentSessionOptions.NamedAgents`. The durable snapshot is constructor output, not a second selection API. |
+| Explicit `Runner.OpenSession` | Same signature and Runner binding; now uses the same original selection/drift checks as the recommended constructor. |
 
 Use `Runner.OpenSession` for explicitly composed runners.
+
+### Actual Gaoge-Agent-Server caller (read-only audit)
+
+`/Users/mini/Coding/Gaoge-Agent-Server/internal/runtimehost/host.go:97–105`
+still calls the already-removed `OpenTextAgentSession(TextAgentSessionOptions)`
+and initializes promoted `ConfigSnapshot` fields directly. Replace that call
+with `OpenAgentSession(AgentSessionOptions)`, retaining Runtime, Store, the
+admission-bound model adapter, `RunExecution`, Session identity and transcript.
+Change the config literal to:
+
+```go
+Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{
+    Model: r.Definition.ModelBinding,
+    Instructions: r.Definition.Instructions,
+    Limits: agent.Limits{MaxLLMCalls: 1, MaxToolCalls: 1},
+    MaxModelOutputTokens: selectedOutputCeiling,
+}},
+```
+
+Also supply `Context: harness.AgentSessionContextOptions{ResolveWindow:
+resolveAuthorizedModelWindow}` in the outer options. These two names are
+**required Host route data**, not existing runtimehost symbols: its current
+`Model` port exposes only `Validate`/`Generate`, not window metadata. Obtain a
+positive output ceiling and the actual routed model window/reservation from the
+authorized model binding; do not invent capacity or add a fallback model route.
+Keep `Prompt(ctx, a.ID, text)` / `Load(ctx, a.ID)` and Snapshot projection at
+`host.go:115–161` unchanged. `SessionOptions`, `RunExecution` and transcript
+signatures are unchanged. This cut does not reintroduce legacy opt-in aliases.
+
+The read-only test audit covered `host_test.go` (physical identity, frozen history,
+read-only reopen, tenant isolation), `admission_integrity_test.go` (original
+admission integrity) and `http_integration_test.go` (HTTP/worker boundary).
+The downstream migration fixture is exercised in an isolated checkout against
+this module set using explicit test model bounds. Production deployment must
+supply the authorized model binding's actual window and output reservation;
+the original downstream working tree is unchanged.
 
 ## Verify locally
 
 ```sh
-go test -race ./go/agent-runtime-harness/... -count=1
-make agent-quality-regression
+go test -race ./go/agent-runtime-harness -run 'Session|Context|Delegat|Allowance|AgentSpec|Root.*(Ceiling|Summary|Output)' -count=1
+go test ./go/agent-runtime-harness/examples/agent-session ./go/agent-runtime-harness/examples/steering-session -count=1
 ```
 
 The fixture checks exact model requests, Turn/Run identities, Tool effects,

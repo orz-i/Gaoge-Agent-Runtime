@@ -6,10 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	runtimeconformance "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +17,7 @@ import (
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
 	postgresadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
@@ -162,7 +163,7 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				if _, e = peerRT.CommitManagedCancellation(t.Context(), cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = runtimeconformance.CancelManagedFixture(t.Context(), peerRT, cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("losing cancellation: %v", e)
 				}
 				enabled, e := peerRT.LoadManagedRecovery(t.Context(), root.ExecutionRefID)
@@ -182,7 +183,7 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 				}
 			} else {
 				r = cancel.Authorization()
-				committed, e := peerRT.CommitManagedCancellation(t.Context(), cancel)
+				committed, e := runtimeconformance.CancelManagedFixture(t.Context(), peerRT, cancel)
 				if e != nil || !committed.Resolved() || committed.Selection.Mode != kernel.ManagedCancel {
 					t.Fatalf("native cancel: %v", e)
 				}
@@ -224,7 +225,7 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 
 // The same durable unsent intent is insufficient without the explicit audited
 // managed lifecycle. Time passage never manufactures that missing authority.
-func TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown(t *testing.T) {
+func TestRealPostgresUnreturnedNativeProcessCrashRemainsUnknown(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured")
@@ -237,15 +238,15 @@ func TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown(t *testing.T) {
 		t.Fatal(e)
 	}
 	files := t.TempDir()
-	runManagedRecoveryProcess(t, isolated, files, "opaque-crash", managedRecoveryCrashExit)
+	runManagedRecoveryProcess(t, isolated, files, "unmanaged-crash", managedRecoveryCrashExit)
 	host, e := harnesspostgres.New(db)
 	if e != nil {
 		t.Fatal(e)
 	}
 	turnID, root := managedRecoveryRoot(t, host)
 	originalItems, e := host.ListItems(t.Context(), turnID, 0, 1000)
-	if e != nil || !harness.PendingExecutionDispatch(originalItems, root.ID) {
-		t.Fatalf("original Host dispatch missing: %v", e)
+	if e != nil || harness.PendingExecutionDispatch(originalItems, root.ID) {
+		t.Fatalf("fixed Context must not elect a separate Host dispatch: %v", e)
 	}
 	store := postgresadapter.NewKernelStore(db)
 	before, e := store.Load(t.Context(), root.ExecutionRefID)
@@ -257,7 +258,7 @@ func TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown(t *testing.T) {
 		t.Fatal(e)
 	}
 	if _, e = store.LoadManagedRecovery(t.Context(), root.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
-		t.Fatalf("opaque callback created safe descriptor: %v", e)
+		t.Fatalf("unreturned callback created safe descriptor: %v", e)
 	}
 	lease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID)
 	if lease.ExecutionExpiresAt == nil {
@@ -273,30 +274,32 @@ func TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown(t *testing.T) {
 	}
 	// The original owned physical fence precedes the legacy Epoch fallback.
 	if e = store.CheckExecution(t.Context(), root.ExecutionRefID, nil); !errors.Is(e, kernel.ErrChildExecutionBusy) {
-		t.Fatalf("opaque original physical authority: %v", e)
+		t.Fatalf("unreturned original physical authority: %v", e)
 	}
 	originalLease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID)
 	session := newManagedRecoverySession(t, db, files, false, false)
-	resumed, e := session.Resume(t.Context(), managedRecoveryTurn)
-	projection := func(i harness.Item) bool { return i.ParentItemID != harness.ExecutionDispatchParentItemID }
-	if !errors.Is(e, harness.ErrExecutionOutcomeUnknown) || !harness.PendingExecutionDispatch(resumed.Items, root.ID) ||
-		!reflect.DeepEqual(slices.DeleteFunc(originalItems, projection), slices.DeleteFunc(resumed.Items, projection)) {
-		t.Fatalf("opaque pending-intent resume changed Host dispatch: %v", e)
+	_, e = session.Resume(t.Context(), managedRecoveryTurn)
+	if !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+		t.Fatalf("unreturned native intent was not fenced: %v", e)
+	}
+	afterItems, e := host.ListItems(t.Context(), turnID, 0, 1000)
+	if e != nil || harness.PendingExecutionDispatch(afterItems, root.ID) {
+		t.Fatalf("denied resume created a Host dispatch: %v", e)
 	}
 	after, e := store.Load(t.Context(), root.ExecutionRefID)
 	if e != nil || !reflect.DeepEqual(before, after) {
-		t.Fatalf("opaque recovery changed Kernel source: %v", e)
+		t.Fatalf("denied recovery changed Kernel source: %v", e)
 	}
 	afterLease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID)
 	if !sameManagedRecoveryLease(originalLease, afterLease) {
-		t.Fatal("opaque denied recovery changed original native authority")
+		t.Fatal("denied recovery changed original native authority")
 	}
 	retained, e := store.LookupChildExecution(t.Context(), root.ExecutionRefID)
 	if e != nil || retained != grant {
-		t.Fatalf("opaque recovery retired original scope: %v", e)
+		t.Fatalf("denied recovery retired original scope: %v", e)
 	}
 	if len(readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))) != 1 ||
 		len(readManagedRecoveryRecords[managedRecoveryEffect](t, filepath.Join(files, "ledger.jsonl"))) != 1 {
-		t.Fatal("opaque recovery replayed physical work")
+		t.Fatal("denied recovery replayed physical work")
 	}
 }

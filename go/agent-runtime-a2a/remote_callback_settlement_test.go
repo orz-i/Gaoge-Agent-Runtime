@@ -17,11 +17,15 @@ func (s auditRejectCancelledStore) Load(ctx context.Context, id string) (kernel.
 	}
 	return s.Store.Load(ctx, id)
 }
-func (s auditRejectCancelledStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if err := ctx.Err(); err != nil {
-		return kernel.Snapshot{}, err
+
+func (s auditRejectCancelledStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		if err := commitCtx.Err(); err != nil {
+			return kernel.Snapshot{}, false, err
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.Apply(ctx, id, rev, m)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type auditCancelCtxA2AClient struct {
@@ -48,7 +52,7 @@ func TestPR151A2ACancelCtxRetainsPhysicalReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cancelErr := runner.cancelRunAtRevision(ctx, snap.Run.ID, snap.Run.Revision)
+	_, cancelErr := runner.CancelRemote(ctx, snap.Run.ID, snap.Run.Revision)
 	t.Logf("CancelRun returned err=%v context=%v", cancelErr, ctx.Err())
 	pending, err := rt.Load(t.Context(), snap.Run.ID)
 	if err != nil {
@@ -130,7 +134,7 @@ func TestPR151A2AResumeReturnProofLostOnCallerCancellation(t *testing.T) {
 	if err != nil || snap.Run.Status != kernel.RunStatusWaitingInput {
 		t.Fatalf("no initial wait: %+v %v", snap.Run, err)
 	}
-	_, resumeErr := runner.ResumeRun(ctx, snap.Run.ID, "approved")
+	_, resumeErr := runner.ResumeRun(ctx, snap.Run.ID, shadowRevision(t, runner, snap.Run.ID), "approved")
 	persisted, err := rt.Load(t.Context(), snap.Run.ID)
 	if err != nil {
 		t.Fatal(err)

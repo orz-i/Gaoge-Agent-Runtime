@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -22,7 +22,7 @@ func RunEA1ChildAgentCancelPhases(t *testing.T, factory func(*testing.T) (kernel
 	}
 	for _, native := range []bool{false, true} {
 		mode := map[bool]string{false: "default-child", true: "explicit-native"}[native]
-		for _, kind := range []string{"host", "model", "tool"} {
+		for _, kind := range []string{"model", "tool"} {
 			t.Run("P2/"+mode+"/"+kind, func(t *testing.T) { ea1ChildCancelUnknown(t, factory, native, kind) })
 		}
 		if native {
@@ -49,12 +49,12 @@ type ea1ChildCancelStore struct {
 	begins, marks, finishes, markAttempts, applyHits, nativeHits, controlHits int
 }
 
-func (s *ea1ChildCancelStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	e := s.ChildExecutionStore.BeginChildExecution(ctx, g)
+func (s *ea1ChildCancelStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	result, e := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	if e == nil {
 		s.begins++
 	}
-	return e
+	return result, e
 }
 func (s *ea1ChildCancelStore) matched(id string, m kernel.StoreMutation, event string) bool {
 	if id != s.runID || m.Record.Run.ID != s.runID || event == "" {
@@ -67,37 +67,46 @@ func (s *ea1ChildCancelStore) matched(id string, m kernel.StoreMutation, event s
 	}
 	return false
 }
-func (s *ea1ChildCancelStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.matched(id, m, s.event) {
-		s.applyHits++
-		return kernel.Snapshot{}, s.fault
+
+func (s *ea1ChildCancelStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		if s.matched(commitID, commitMutation, s.event) {
+			s.applyHits++
+			return kernel.Snapshot{}, false, s.fault
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.Apply(ctx, id, rev, m)
-}
-func (s *ea1ChildCancelStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.matched(l.RunID, m, s.event) {
-		s.nativeHits++
-		return kernel.Snapshot{}, s.fault
+	if commitAuth.Lease != nil {
+		l := *commitAuth.Lease
+
+		if s.matched(l.RunID, commitMutation, s.event) {
+			s.nativeHits++
+			return kernel.Snapshot{}, false, s.fault
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-}
-func (s *ea1ChildCancelStore) ApplyControl(ctx context.Context, id string, rev uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	out, revoked, e := s.ControlStore.ApplyControl(ctx, id, rev, g, m)
-	if e == nil && s.mode == "cancel-ack" && g.Kind == kernel.ControlCancel && s.matched(id, m, "run.cancelled") {
-		s.controlHits++
-		return kernel.Snapshot{}, false, s.fault
+	if commitAuth.Control != nil {
+		g := *commitAuth.Control
+
+		out, revoked, e := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if e == nil && s.mode == "cancel-ack" && g.Kind == kernel.ControlCancel && s.matched(commitID, commitMutation, "run.cancelled") {
+			s.controlHits++
+			return kernel.Snapshot{}, false, s.fault
+		}
+		return out, revoked, e
 	}
-	return out, revoked, e
+	return s.ea1AgentAdmissionStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
-func (s *ea1ChildCancelStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+
+func (s *ea1ChildCancelStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if g.ChildRunID != s.runID {
-		return s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
 	s.markAttempts++
 	if s.mode == "P3" {
 		return s.fault
 	}
-	e := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	e := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 		if s.mode == "P4" {
@@ -107,33 +116,14 @@ func (s *ea1ChildCancelStore) MarkChildExecutionSettled(ctx context.Context, g k
 	return e
 }
 func (s *ea1ChildCancelStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	if s.mode == "P4" {
+		return s.fault
+	}
+	e := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
 	}
 	return e
-}
-
-type ea1ChildCancelHost struct {
-	request  agent.StartRequest
-	physical *ea1StartSettlementPhysical
-	fault    error
-	sends    int
-}
-
-func (*ea1ChildCancelHost) Name() string { return "ea1.original.child.cancel.unknown" }
-func (h *ea1ChildCancelHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if i.Operation != plugin.RunResume || i.RunID != h.request.ID || i.ParentRunID != h.request.ParentRunID || i.Actor != h.request.Actor || i.Thread != h.request.Thread || i.Goal != h.request.Goal {
-		return kernel.Snapshot{}, agent.ErrInvalidRequest
-	}
-	h.physical.mu.Lock()
-	h.physical.hostCalls++
-	h.physical.mu.Unlock()
-	if h.fault != nil {
-		h.sends++
-		return kernel.Snapshot{}, h.fault
-	}
-	return next(ctx)
 }
 
 type ea1ChildCancelFixture struct {
@@ -145,7 +135,6 @@ type ea1ChildCancelFixture struct {
 	request                                agent.StartRequest
 	parent, grandparent, created, prepared kernel.Snapshot
 	physical                               *ea1StartSettlementPhysical
-	host                                   *ea1ChildCancelHost
 	definition                             tools.Definition
 	registry                               *tools.Registry
 }
@@ -166,7 +155,8 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.request = agent.StartRequest{ID: "child-cancel-source", RequestID: "original-child-cancel-source", ParentRunID: f.parent.Run.ID, OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child-cancel-source","context":"isolated"}`)), Actor: actor, Thread: thread, Goal: "original child cancellation source", Instructions: "Preserve original source.", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
+	f.request = agent.StartRequest{ID: "child-cancel-source", RequestID: "original-child-cancel-source", ParentRunID: f.parent.Run.ID, OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child-cancel-source","context"
+ "slices":"isolated"}`)), Actor: actor, Thread: thread, Goal: "original child cancellation source", Instructions: "Preserve original source.", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 	if tool {
 		f.request.ToolKeys = []string{"effect"}
 	}
@@ -177,7 +167,6 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal(e)
 	}
 	st.runID = f.request.ID
-	f.host = &ea1ChildCancelHost{request: f.request, physical: f.physical}
 	setup := f.runner(rt, "prepare-owner", false)
 	st.afterCreate = func(_ context.Context, s kernel.Snapshot) error {
 		f.created = s
@@ -193,7 +182,7 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 	if _, e = rt.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatal("Prepare scope not retired", e)
 	}
-	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || f.physical.hostCalls != 0 || st.begins != 1 || st.marks != 1 || st.finishes != 1 {
+	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || st.begins != 1 || st.marks != 1 || st.finishes != 1 {
 		t.Fatal("Prepare did not finish its separate zero-send callback")
 	}
 	st.begins, st.marks, st.finishes, st.markAttempts = 0, 0, 0, 0
@@ -202,11 +191,7 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 	return f
 }
 func (f *ea1ChildCancelFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	var middleware []plugin.RunMiddleware
-	if host {
-		middleware = []plugin.RunMiddleware{f.host}
-	}
-	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, RunMiddleware: middleware, ToolMiddleware: []plugin.ToolMiddleware{f.physical},
+	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry,
 		Execution: ea1StoreBackedExecutionPolicy()}
 	if f.native {
 		deps.RunExecution = &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}
@@ -275,7 +260,7 @@ func ea1ChildCancelPreflight(t *testing.T, factory func(*testing.T) (kernel.Stor
 	}
 	ea1CompBarrierUnchanged(t, f.rt, f.parent)
 	ea1CompBarrierUnchanged(t, f.rt, f.grandparent)
-	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || f.physical.hostCalls != 0 {
+	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
 		t.Fatal("preflight Cancel dispatched callback")
 	}
 }
@@ -290,8 +275,6 @@ func ea1ChildCancelUnknownWithModelReadDelay(
 	f := ea1NewChildCancelFixture(t, factory, kind == "tool", native)
 	f.physical.modelReadDelay = modelReadDelay
 	switch kind {
-	case "host":
-		f.host.fault = f.store.fault
 	case "model":
 		f.store.event = "agent.model_invocation.completed"
 	default:
@@ -306,18 +289,11 @@ func ea1ChildCancelUnknownWithModelReadDelay(
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision {
+	if e != nil || !g.IsOwned() || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || f.store.acquireCalls+f.store.releaseCalls != 0 {
 		t.Fatal("unknown original child scope missing", e)
 	}
-	if kind == "host" {
-		if f.host.sends != 1 || f.store.applyHits+f.store.nativeHits != 0 || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
-			t.Fatal("host send fixture substituted receipt")
-		}
-	} else {
-		wantApply, wantNative := 1, 0
-		if native {
-			wantApply, wantNative = 0, 1
-		}
+	{
+		wantApply, wantNative := 0, 1
 		if f.store.applyHits != wantApply || f.store.nativeHits != wantNative {
 			t.Fatal("receipt fault missed actual ordinary/native Store port")
 		}
@@ -353,23 +329,19 @@ func ea1ChildCancelUnknownWithModelReadDelay(
 			t.Fatal("original native token revived", e)
 		}
 	}
-	if e = f.runner(ar, "recovery-only", true).ReconcileChildPhysicalGrant(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+	if e = f.runner(ar, "recovery-only", true).ReconcilePhysicalExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 		t.Fatal("unknown child retired by recovery", e)
 	}
 	ea1ChildRecoveryPhaseUnchanged(t, ar, before, f.parent, f.grandparent, g)
-	if kind != "host" {
-		ea1ChildCancelUnknownSource(t, f, before, kind)
-	} else if f.host.sends != 1 {
-		t.Fatal("unknown host replayed")
-	}
-	if f.physical.hostCalls != 1 || f.store.marks != 0 || f.store.finishes != 0 {
+	ea1ChildCancelUnknownSource(t, f, before, kind)
+	if f.store.marks != 0 || f.store.finishes != 0 {
 		t.Fatal("unknown callback was replayed or marked")
 	}
 }
 func ea1ChildCancelUnknownSource(t *testing.T, f *ea1ChildCancelFixture, s kernel.Snapshot, kind string) {
 	t.Helper()
 	p := f.physical
-	if len(p.requests) != 1 || len(p.responses) != 1 || len(p.intents) != 1 || p.hostCalls != 1 {
+	if len(p.requests) != 1 || len(p.responses) != 1 || len(p.intents) != 1 {
 		t.Fatal("original Model source count changed")
 	}
 	captured := p.intents[0]
@@ -402,7 +374,7 @@ func ea1ChildCancelUnknownSource(t *testing.T, f *ea1ChildCancelFixture, s kerne
 		}
 		ea1StartSettlementJSONEqual(t, "original consumed Model response", inv.Response, p.responses[0])
 		want := tools.ExecutionRequest{RunID: f.request.ID, Call: tools.Call{ID: "original-call", ToolKey: "effect", Name: f.definition.Name, Arguments: json.RawMessage(`{"source":"original"}`)}}
-		if !ea1RecoveryJSONEqual(p.toolRequests[0], want) || len(p.toolInvocations) != 1 || !ea1RecoveryJSONEqual(p.toolInvocations[0].Definition, f.definition) || !ea1RecoveryJSONEqual(p.toolInvocations[0].Request, want) {
+		if !ea1RecoveryJSONEqual(p.toolRequests[0], want) || len(p.toolInvocations) != 1 || !slices.ContainsFunc(p.requests[0].Tools, func(d tools.Definition) bool { return ea1RecoveryJSONEqual(d, f.definition) }) || !ea1RecoveryJSONEqual(p.toolInvocations[0].Request, want) {
 			t.Fatal("unknown actual Tool original source changed")
 		}
 		result := tools.ExecutionResult{Content: json.RawMessage(`{"committed":"original"}`), Receipt: tools.Receipt{ExecutionID: "original-call", Disposition: "committed"}}
@@ -427,7 +399,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ExpectedRevision != f.prepared.Run.Revision {
+	if e != nil || !g.IsOwned() || g.ExpectedRevision != f.prepared.Run.Revision || f.store.acquireCalls+f.store.releaseCalls != 0 {
 		t.Fatal("original child settlement scope absent", e)
 	}
 	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)
@@ -435,7 +407,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 	a, _ := f.reopen()
 	ar := ea1StartRuntime(t, a)
 	ea1ChildRecoveryPhaseControls(t, ar, before, f.parent, f.grandparent, g)
-	e = f.runner(ar, "fresh-recovery", true).ReconcileChildPhysicalGrant(t.Context(), f.request.ID)
+	e = f.runner(ar, "fresh-recovery", true).ReconcilePhysicalExecution(t.Context(), f.request.ID)
 	if phase == "P3" {
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatal("original receipt fabricated missing marker", e)
@@ -448,7 +420,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if _, lookupErr := ar.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(lookupErr, kernel.ErrNotFound) {
 			t.Fatal("original marker recovery did not retire scope", lookupErr)
 		}
-		if replayErr := f.runner(ar, "second-inspection", true).ReconcileChildPhysicalGrant(t.Context(), f.request.ID); !errors.Is(replayErr, kernel.ErrNotFound) {
+		if replayErr := f.runner(ar, "second-inspection", true).ReconcilePhysicalExecution(t.Context(), f.request.ID); replayErr != nil {
 			t.Fatal("original marker replayed", replayErr)
 		}
 		if tool {
@@ -496,7 +468,7 @@ func ea1ChildCancelACK(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	}
 	ea1CompBarrierUnchanged(t, ar, f.parent)
 	ea1CompBarrierUnchanged(t, ar, f.grandparent)
-	if f.store.controlHits != 1 || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || f.physical.hostCalls != 0 {
+	if f.store.controlHits != 1 || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
 		t.Fatal("Cancel replayed mutation or physical callbacks")
 	}
 }

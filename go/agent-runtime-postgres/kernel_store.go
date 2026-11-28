@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel/statehistory"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -59,6 +60,7 @@ func (store *KernelStore) applyKernelMutation(
 	runID string,
 	expectedRevision uint64,
 	updatedModel models.KernelRunRecord,
+	plan statehistory.Plan,
 	mutation kernel.StoreMutation,
 	lease *kernel.ExecutionLease,
 	control bool,
@@ -116,6 +118,9 @@ func (store *KernelStore) applyKernelMutation(
 		}
 		return kernel.Snapshot{}, store.executionCommitConflict(db, runID, lease)
 	}
+	if e := pgAppendHistory(db, runID, plan.Appends); e != nil {
+		return kernel.Snapshot{}, e
+	}
 	var persisted models.KernelRunRecord
 	if err := db.Where("run_id = ?", runID).First(&persisted).Error; err != nil {
 		return kernel.Snapshot{}, translateKernelError(err)
@@ -129,7 +134,7 @@ func (store *KernelStore) applyKernelMutation(
 	}
 	// The row was read under the successful CAS transaction. Never load again
 	// after commit: a different worker may already have advanced the revision.
-	return kernelSnapshotFrom(persisted)
+	return kernelSnapshotFrom(db, persisted)
 }
 
 const (
@@ -170,6 +175,8 @@ func (store *KernelStore) Create(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	plan := statehistory.Prepare(string(record.Run.Kind), nil, record.State, statehistory.Manifest{}, record.Run.Revision)
+	model.StateJSON = string(plan.Physical())
 	if record.ExecutionRequired {
 		model.ExecutionEpoch = 1
 	}
@@ -183,6 +190,9 @@ func (store *KernelStore) Create(
 		}
 		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
+		}
+		if e := pgAppendHistory(tx, record.Run.ID, plan.Appends); e != nil {
+			return e
 		}
 		scoped := &KernelStore{db: tx}
 		if e := kernel.ValidateCreationRetry(ctx, record.BudgetEnrollment, scoped.Load, scoped.LoadCreationDecision); e != nil {
@@ -206,7 +216,7 @@ func (store *KernelStore) Create(
 			return translateKernelError(readErr)
 		}
 		var snapshotErr error
-		snapshot, snapshotErr = kernelSnapshotFrom(persisted)
+		snapshot, snapshotErr = kernelSnapshotFrom(tx, persisted)
 		return snapshotErr
 	})
 	if err != nil {
@@ -230,7 +240,7 @@ func (store *KernelStore) Load(ctx context.Context, runID string) (kernel.Snapsh
 	if err := db.Where("run_id = ?", runID).First(&runRecord).Error; err != nil {
 		return kernel.Snapshot{}, translateKernelError(err)
 	}
-	return kernelSnapshotFrom(runRecord)
+	return kernelSnapshotFrom(db, runRecord)
 }
 
 // ListEvents returns one monotonic journal page without loading aggregate state.
@@ -262,43 +272,46 @@ func (store *KernelStore) ListEvents(
 	return kernelEventsFrom(records)
 }
 
-// Apply atomically commits one revision-CAS transition and its Event append.
-func (store *KernelStore) Apply(
-	ctx context.Context,
-	runID string,
-	expectedRevision uint64,
-	mutation kernel.StoreMutation,
-) (kernel.Snapshot, error) {
-	return store.applyWithExecution(ctx, nil, nil, nil, runID, expectedRevision, mutation)
-}
+// Commit is the single Run/effect/usage mutation transaction.
+func (store *KernelStore) Commit(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation, auth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	lease, guard, recovery := auth.Lease, auth.Control, auth.Recovery
+	if e := auth.Validate(runID, expectedRevision, mutation); e != nil {
+		return kernel.Snapshot{}, false, e
+	}
+	if lease != nil && !pgExecutionLeaseValid(*lease) {
+		return kernel.Snapshot{}, false, kernel.ErrInvalidInput
+	}
+	revoked := false
 
-func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease, guard *kernel.ControlGuard, revoked *bool,
-	runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	if store == nil || store.db == nil || strings.TrimSpace(runID) == "" {
-		return kernel.Snapshot{}, kernel.ErrNotFound
+		return kernel.Snapshot{}, false, kernel.ErrNotFound
 	}
-	if mutation.Record.Run.ID != runID || mutation.Record.Run.Revision != expectedRevision+1 {
-		return kernel.Snapshot{}, kernel.ErrConflict
-	}
-	updatedModel, err := kernelRunRecordFrom(mutation.Record, 0)
+	p, managed, err := guard.ManagedCancellation(runID, expectedRevision, mutation)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return kernel.Snapshot{}, false, err
+	}
+	var updatedModel models.KernelRunRecord
+	if !managed {
+		updatedModel, err = kernelRunRecordFrom(mutation.Record, 0)
+		if err != nil {
+			return kernel.Snapshot{}, false, err
+		}
 	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Parent terminal control and already admitted child effects share the
 		// authoritative parent row lock. A child Approval control must lock its
 		// ancestry first so a concurrent parent Cancel cannot slip past CAS.
-		if mutation.Ledger != nil && lease == nil && guard == nil && (mutation.Record.Run.ParentRunID == "" || !mutation.PhysicalPermit.IsPresent()) {
+		if mutation.Ledger != nil && lease == nil && guard == nil && recovery == nil && (mutation.Record.Run.ParentRunID == "" || !mutation.PhysicalPermit.IsPresent()) {
 			return kernel.ErrExecutionRequired
 		}
-		if (guard != nil && guard.Kind == kernel.ControlApproval) || (guard == nil && mutation.Ledger != nil) {
+		if (guard != nil && guard.Kind == kernel.ControlApproval) || (guard == nil && recovery == nil && mutation.Ledger != nil) {
 			var child models.KernelRunRecord
 			if readErr := tx.Where("run_id = ?", runID).First(&child).Error; readErr != nil {
 				return translateKernelError(readErr)
 			}
 			if child.ParentRunID != "" {
-				source, e := kernelSnapshotFrom(child)
+				source, e := kernelSnapshotFrom(tx, child)
 				if e != nil {
 					return e
 				}
@@ -317,15 +330,45 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		}
 		// Native authority is required before evaluating a physical-scope fence.
 		// Control and exact leased writes retain their separate authority paths.
-		if lease == nil && guard == nil && lockedRun.ExecutionEpoch > 0 {
+		if lease == nil && guard == nil && recovery == nil && lockedRun.ExecutionEpoch > 0 {
 			return kernel.ErrExecutionRequired
+		}
+		current, decodeErr := kernelSnapshotFrom(tx, lockedRun)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		var transfer kernel.ManagedTransfer
+		if managed {
+			var replay bool
+			var e error
+			transfer, mutation, replay, e = pgManagedControl(ctx, tx, lockedRun, current, p)
+			if e != nil {
+				return e
+			}
+			if replay {
+				snapshot = current
+				return nil
+			}
+			updatedModel, e = kernelRunRecordFrom(mutation.Record, 0)
+			if e != nil {
+				return e
+			}
 		}
 		if e := pgNativeEntryGate(tx, runID); e != nil {
 			return e
 		}
-		current, decodeErr := kernelSnapshotFrom(lockedRun)
-		if decodeErr != nil {
-			return decodeErr
+		if recovery != nil {
+			g, p := recovery.Grant, recovery.Permit
+			row, e := pgLoadOwnedPhysicalGrant(tx, g)
+			if errors.Is(e, kernel.ErrNotFound) {
+				return kernel.ErrExecutionConflict
+			}
+			if e != nil {
+				return e
+			}
+			if e = kernel.ValidateOwnedPhysicalRecovery(g, current, pgManagedLease(lockedRun), expectedRevision, mutation, p, pgCallbackCompletion(row), 0); e != nil {
+				return e
+			}
 		}
 		accounting := sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}
 		ledger, e := kernel.PlanRunBudgetMutation(ctx, accounting, current.Run, mutation, guard != nil)
@@ -335,8 +378,8 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if e = accounting.Apply(ctx, runID, ledger); e != nil {
 			return e
 		}
-		var active []models.KernelChildEffectGrantRecord
-		if queryErr := tx.Where("parent_run_id = ?", runID).Find(&active).Error; queryErr != nil {
+		var active []models.KernelEffectRecord
+		if queryErr := pgActiveEffects(tx).Where(activeEffectScope, runID, runID).Find(&active).Error; queryErr != nil {
 			return translateKernelError(queryErr)
 		}
 		// A native waiting owner cannot bypass approval through ordinary Apply.
@@ -360,12 +403,21 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 			}
 			return kernel.ErrExecutionRequired
 		}
+		if recovery != nil && len(active) != 1 {
+			return kernel.ErrChildExecutionBusy
+		}
 		var approvalLease *kernel.ExecutionLease
 		rootGrantFound := false
 		for _, record := range active {
 			if record.ChildRunID == runID {
 				rootGrantFound = true
 				original := pgPhysicalGrant(record)
+				if recovery != nil {
+					if original != recovery.Grant {
+						return kernel.ErrExecutionConflict
+					}
+					continue
+				}
 				if original.IsOwned() {
 					if guard != nil {
 						originalLease, ok := mutation.PhysicalPermit.ExecutionLease()
@@ -399,7 +451,7 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 			if persisted.Revision != expectedRevision {
 				return kernel.ErrConflict
 			}
-			current, decodeErr := kernelSnapshotFrom(persisted)
+			current, decodeErr := kernelSnapshotFrom(tx, persisted)
 			if decodeErr != nil {
 				return decodeErr
 			}
@@ -416,9 +468,7 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 			if persisted.ExecutionEpoch == math.MaxInt64 {
 				return kernel.ErrExecutionConflict
 			}
-			if revoked != nil {
-				*revoked = persisted.ExecutionEpoch > 0 && approvalLease == nil
-			}
+			revoked = persisted.ExecutionEpoch > 0 && approvalLease == nil
 		}
 		var applyErr error
 		effectiveLease := lease
@@ -429,9 +479,19 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if managedErr != nil {
 			return managedErr
 		}
-		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, effectiveLease, guard != nil && approvalLease == nil, false, approvalLease != nil)
+		_, manifest, e := statehistory.OpenPhysical(json.RawMessage(lockedRun.StateJSON))
+		if e != nil {
+			return e
+		}
+		plan := statehistory.Prepare(string(mutation.Record.Run.Kind), current.State, mutation.Record.State, manifest, mutation.Record.Run.Revision)
+		updatedModel.StateJSON = string(plan.Physical())
+		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, plan, mutation, effectiveLease, guard != nil && approvalLease == nil, recovery != nil, approvalLease != nil)
 		if applyErr != nil {
 			return applyErr
+		}
+		if managed {
+			transfer.Terminal = &snapshot
+			return pgSaveManaged(tx, transfer)
 		}
 		if managedPoint != nil {
 			// PostgreSQL may represent timestamps at a different precision than
@@ -443,9 +503,9 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		return nil
 	})
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return kernel.Snapshot{}, false, err
 	}
-	return snapshot, nil
+	return snapshot, revoked, nil
 }
 
 // ClaimTransitions leases committed transitions to one projector. PostgreSQL
@@ -711,7 +771,7 @@ func validKernelTransitionLease(request kernel.TransitionLeaseRequest) bool {
 		strings.TrimSpace(request.WorkerID) != ""
 }
 
-func kernelSnapshotFrom(runRecord models.KernelRunRecord) (kernel.Snapshot, error) {
+func kernelSnapshotFrom(db *gorm.DB, runRecord models.KernelRunRecord) (kernel.Snapshot, error) {
 	checkpoint, hasCheckpoint, err := unmarshalCheckpoint(runRecord.CheckpointJSON)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -721,9 +781,19 @@ func kernelSnapshotFrom(runRecord models.KernelRunRecord) (kernel.Snapshot, erro
 		return kernel.Snapshot{}, err
 	}
 	state := json.RawMessage(runRecord.StateJSON)
-	if !json.Valid(state) {
-		return kernel.Snapshot{}, errPersistedKernelStateJSON
+	hot, manifest, e := statehistory.OpenPhysical(state)
+	if e != nil {
+		return kernel.Snapshot{}, errors.Join(errPersistedKernelStateJSON, e)
 	}
+	if !manifest.Empty() {
+		state, e = statehistory.Restore(hot, manifest, func(stream int, gen uint64, count int) ([]json.RawMessage, error) {
+			return pgReadHistory(db, runRecord.RunID, stream, gen, count)
+		})
+		if e != nil {
+			return kernel.Snapshot{}, errors.Join(errPersistedKernelStateJSON, e)
+		}
+	}
+
 	snapshot := kernel.Snapshot{
 		Run: kernel.Run{
 			ID: runRecord.RunID, Kind: kernel.RunKind(runRecord.Kind),

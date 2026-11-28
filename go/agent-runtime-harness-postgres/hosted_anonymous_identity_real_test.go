@@ -1,7 +1,6 @@
 package harnesspostgres_test
 
 import (
-	"context"
 	"errors"
 	"os"
 	"strings"
@@ -16,10 +15,6 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
-
-type hostedAnonymousRealClock struct{}
-
-func (hostedAnonymousRealClock) Now() time.Time { return time.Now().UTC() }
 
 // Two actual PostgreSQL connections must not observe an anonymous terminal
 // as two independently settled native calls, nor turn a held model dispatch
@@ -88,9 +83,15 @@ func TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
-		Store: first, Clock: hostedAnonymousRealClock{},
-	})
+	// Exercise the persisted ledger reducer, not a standalone Budget
+	// execution adapter. The native Agent dispatch boundary is separately
+	// covered by RejectedHostedReceiptPreservesOriginalQuota.
+	ctx := t.Context()
+	coordinator := budget.Coordinator{Store: first}
+	if _, err = coordinator.Ensure(ctx, turnID, *config.SharedBudget); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := coordinator.RegisterRun(ctx, turnID, runID, budget.RunBudget{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,19 +100,38 @@ func TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart(t *testing.T) 
 		Messages:    []model.Message{{Role: model.RoleUser, Content: model.TextParts("Verify only identified native calls")}},
 		HostedTools: []model.HostedTool{{Key: "native.search"}},
 	}
-	providerCalls := 0
-	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, actual model.Request, _ model.StreamSink) (model.Response, error) {
-		providerCalls++
-		if actual.HostedToolCallLimit == nil || *actual.HostedToolCallLimit != 2 {
-			t.Fatalf("physical provider was not bounded: %+v", actual)
-		}
-		return model.Response{Content: "repeated anonymous tool result", HostedToolCalls: []model.HostedToolCall{
+	originalHash, err := model.PhysicalRequestHash(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowance := 2
+	request.HostedToolCallLimit = &allowance
+	physicalHash, err := model.PhysicalRequestHash(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := budget.Reservation{ID: "model:" + request.InvocationID, RunID: runID,
+		RequestHash: originalHash, PhysicalRequestHash: physicalHash,
+		Requested: budget.Usage{LLMCalls: 1, ToolCalls: 2, HostedToolCalls: 2}}
+	mutation, err := budget.PlanDispatch(ctx, ledger, reservation, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = first.SaveBudget(ctx, mutation.Next(), ledger.Revision); err != nil {
+		t.Fatal(err)
+	}
+	_, err = coordinator.SettleModel(ctx, turnID, request, model.Response{
+		Content: "repeated anonymous tool result",
+		HostedToolCalls: []model.HostedToolCall{
 			{ToolKey: "native.search", Status: "completed"},
 			{ToolKey: "native.search", Status: "completed"},
-		}}, nil
-	})
-	if !errors.Is(err, budget.ErrInvalidUsage) || providerCalls != 1 {
-		t.Fatalf("anonymous terminal was settled as verifiable charge: err=%v providerCalls=%d", err, providerCalls)
+		},
+	}, nil)
+	if !errors.Is(err, budget.ErrInvalidUsage) {
+		t.Fatalf("anonymous terminal was settled as verifiable charge: %v", err)
+	}
+	if _, err = coordinator.Suspend(ctx, turnID, reservation.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	prior, err := second.LoadBudget(t.Context(), turnID)
@@ -130,19 +150,12 @@ func TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart(t *testing.T) 
 			t.Fatalf("anonymous physical results manufactured an individual hosted receipt: %s", id)
 		}
 	}
-	restarted, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
-		Store: second, Clock: hostedAnonymousRealClock{},
-	})
-	if err != nil {
-		t.Fatal(err)
+	// The second connection cannot acquire another dispatch for the same
+	// frozen original reservation, and denial must not alter its held quota.
+	if _, err = budget.PlanDispatch(ctx, prior, reservation, true); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("restart admitted unknown provider effects: %v", err)
 	}
-	_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		providerCalls++
-		return model.Response{Content: "unsafe repeat"}, nil
-	})
-	if !errors.Is(err, budget.ErrWaiting) || providerCalls != 1 {
-		t.Fatalf("restart reissued unknown provider effects: err=%v providerCalls=%d", err, providerCalls)
-	}
+
 	after, err := first.LoadBudget(t.Context(), turnID)
 	if err != nil || after.View("").Usage.HostedToolCalls != 0 ||
 		after.View("").Reserved.HostedToolCalls != 2 || !after.View("").UnknownUsage {

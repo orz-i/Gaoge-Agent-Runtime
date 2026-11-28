@@ -553,7 +553,7 @@ func newDelegationHarnessWithRuntime(
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(agentRunner)
+	handoffs, err := handoff.New(handoff.Config{Local: agentRunner})
 	if err != nil {
 		t.Fatal(err)
 	}

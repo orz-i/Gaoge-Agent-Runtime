@@ -27,7 +27,7 @@ func TestPR151ACPRevisionSubstitution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.NewRouted(p)
+	c, err := handoff.New(handoff.Config{Remote: p})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestPR151ACPRevisionSubstitution(t *testing.T) {
 	if _, err := p.ResolveChild(t.Context(), d); err == nil {
 		t.Fatal("binding revision substituted")
 	}
-	wrong, err := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return fixed, nil }))
+	wrong, err := handoff.New(handoff.Config{Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return fixed, nil })})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,14 +70,18 @@ type auditPromptCommitFence struct {
 	release   chan struct{}
 }
 
-func (s *auditPromptCommitFence) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, rev, m)
-	if err == nil && rev == 3 && strings.Contains(string(m.Record.State), "\"promptPending\":true") {
-		s.committed <- snap
-		<-s.release
+func (s *auditPromptCommitFence) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && commitRev == 3 && strings.Contains(string(commitMutation.Record.State), "\"promptPending\":true") {
+			s.committed <- snap
+			<-s.release
+		}
+		return snap, false, err
 	}
-	return snap, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func TestPR151ACPCancelBeforePhysicalPrompt(t *testing.T) {
 	f := &fakeClient{}
 	s := &auditPromptCommitFence{Store: memory.NewStore(), committed: make(chan kernel.Snapshot, 1), release: make(chan struct{})}
@@ -100,7 +104,7 @@ func TestPR151ACPCancelBeforePhysicalPrompt(t *testing.T) {
 	}()
 	snap := <-s.committed
 	beforeO, beforeP, beforeC := f.counts()
-	cancelSnap, cancelErr := runner.CancelRun(t.Context(), snap.Run.ID, snap.Run.Revision)
+	cancelSnap, cancelErr := runner.CancelRemote(t.Context(), snap.Run.ID, snap.Run.Revision)
 	afterO, afterP, afterC := f.counts()
 	t.Logf("committed prompt intent rev=%d before counts=%d/%d/%d; cancel returned rev=%d err=%v counts=%d/%d/%d", snap.Run.Revision, beforeO, beforeP, beforeC, cancelSnap.Run.Revision, cancelErr, afterO, afterP, afterC)
 	close(s.release)
@@ -154,7 +158,7 @@ func TestPR151ACPRealStdioLatePromptAfterCancel(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	cancelled, err := runner.CancelRun(ctx, snap.Run.ID, snap.Run.Revision)
+	cancelled, err := runner.CancelRemote(ctx, snap.Run.ID, snap.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		close(store.release)
 		t.Fatalf("unexpected cancel result %v", err)

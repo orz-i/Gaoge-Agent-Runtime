@@ -79,10 +79,6 @@ func TestEA1ChildAgentStartPhasesGORM(t *testing.T) {
 	conformance.RunEA1ChildAgentStartPhases(t, gormEA1PeerReopen)
 }
 
-func TestEA1MiddlewareNextLifetimeGORM(t *testing.T) {
-	conformance.RunEA1MiddlewareNextLifetime(t, gormEA1PeerReopen)
-}
-
 func TestEA1OwnedCallbackReturnGORM(t *testing.T) {
 	conformance.RunEA1OwnedCallbackReturn(t, gormEA1Pair)
 }

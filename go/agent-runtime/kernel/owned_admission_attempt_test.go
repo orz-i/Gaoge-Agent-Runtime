@@ -14,12 +14,12 @@ func TestOwnedAdmissionAttemptBindsCommitAndSource(t *testing.T) {
 	// deterministic Host-dispatch grant used by the managed fixture.
 	grant.ID = "old-grant"
 	grant.ExpectedRevision = source.Run.Revision
-	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_admission", OwnedPhysicalAdmissionSubject(ExecutionAcquireRequest{}, lease, grant.AdmissionOperation, ""), source.State, source)
-	p := OwnedPhysicalAdmission{proof: proof, attempt: [32]byte{1}, candidate: OwnedPhysicalAdmissionResult{Grant: grant, Lease: lease}}
+	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_admission", PhysicalAdmissionSubject(ExecutionAcquireRequest{}, lease, grant.AdmissionOperation, ""), source.State, source)
+	p := PhysicalAdmission{proof: proof, operation: grant.AdmissionOperation, attempt: [32]byte{1}, candidate: PhysicalAdmissionResult{Grant: grant, Lease: lease}}
 	other := p
 	other.attempt = [32]byte{2}
 	grant.AdmissionSourceHash = ownedAdmissionAttemptHash(source, lease, grant.AdmissionOperation, grant.ID, p.attempt)
-	if !p.Matches(grant, source, lease) || other.Matches(grant, source, lease) || (OwnedPhysicalAdmission{proof: proof}).Matches(grant, source, lease) {
+	if !p.Matches(grant, source, lease) || other.Matches(grant, source, lease) || (PhysicalAdmission{proof: proof}).Matches(grant, source, lease) {
 		t.Fatal("admission proof did not distinguish original attempt")
 	}
 	foreign := grant
@@ -47,7 +47,7 @@ func TestOwnedAdmissionAttemptBindsCommitAndSource(t *testing.T) {
 			t.Fatalf("unqualified outcome admitted: %v", notOriginal)
 		}
 	}
-	if p.CommitOutcome(nil) != nil || !errors.Is((OwnedPhysicalAdmission{}).CommitOutcome(lost), lost) || errors.Is((OwnedPhysicalAdmission{}).CommitOutcome(lost), ErrPhysicalAdmissionCommitUnknown) {
+	if p.CommitOutcome(nil) != nil || !errors.Is((PhysicalAdmission{}).CommitOutcome(lost), lost) || errors.Is((PhysicalAdmission{}).CommitOutcome(lost), ErrPhysicalAdmissionCommitUnknown) {
 		t.Fatal("zero or successful outcome unexpectedly classified as unknown")
 	}
 }

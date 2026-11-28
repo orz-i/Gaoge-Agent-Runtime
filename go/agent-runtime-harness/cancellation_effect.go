@@ -59,6 +59,9 @@ type cancellationEffectWriteKey struct{}
 type cancellationEffectWrite struct{ item Item }
 
 func withCancellationElection(ctx context.Context, intent Item) context.Context {
+	if intent.ID == "" {
+		return ctx
+	}
 	return context.WithValue(ctx, cancellationElectionKey{}, cloneItem(intent))
 }
 

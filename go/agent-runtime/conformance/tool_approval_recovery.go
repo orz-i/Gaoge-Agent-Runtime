@@ -28,14 +28,16 @@ func (p originalApprovalPolicy) Approval(context.Context, plugin.ToolInvocation)
 
 // Original approval/owner evidence follows the physical Call across receipt
 // CAS cuts. A successor cannot borrow its own (or another Call's) approval.
-func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
+func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, mode := range []string{"normal", "bounded-recovery", "checkpoint-recovery", "result-only-policy", "unmetered-recovery", "held-approved-child", "held-approved-scheduled", "held-approved-pending", "held-approved-external", "unmetered-approved-pending", "lost-recovery-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
 			observer := ea1StartRuntime(t, peer)
-			ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: "tool.completed", injected: errors.New("original approved Tool CAS cut")}
+			fault := &ea1AgentReceiptFault{Store: backing, LedgerStore: newToolTestLedger(t, backing), ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "tool.receipt_recovered", injected: errors.New("original approved Tool CAS cut")}
+			if mode == "unmetered-recovery" {
+				fault.event = "tool.completed"
+			}
 			held := strings.HasPrefix(mode, "held-approved-") || mode == "unmetered-approved-pending"
 			initial := backing
 			if mode != "normal" && !held {
@@ -101,7 +103,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				}
 				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(interactions), DelegatedToolResults: reader, ToolOutcomeVerifier: reader, DeferResumption: true}
 				if mode != "unmetered-recovery" && mode != "unmetered-approved-pending" {
-					d.ToolMiddleware = []plugin.ToolMiddleware{b}
+					d.BoundedBudget = b
 				}
 				if withPolicy {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{policy}
@@ -113,7 +115,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				return r
 			}
 			rt := ea1StartRuntime(t, initial)
-			r := makeRunner(rt, ledger, true)
+			r := makeRunner(rt, newToolTestLedger(t, initial), true)
 			req := agent.StartRequest{ID: "approved-root", RequestID: "original", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "original approved read", ToolKeys: []string{"read"}}
 			final, err := r.StartRun(ctx, req)
 			if mode == "checkpoint-recovery" {
@@ -148,7 +150,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				if err != nil {
 					t.Fatal(err)
 				}
-				c, err := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, err := observer.LookupPhysicalCallbackReturn(ctx, g)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -175,7 +177,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 					t.Fatal("known owner result not sealed", b)
 				}
 				fresh := reopen()
-				l := reopenLedger()
+				l := newToolTestLedger(t, fresh)
 				rt = ea1StartRuntime(t, fresh)
 				// A replacement without the original approval policy can consume
 				// evidence but cannot create new approval authority.
@@ -189,9 +191,9 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				}
 				var staged kernel.Snapshot
 				if mode == "lost-recovery-ack" {
-					under := &ea1AgentReceiptFault{Store: fresh, ExecutionStore: fresh.(kernel.ExecutionStore), ControlStore: fresh.(kernel.ControlStore), ChildExecutionStore: fresh.(kernel.ChildExecutionStore), ExecutionQuarantineStore: fresh.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: fresh.(kernel.OwnedPhysicalExecutionStore), injected: fault.injected}
+					under := &ea1AgentReceiptFault{Store: fresh, LedgerStore: l, ExecutionStore: fresh.(kernel.ExecutionStore), ExecutionQuarantineStore: fresh.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: fresh.(kernel.PhysicalExecutionStore), injected: fault.injected}
 					cut := &ea1RootRecoveryFault{ea1AgentReceiptFault: under, phase: "P3"}
-					r = makeRunner(ea1StartRuntime(t, cut), l, false)
+					r = makeRunner(ea1StartRuntime(t, cut), cut, false)
 					if _, err = r.ReconcileToolOutcome(ctx, req.ID, before.Run.Revision, "original-call"); !errors.Is(err, fault.injected) {
 						t.Fatal("recovery ACK cut not reached", err)
 					}
@@ -203,16 +205,25 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				if err != nil || staged.Run.Revision != before.Run.Revision+1 || physical != 1 || approvals != 1 || len(m.calls) != 1 {
 					t.Fatal("receipt-only recovery changed physical authority", err, staged.Run, physical, approvals, len(m.calls))
 				}
+				if mode == "lost-recovery-ack" {
+					if makeRunner(rt, l, true).VerifiedDeferredRootControl(ctx, rt, staged) {
+						t.Fatal("unretired recovery acquired control")
+					}
+					if err = r.ReconcilePhysicalExecution(ctx, req.ID); err != nil {
+						t.Fatal("retire original recovered receipt", err)
+					}
+				}
 				if mode != "result-only-policy" {
 					controlReader := makeRunner(rt, l, true)
-					if mode != "lost-recovery-ack" {
-						if !controlReader.VerifiedDeferredRootControl(ctx, rt, staged) {
-							t.Fatal("original staged owner proof not observable")
-						}
+					if !controlReader.VerifiedDeferredRootControl(ctx, rt, staged) {
+						t.Fatal("original staged owner proof not observable")
 					}
 					current.Content = json.RawMessage(`{"answer":"<>&"}`)
-					if controlReader.VerifiedDeferredRootControl(ctx, rt, staged) {
-						t.Fatal("staged receipt bypassed independent owner proof")
+					// Metered recovery committed the exact owner result and
+					// accounting together. It no longer re-queries the Host to
+					// certify that already sealed native receipt.
+					if got := controlReader.VerifiedDeferredRootControl(ctx, rt, staged); got != (mode != "unmetered-recovery" && mode != "unmetered-approved-pending") {
+						t.Fatal("staged receipt lost its original authority", got)
 					}
 					current = tools.CloneExecutionResult(owner)
 				}
@@ -231,12 +242,19 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 			if got := r.VerifiedDeferredRootControl(ctx, rt, final); got != (mode != "result-only-policy") {
 				t.Fatal("approval control classification changed", got, mode)
 			}
-			if rt.VerifyOwnedRootSettlement(ctx, final) == nil {
+			if rt.VerifyExecutionCustody(ctx, final, kernel.CustodyRetired) == nil {
 				t.Fatal("original approval policy upgraded to unrestricted scoped custody")
 			}
 			current.Content = json.RawMessage(`{"answer":"<>&"}`)
-			if r.VerifyDeferredToolResults(ctx, rt, final) || r.VerifiedDeferredRootControl(ctx, rt, final) {
-				t.Fatal("changed owner result acquired observation/control")
+			// Delegated observation still verifies the independent owner's
+			// exact bytes. Native bounded control instead uses acknowledged
+			// retirement and settled accounting, not a later Host response.
+			if r.VerifyDeferredToolResults(ctx, rt, final) {
+				t.Fatal("changed owner result acquired observation")
+			}
+			wantControl := mode != "result-only-policy" && mode != "unmetered-recovery" && mode != "unmetered-approved-pending"
+			if got := r.VerifiedDeferredRootControl(ctx, rt, final); got != wantControl {
+				t.Fatal("original native control classification changed", got, wantControl)
 			}
 			current = tools.CloneExecutionResult(owner)
 			if !r.VerifyDeferredToolResults(ctx, rt, final) {

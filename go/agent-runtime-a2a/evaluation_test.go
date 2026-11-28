@@ -180,11 +180,11 @@ func (executor a2aScenarioExecutor) shadowResumeUnknown(ctx context.Context) (ev
 		return evaluation.ScenarioObservation{}, errors.New("A2A shadow did not enter waiting input")
 	}
 	remote.resumeErr = errors.New("response lost after possible remote input acceptance")
-	pending, err := runner.ResumeRun(ctx, started.Run.ID, "approved")
+	pending, err := runner.ResumeRun(ctx, started.Run.ID, started.Run.Revision, "approved")
 	if !errors.Is(err, ErrRemoteOutcomeUnknown) || pending.Run.Status != kernel.RunStatusRunning {
 		return evaluation.ScenarioObservation{}, errors.New("A2A shadow did not persist the uncertain input intent")
 	}
-	if _, err := runner.ResumeRun(ctx, started.Run.ID, "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
+	if _, err := runner.ResumeRun(ctx, started.Run.ID, pending.Run.Revision, "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
 		return evaluation.ScenarioObservation{}, errors.New("A2A unknown resume permitted a second physical send")
 	}
 	if _, err := runner.LoadRun(ctx, started.Run.ID); !errors.Is(err, ErrRemoteOutcomeUnknown) {

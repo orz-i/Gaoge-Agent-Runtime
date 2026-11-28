@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
@@ -51,6 +53,10 @@ func (p *receiptHydrationPorts) Hydrate(ctx context.Context, inv plugin.RunInvoc
 	return ctx, BoundedContextHydration{RunID: inv.RunID, SourceBinding: json.RawMessage(`{"receipt-only":true}`)}, nil
 }
 
+func (*receiptHydrationPorts) Plan(_ context.Context, request model.Request) (BoundedContextPlan, error) {
+	return BoundedContextPlan{Request: request}, nil
+}
+
 func TestExpiredReceiptPreservesElectedBudgetCancellation(t *testing.T) {
 	for _, mode := range []string{"cancelled", "completed", "retarget", "projection-failed", "cancel-during-project-live", "cancel-during-project-expired", "cancel-after-run-admission-live", "cancel-after-run-admission-expired"} {
 		t.Run(mode, func(t *testing.T) { testExpiredReceiptBudgetLifecycle(t, mode) })
@@ -65,20 +71,25 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	start.WorkingStateSummary = nil
 	deadline := storeClock.now.Add(time.Minute)
 	start.DeadlineAt = &deadline
-	ledgerStore := budget.NewMemoryLedgerStore()
+	ledgerStore := rt.BudgetStore()
 	ports := &receiptLifecycleBudgetPorts{frozenReceiptBudgetPorts: &frozenReceiptBudgetPorts{}}
 	shared, e := NewBoundedBudgetAdapter(ledgerStore, ports)
 	if e != nil {
 		t.Fatal(e)
 	}
-	deps := Dependencies{Runtime: rt, Model: provider, Clock: clock, RunMiddleware: []plugin.RunMiddleware{shared}, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}}
+	deps := Dependencies{Runtime: rt, Model: provider, Clock: clock, BoundedBudget: shared, ModelOutcomeVerifier: ModelOutcomeVerifierFunc(func(_ context.Context, q model.Request) (model.Response, error) {
+		if calls := provider.calls(); len(calls) != 1 || !reflect.DeepEqual(calls[0], q) {
+			t.Fatal("verifier received foreign request")
+		}
+		return model.Response{Content: "business answer", ResponseID: "response_" + q.InvocationID, Usage: &model.Usage{InputTokens: 7, OutputTokens: 3, CacheReadTokens: 1, ReasoningTokens: 2}}, nil
+	})}
 	hydrate := &receiptHydrationPorts{}
 	if strings.HasPrefix(mode, "cancel-after-run-admission") {
 		inner, e := NewBoundedContextAdapter(contextPorts.manager, hydrate)
 		if e != nil {
 			t.Fatal(e)
 		}
-		deps.RunMiddleware = append(deps.RunMiddleware, inner)
+		deps.BoundedContext = inner
 	}
 	r, e := NewRunner(deps)
 	if e != nil {
@@ -146,16 +157,14 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	if loadErr != nil || len(provider.calls()) != 1 {
 		t.Fatalf("fixture lost ledger or resent provider: %v", loadErr)
 	}
-	if mode == "completed" {
+	if mode == "completed" || mode == "retarget" {
 		if e != nil || out.Run.Status != kernel.RunStatusCompleted || !after.FinishedRuns[start.ID] {
 			t.Fatalf("native receipt did not finish original budget obligation: %v", e)
 		}
 		return
 	}
 	want := budget.ErrExhausted
-	if mode == "retarget" {
-		want = budget.ErrLedgerConflict
-	}
+
 	if mode == "projection-failed" {
 		want = projectionErr
 	}

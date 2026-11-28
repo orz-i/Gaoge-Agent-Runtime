@@ -10,7 +10,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type summaryInputsModel struct {
@@ -79,7 +78,7 @@ func TestContextSummaryHostInputsApplyOnlyBeforeNextBusinessIntent(t *testing.T)
 		t.Fatal(err)
 	}
 	runner, err := NewRunner(Dependencies{Runtime: runtime, Model: client, Clock: clock, Inputs: inputs,
-		RunMiddleware: []plugin.RunMiddleware{bounded}, ContextSummary: summary})
+		ContextSummary: summary})
 	if err != nil {
 		t.Fatal(err)
 	}

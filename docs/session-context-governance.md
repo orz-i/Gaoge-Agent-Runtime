@@ -60,7 +60,7 @@ For explicit, versioned task data supplied by the Host, see
 freezes through existing admission and Context persistence, and materializes as
 user-role data. It does not change the ownership or dispatch boundary below.
 
-`agent.Dependencies.PrepareModelRequest` is the single trusted projection boundary **before** `ModelInvocation` intent creation and hashing. It may project messages and Host-scoped Tool descriptions/schemas but must not call a Provider, change Model/Run identity, alter limits, or enlarge Tool authority. The final request and original Catalog fingerprints are persisted atomically. A recovered pending intent dispatches that same frozen projection without rerunning preparers. `ModelMiddleware` may only apply enforcement/observation and bounded Tool/budget restrictions; no message/schema edits are supported. See [ADR 0010](adr/0010-prestable-model-dispatch-contract.md).
+`agent.Dependencies.PrepareModelRequest` is the single trusted projection boundary **before** `ModelInvocation` intent creation and hashing. It may project messages and Host-scoped Tool descriptions/schemas but must not call a Provider, change Model/Run identity, alter limits, or enlarge Tool authority. The final request and original Catalog fingerprints are persisted atomically. A recovered pending intent dispatches that same frozen projection without rerunning preparers. The fixed Model stage applies admission and bounded Tool/budget restrictions; observation is projected through observers. See [ADR 0010](adr/0010-prestable-model-dispatch-contract.md).
 
 Basic integration:
 
@@ -76,19 +76,16 @@ This is enough for durable prefix injection when a Harness execution context sup
 
 ## Optional model-window pressure management
 
-For bounded auto compaction, use `harness.NewManagedContextPreparer(store, manager, resolveWindow)` as `PrepareModelRequest`. The host **must** resolve the real routed model's `context.ModelWindow` (with appropriate reserved output tokens); an unknown capacity returns an explicit error, never a fabricated token limit.
+For bounded auto compaction and durable hydration, configure `harness.NewBoundedContextAdapter` as `Dependencies.BoundedContext`. The host **must** resolve the real routed model's `context.ModelWindow` (with appropriate reserved output tokens); an unknown capacity returns an explicit error, never a fabricated token limit.
 
 ```go
 manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
-prepare, err := harness.NewManagedContextPreparer(harnessStore, manager, resolveModelWindow)
-if err != nil { return err }
-rehydrate, err := harness.NewContextRunMiddleware(harnessStore, relationReader)
+bounded, err := harness.NewBoundedContextAdapter(harnessStore, manager, resolveModelWindow, relationReader)
 if err != nil { return err }
 directAgent, err := agent.NewRunner(agent.Dependencies{
     Runtime: rt, Model: modelClient,
     Catalog: catalog, Executor: executor,
-    PrepareModelRequest: prepare,
-    RunMiddleware: []plugin.RunMiddleware{rehydrate},
+    BoundedContext: bounded,
 })
 if err != nil { return err }
 hostRunner, err := harness.NewRunner(harness.Dependencies{
@@ -97,7 +94,7 @@ hostRunner, err := harness.NewRunner(harness.Dependencies{
 })
 ```
 
-`resolveModelWindow`, `catalog`, `executor`, `clock` and `relationReader` are host-provided collaborators. The `RunMiddleware` rehydrates persisted Context when an Agent is resumed by a new process.
+`resolveModelWindow`, `catalog`, `executor`, `clock` and `relationReader` are host-provided collaborators. The fixed Context stage rehydrates persisted Context when an Agent is resumed by a new process.
 A process-local Context checkpoint or `ContextWindowBinding` is **never**
 a substitute for the *current* physical Run's durable Invocation/Turn ownership:
 root Agent Runs may own their Turn Context; descendant Runs inherit only

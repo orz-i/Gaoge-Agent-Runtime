@@ -328,7 +328,8 @@ func PlanDispatch(ctx context.Context, original Ledger, request Reservation, act
 	return PlanLedgerMutation(ctx, original, func(c Coordinator) error {
 		_, err := c.update(ctx, original.ID, func(l *Ledger) error {
 			if existing, ok := l.Reservations[request.ID]; ok {
-				if existing.Dispatched || existing.Status == ReservationSettled || existing.Requested != request.Requested || existing.RunID != request.RunID || existing.RequestHash != request.RequestHash || existing.PhysicalRequestHash != request.PhysicalRequestHash {
+				if existing.Dispatched || existing.Status == ReservationSettled || existing.Requested != request.Requested || existing.RunID != request.RunID || existing.RequestHash != request.RequestHash || existing.PhysicalRequestHash != request.PhysicalRequestHash ||
+					(!model && (existing.Usage != (Usage{}) || len(existing.Receipt) != 0)) {
 					return ErrLedgerConflict
 				}
 			}
@@ -367,37 +368,6 @@ func dispatchReservation(value *Reservation) error {
 	return nil
 }
 
-// DispatchTool applies the same dispatch transition, but at the actual
-// ledger CAS checks the original Tool reservation and elected Run closure.
-// On definitive cancellation it returns the observed, unchanged ledger.
-// A Store write error may instead return a speculative dispatched candidate;
-// that candidate is never a qualified unsent denial.
-func (coordinator Coordinator) DispatchTool(ctx context.Context, scopeID string, expected Reservation) (Ledger, error) {
-	if !validToolReservationIdentity(expected) {
-		return Ledger{}, ErrInvalidUsage
-	}
-	return coordinator.update(ctx, scopeID, func(l *Ledger) error {
-		res, ok := l.Reservations[expected.ID]
-		if _, registered := l.Runs[expected.RunID]; !registered || !ok || !sameToolReservationIdentity(res, expected) {
-			return ErrLedgerConflict
-		}
-		if res.Status == ReservationHeld && res.Dispatched {
-			return ErrWaiting
-		}
-		if !sameUnsentToolReservation(res, expected) {
-			return ErrLedgerConflict
-		}
-		if l.RunCancelled(expected.RunID) {
-			return ErrExhausted
-		}
-		if err := dispatchReservation(&res); err != nil {
-			return err
-		}
-		l.Reservations[expected.ID] = res
-		return nil
-	})
-}
-
 func validToolReservationIdentity(expected Reservation) bool {
 	prefix := "tool:" + expected.RunID + ":"
 	return validReservationRequest(expected) && strings.HasPrefix(expected.ID, prefix) && len(expected.ID) > len(prefix) && expected.Requested == (Usage{ToolCalls: 1}) && expected.PhysicalRequestHash == ""
@@ -406,9 +376,6 @@ func validToolReservationIdentity(expected Reservation) bool {
 func sameToolReservationIdentity(res, expected Reservation) bool {
 	return res.ID == expected.ID && res.RunID == expected.RunID && res.RequestHash == expected.RequestHash &&
 		res.PhysicalRequestHash == "" && res.Requested == expected.Requested
-}
-func sameUnsentToolReservation(res, expected Reservation) bool {
-	return sameToolReservationIdentity(res, expected) && !res.Dispatched && res.Usage == (Usage{}) && len(res.Receipt) == 0
 }
 
 // RequeueProvenUnsent revokes a speculative dispatch marker ONLY when the
@@ -475,41 +442,6 @@ func (coordinator Coordinator) Release(ctx context.Context, scopeID, id string) 
 			return ErrLedgerConflict
 		}
 		value.Status, value.Active = ReservationReleased, false
-		return nil
-	})
-}
-
-// ResolveUnsentTool changes only an exact, never-dispatched Tool reservation.
-// The caller must have committed its native no-send disposition first. Release
-// is terminal; park permits a later fresh capacity admission of the same Call.
-// Neither can refund dispatched or settled usage. Repeating the same action
-// after a lost acknowledgement requires the current exact fact. A stale
-// receipt observer may not park a successor's newly acquired reservation.
-func (coordinator Coordinator) ResolveUnsentTool(ctx context.Context, scopeID string, expected Reservation, release bool, revision uint64) (Ledger, error) {
-	if revision == 0 || !validToolReservationIdentity(expected) {
-		return Ledger{}, ErrInvalidUsage
-	}
-	return coordinator.update(ctx, scopeID, func(l *Ledger) error {
-		if l.Revision != revision {
-			return ErrLedgerConflict
-		}
-		if _, ok := l.Runs[expected.RunID]; !ok {
-			return ErrLedgerConflict
-		}
-		terminal := release || l.RunCancelled(expected.RunID)
-		res, ok := l.Reservations[expected.ID]
-		if !ok || !sameUnsentToolReservation(res, expected) ||
-			(res.Status != ReservationWaiting && res.Status != ReservationHeld && (!terminal || res.Status != ReservationReleased)) {
-			return ErrLedgerConflict
-		}
-		res.Active = false
-		if terminal {
-			res.Status = ReservationReleased
-		} else {
-			res.Status = ReservationWaiting
-			res.Dimension = ""
-		}
-		l.Reservations[expected.ID] = res
 		return nil
 	})
 }

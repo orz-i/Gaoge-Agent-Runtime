@@ -7,115 +7,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
-
-// Resolve only a pending dispatch's exact Host-bound native retirement fact.
-// A same-Run historical receipt, generic error or missing active Grant
-// cannot settle a different dispatch. No new invocation/attempt is elected.
-func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv Invocation) (bool, error) {
-	native, ok := runner.agent.(*agent.Runner)
-	if !ok || !native.ObservesKernelRuntime(runner.runtime) || !validInvocationExecutionAuthority(inv) {
-		return false, nil
-	}
-	if _, err := verifyProtectiveInvocation(ctx, runner.store, inv); err != nil {
-		return false, err
-	}
-	items, err := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
-	if err != nil {
-		return false, err
-	}
-	// An exact original retirement closes old work; it cannot elect a new
-	// dispatch or settle the cancellation intent itself. The same repair is
-	// safe before and after cancellation election, including an active fence.
-	// AppendItem still arbitrates its own canonical receipt and managed owner.
-	receipts := executionDispatchReceiptIndex(items)
-	var pending Item
-	var operation plugin.RunOperation
-	var physicalRunID string
-	var handoffStart bool
-	for _, item := range items {
-		if item.ParentItemID != ExecutionDispatchParentItemID || item.InvocationID != inv.ID {
-			continue
-		}
-		if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); settled {
-			continue
-		}
-		phase, valid := VerifiedExecutionDispatchGrant(item)
-		if !valid || item.TurnID != inv.TurnID || item.RunID != inv.ExecutionRefID || len(receipts[item.ID]) != 0 || pending.ID != "" {
-			return false, nil
-		}
-		operation = nativeDispatchOperation(phase)
-		if operation == "" {
-			return false, nil
-		}
-		if phase == "handoff-start" {
-			frozen, e := decodeFrozenHandoffDelegation(inv.Input)
-			if e != nil || !isHandoffDelegationInvocation(inv) || runner.nativeLocalDelegation(frozen) != native {
-				// Invalid or nonlocal selection cannot authorize native receipt recovery.
-				return false, nil //nolint:nilerr
-			}
-			child, e := runner.runtime.Load(ctx, inv.ExecutionRefID)
-			if errors.Is(e, kernel.ErrNotFound) {
-				// A missing Run is not a receipt; leave the pending dispatch untouched.
-				return false, nil
-			}
-			if e != nil {
-				return false, e
-			}
-			if child.Run.BudgetScopeID != inv.TurnID {
-				return false, nil
-			}
-			if _, _, e = runner.localHandoffCancellationAuthority(ctx, inv, child); e != nil {
-				return false, e
-			}
-			handoffStart = true
-		}
-		fields, ok := executionDispatchFields(item.Payload)
-		if !ok {
-			return false, nil
-		}
-		pending, physicalRunID = item, fields["physicalRunID"]
-	}
-	if pending.ID == "" {
-		return false, nil
-	}
-	// Only an independently owned native Run can have a matching original
-	// retirement. Do not widen descendant approval or Handoff authority.
-	var kind agent.PhysicalCallOutcomeKind
-	if physicalRunID != inv.ExecutionRefID {
-		known, e := native.ReconcileUnenteredPhysicalDispatch(ctx, physicalRunID, operation, pending.ID)
-		if e != nil || !known {
-			return false, e
-		}
-		kind = agent.PhysicalCallNotEntered
-	} else {
-		kind, err = native.ReconcileOriginalPhysicalDispatch(ctx, physicalRunID, operation, pending.ID)
-	}
-	if err != nil {
-		return false, err
-	}
-	if handoffStart {
-		if kind != agent.PhysicalCallSettled && kind != agent.PhysicalCallNotEntered {
-			return false, nil
-		}
-		err = runner.finishPhysicalDispatchGrant(ctx, pending, "handoff_start_returned")
-		return err == nil, err
-	}
-	var boundary string
-	switch kind {
-	case agent.PhysicalCallNotEntered:
-		boundary = "native_agent_callback_not_entered"
-	case agent.PhysicalCallSettled:
-		boundary = "physical_dispatch_returned"
-	case agent.PhysicalCallUnknown, agent.PhysicalCallDurableYield, agent.PhysicalCallCreated:
-		return false, nil
-	default:
-		return false, ErrConflict
-	}
-	err = runner.finishPhysicalDispatchGrant(ctx, pending, boundary)
-	return err == nil, err
-}
 
 // Recover the original native child result before supervisor projection.
 // Only opaque routes can still need the independent Host dispatch receipt.
@@ -124,7 +16,7 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 	native, ok := runner.agent.(*agent.Runner)
 	coordinator, bound := runner.handoffs.(*handoff.Coordinator)
 	nativeOwner := ok && native.ObservesKernelRuntime(runner.runtime)
-	if !bound || !nativeOwner && !terminal || terminal && !coordinator.SupportsLocalDelegationObservation(runner.runtime) {
+	if !bound || !nativeOwner && !terminal || terminal && !coordinator.ObservesLocalKernelRunner(runner.runtime) {
 		return nil
 	}
 	owners, err := runner.store.ListInvocations(ctx, turn.ID)
@@ -192,7 +84,7 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 		if !frozen.NativeLocal && (!valid || phase != "handoff-start" && phase != "resolve-subtask-approval" || terminalInvocationStatus(owner.Status) && phase != "handoff-start") {
 			continue
 		}
-		if !coordinator.UsesLocalAgentForDelegation(runner.runtime, native, frozen) {
+		if frozen.Remote || coordinator.LocalAgent(runner.runtime) != native {
 			if frozen.NativeLocal {
 				return ErrHandoffCancellationUnverified
 			}
@@ -223,9 +115,7 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 				if len(receipts[dispatch.ID]) != 0 {
 					return ErrConflict
 				}
-				if _, err = runner.recoverOriginalPhysicalDispatch(ctx, owner); err != nil {
-					return err
-				}
+				return ErrExecutionOutcomeUnknown
 			}
 			continue
 		}
@@ -261,31 +151,9 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 				if len(receipts[dispatch.ID]) != 0 {
 					return ErrConflict
 				}
-				repaired, err := runner.recoverOriginalPhysicalDispatch(ctx, owner)
-				if err != nil || !repaired {
-					return errors.Join(ErrExecutionOutcomeUnknown, err)
-				}
+				return ErrExecutionOutcomeUnknown
 			} else if boundary != "physical_dispatch_returned" {
 				continue
-			}
-			kind, err := native.ReconcileOriginalPhysicalDispatch(ctx, child.Run.ID, plugin.RunResolveApproval, dispatch.ID)
-			if err != nil || kind != agent.PhysicalCallSettled {
-				return errors.Join(ErrExecutionOutcomeUnknown, err)
-			}
-			id, err := kernel.OwnedPhysicalDispatchGrantID(child.Run.ID, "approval", dispatch.ID)
-			if err != nil {
-				return err
-			}
-			receipt, err := runner.runtime.LoadOwnedRetirement(ctx, id)
-			if err != nil {
-				return err
-			}
-			original := receipt.Evidence.Snapshot
-			if kernel.ManagedDigest(original) != kernel.ManagedDigest(child) {
-				if original.Run.Revision < child.Run.Revision && !terminalRuntimeStatus(original.Run.Status) {
-					continue
-				}
-				return ErrExecutionOutcomeUnknown
 			}
 			current, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
 			if err != nil || PendingExecutionDispatch(current, owner.ID) {

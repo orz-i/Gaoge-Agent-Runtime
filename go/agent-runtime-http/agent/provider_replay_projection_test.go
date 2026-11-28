@@ -98,7 +98,7 @@ func TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence(t *testing.T) {
 			router := gin.New()
 			routes := router.Group("/v1")
 			runtimehttp.NewModule(runtimehttp.NewHandler(runtimehttp.Dependencies{
-				Runtime: runtime, Shared: shared, PendingToolProjector: PendingTool,
+				Runtime: runtime, Shared: shared,
 			})).RegisterRoutes(routes)
 			NewModule(NewHandler(Dependencies{Runner: runner, Shared: shared})).RegisterRoutes(routes)
 

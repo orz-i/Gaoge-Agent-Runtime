@@ -34,10 +34,19 @@ func (r *Runner) commitNativeTransition(ctx context.Context, source kernel.Snaps
 	return r.runtime.ApplyManagedNativeTransition(ctx, source.Run.ID, source.Run.Revision, m, *point, proof)
 }
 
+// commitReturnedState binds the existing receipt-only transaction to its
+// original grant, exact source, and exact state/ledger proposal. Callers
+// qualify the original result or no-send evidence before using it.
+func (r *Runner) commitReturnedState(ctx context.Context, s kernel.Snapshot, g kernel.ChildExecutionGrant, m kernel.Mutation) (kernel.Snapshot, error) {
+	source := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, s.State, s.Checkpoint)
+	target := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, m.State, kernel.ReceiptRecoveryTarget(m.Checkpoint, m.Ledger))
+	return r.runtime.ApplyOwnedPhysicalRecovery(ctx, g, s.Run.Revision, m, source, target)
+}
+
 // The existing Run admission selects the original co-located scope. No
 // Host resolution or ledger lookup can substitute a different scope.
 func (r *Runner) nativeRunBudget(ctx context.Context, id string) *runBudgetAdmission {
-	a := r.atomicBudget()
+	a := r.boundedBudget
 	if a == nil {
 		return nil
 	}

@@ -242,11 +242,11 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 				run := root.Run
 				run.Revision++
 				run.UpdatedAt = time.Now().UTC()
-				if _, e = f.Store.(kernel.ExecutionStore).ApplyExecution(ctx, lease, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}, Ledger: plan}); !errors.Is(e, budget.ErrLedgerConflict) {
+				if _, _, e = f.Store.Commit(ctx, (lease).RunID, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}, Ledger: plan}, kernel.LeaseCommit(lease)); !errors.Is(e, budget.ErrLedgerConflict) {
 					t.Fatalf("foreign ledger accepted: %v", e)
 				}
 				run.BudgetScopeID = "other"
-				if _, e = f.Store.(kernel.ExecutionStore).ApplyExecution(ctx, lease, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}}); e == nil {
+				if _, _, e = f.Store.Commit(ctx, (lease).RunID, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}}, kernel.LeaseCommit(lease)); e == nil {
 					t.Fatal("mutable scope")
 				}
 				if !reflect.DeepEqual(other, load("other")) {
@@ -260,7 +260,7 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 					}
 				}
 				if mode == "unknown-expire" {
-					if _, e = c.DispatchTool(ctx, "scope", res); e != nil {
+					if e = DispatchToolFixture(ctx, c, "scope", res); e != nil {
 						t.Fatal(e)
 					}
 				}
@@ -295,7 +295,7 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 					run.Status = kernel.RunStatusCompleted
 					run.UpdatedAt = time.Now().UTC()
 					run.EndedAt = &run.UpdatedAt
-					if _, e = f.Store.(kernel.ExecutionStore).ApplyExecution(ctx, lease, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}}); e != nil {
+					if _, _, e = f.Store.Commit(ctx, (lease).RunID, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}}, kernel.LeaseCommit(lease)); e != nil {
 						t.Fatal(e)
 					}
 				}
@@ -345,19 +345,19 @@ func runNativeLogicalOwner(t *testing.T, factory func(*testing.T) ExecutionBudge
 			case "entry":
 				w.afterOwned = func(context.Context, kernel.ChildExecutionGrant) error { return stop() }
 			}
-			m, host := &ea1AdmissionModel{}, &ea1AdmissionMiddleware{}
-			runner := ea1AdmissionConfiguredRunner(t, ea1StartRuntime(t, w), m, host, false)
+			m := &ea1AdmissionModel{}
+			runner := ea1AdmissionConfiguredRunner(t, ea1StartRuntime(t, w), m, nil, false)
 			out, err := runner.StartRun(ctx, req)
 			if cut == "success" {
 				if err != nil || out.Run.Status != kernel.RunStatusCompleted || out.Run.ParentRunID != "" ||
 					out.Run.LogicalParentRunID != parent.Run.ID || out.Run.BudgetScopeID != "" ||
 					!agent.MatchesFrozenOrigin(out, []byte("frozen-child")) ||
-					m.calls.Load() != 1 || host.calls.Load() != 1 {
+					m.calls.Load() != 1 {
 					t.Fatalf("native logical owner not retained: %+v %v", out.Run, err)
 				}
 				return
 			}
-			if err == nil || m.calls.Load() != 0 || host.calls.Load() != 0 {
+			if err == nil || m.calls.Load() != 0 {
 				t.Fatalf("rejected owner entered a callback: %v", err)
 			}
 			if cut == "foreign" || cut == "missing" || cut == "terminal" {

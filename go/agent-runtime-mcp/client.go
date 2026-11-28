@@ -31,9 +31,7 @@ const (
 )
 
 var (
-	ErrInvalidClient = errors.New("invalid MCP client")
-	// Deprecated: the official SDK now negotiates legacy protocols when needed.
-	ErrLegacyProtocol      = errors.New("legacy MCP protocol is forbidden")
+	ErrInvalidClient       = errors.New("invalid MCP client")
 	ErrUnsupportedProtocol = errors.New("unsupported MCP protocol version")
 	ErrToolsUnavailable    = errors.New("MCP tools capability is unavailable")
 	ErrInvalidTool         = errors.New("invalid MCP tool")
@@ -78,10 +76,7 @@ type Client struct {
 // DiscoveredTool preserves MCP discovery metadata while exposing a stable
 // Runtime Tool Definition for model/tool composition.
 type DiscoveredTool struct {
-	Name         string
 	Title        string
-	Description  string
-	InputSchema  json.RawMessage
 	OutputSchema json.RawMessage
 	Definition   tools.Definition
 }
@@ -104,7 +99,7 @@ type Discovery struct {
 	ToolsListChanged bool
 	Extensions       []Extension
 	Tools            []DiscoveredTool
-	Catalog          CatalogSnapshot
+	Endpoint         string
 }
 
 // CallRequest executes one named MCP Tool with object arguments.
@@ -218,7 +213,7 @@ func newDiscovery(initialize *mcpsdk.InitializeResult, endpoint string) (Discove
 	}
 	discovery := Discovery{
 		ProtocolVersion: strings.TrimSpace(initialize.ProtocolVersion), CapabilitiesJSON: append(json.RawMessage(nil), capabilitiesJSON...),
-		ToolsListChanged: initialize.Capabilities.Tools.ListChanged, Catalog: CatalogSnapshot{Endpoint: endpoint},
+		ToolsListChanged: initialize.Capabilities.Tools.ListChanged, Endpoint: endpoint,
 	}
 	extensions, err := projectExtensions(initialize.Capabilities.Extensions)
 	if err != nil {
@@ -303,12 +298,11 @@ func appendToolPage(discovery *Discovery, result *mcpsdk.ListToolsResult, seenNa
 		if err != nil {
 			return err
 		}
-		if _, duplicate := seenNames[projected.Name]; duplicate {
-			return fmt.Errorf("%w: duplicate tool %q", ErrInvalidTool, projected.Name)
+		if _, duplicate := seenNames[projected.Definition.Name]; duplicate {
+			return fmt.Errorf("%w: duplicate tool %q", ErrInvalidTool, projected.Definition.Name)
 		}
-		seenNames[projected.Name] = struct{}{}
+		seenNames[projected.Definition.Name] = struct{}{}
 		discovery.Tools = append(discovery.Tools, projected)
-		discovery.Catalog.Definitions = append(discovery.Catalog.Definitions, tools.CloneDefinition(projected.Definition))
 	}
 	return nil
 }
@@ -460,9 +454,7 @@ func projectTool(item *mcpsdk.Tool) (DiscoveredTool, error) {
 		Key: name, Name: name, Description: description, InputSchema: append(json.RawMessage(nil), input...),
 	}
 	return DiscoveredTool{
-		Name: name, Title: title, Description: definition.Description,
-		InputSchema: append(json.RawMessage(nil), input...), OutputSchema: append(json.RawMessage(nil), output...),
-		Definition: tools.CloneDefinition(definition),
+		Title: title, OutputSchema: output, Definition: definition,
 	}, nil
 }
 
@@ -508,10 +500,8 @@ func cloneDiscovery(discovery Discovery) Discovery {
 	}
 	discovery.Tools = append([]DiscoveredTool(nil), discovery.Tools...)
 	for index := range discovery.Tools {
-		discovery.Tools[index].InputSchema = append(json.RawMessage(nil), discovery.Tools[index].InputSchema...)
 		discovery.Tools[index].OutputSchema = append(json.RawMessage(nil), discovery.Tools[index].OutputSchema...)
 		discovery.Tools[index].Definition = tools.CloneDefinition(discovery.Tools[index].Definition)
 	}
-	discovery.Catalog = CloneCatalogSnapshot(discovery.Catalog)
 	return discovery
 }

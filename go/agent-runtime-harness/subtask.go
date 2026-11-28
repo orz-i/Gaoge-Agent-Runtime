@@ -333,7 +333,7 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 			}
 		}
 	}
-	target, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason, nil)
+	target, found, cancelErr := runner.cancelRuntimeRun(ctx, turn, task.RunID, reason, nil)
 	// Only conflicts from the TARGET cancellation itself can prove that no
 	// physical cancellation began. A later descendant-cleanup conflict may
 	// follow already committed effects; it must retain the intent.

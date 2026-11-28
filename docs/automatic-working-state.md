@@ -43,12 +43,10 @@ summary disabled, with the original request and hash semantics. Registering a
 Tool or including an evidence reference does not select or authorize that Tool.
 
 Ordinary `OpenAgentSession` supports recovery after the original callback has
-returned. For takeover after a process exits inside that callback, explicitly
-select `AgentSessionContextOptions.ManagedRecovery`. The Kernel Runtime
-must have a `ManagedRecoveryHost` bound to the exact same Harness Store. This
-mode requires the built-in Harness bounded Context/summary bridges and the
-restricted native callback composition checked by the constructor. Custom or
-wrapped Context ports cannot opt into this proof with a marker or flag.
+returned. For takeover after a process exits inside that callback, the Kernel
+Runtime derives recovery capability from the actual `ManagedRecoveryHost`
+bound to the exact Harness Store and the built-in Context/summary bridges.
+Custom or wrapped ports cannot manufacture that proof.
 Summary is an optional stage in the same Agent recovery lifecycle.
 Ordinary and managed summary support `SharedBudget` with the native Runtime
 ledger composition. The combined managed proof is limited to the

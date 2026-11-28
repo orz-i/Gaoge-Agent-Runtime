@@ -51,12 +51,11 @@ func TestAutoAllowanceRunPersistsAndResumesAcrossSQLStoreReopen(t *testing.T) {
 	_, firstWorker := newWorker()
 	waiting, err := firstWorker.StartRun(t.Context(), agent.StartRequest{
 		ID: "auto-sql-run", RequestID: "auto-sql-request", Goal: "complete with a correction",
-		Actor:         kernel.ActorRef{TenantID: "tenant", ActorID: "operator"},
-		Thread:        kernel.ThreadRef{Kind: "conversation", ID: "auto-thread"},
-		CallAllowance: &agent.CallAllowance{LLMCalls: 1},
-		AutoAllowance: &agent.AutoAllowancePolicy{
+		Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "operator"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "auto-thread"},
+		CallAllowance: &agent.CallAllowance{LLMCalls: 1, Renewal: &agent.AutoAllowancePolicy{
 			ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1,
-		},
+		}},
 	})
 	if err != nil || waiting.Run.Status != kernel.RunStatusRunning || modelClient.calls != 1 {
 		t.Fatalf("auto grant not persisted at SQL worker yield: %#v calls=%d err=%v", waiting.Run, modelClient.calls, err)

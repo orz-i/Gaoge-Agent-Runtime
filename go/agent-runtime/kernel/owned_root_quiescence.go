@@ -6,88 +6,79 @@ import (
 	"math"
 )
 
-// OwnedRootSettlementStore is an OPTIONAL read-only custody proof. It is not
-// a generic physical Cancel capability. The Store inspects an exact Root Run,
-// its execution epoch, unsettled grants and retired callback retirement
-// under the same Run lock used for new physical admission and Kernel Cancel.
-type OwnedRootSettlementStore interface {
-	VerifyOwnedRootSettlement(context.Context, Snapshot) error
+// ExecutionCustody identifies the read-only fact required by a caller.
+// These are conditions on the same original execution record, not execution
+// modes or permission to dispatch or settle physical effects.
+type ExecutionCustody string
+
+const (
+	CustodyRetired         ExecutionCustody = "retired"
+	CustodyPrepared        ExecutionCustody = "prepared"
+	CustodyCompletedTool   ExecutionCustody = "completed_tool"
+	CustodyBoundedApproval ExecutionCustody = "bounded_approval"
+	CustodyReturned        ExecutionCustody = "returned"
+)
+
+// ExecutionCustodyStore verifies the original Run, lease, active grant and
+// retirement facts in the same native read transaction. Subsequent control
+// writes must still arbitrate their own CAS against new admissions.
+type ExecutionCustodyStore interface {
+	VerifyExecutionCustody(context.Context, Snapshot, ExecutionCustody) error
 }
 
-// CompletedToolReturnStore verifies the original native callback history.
-// The consumer must independently verify every original Tool owner's receipt.
-type CompletedToolReturnStore interface {
-	VerifyCompletedToolReturn(context.Context, Snapshot) error
-}
-
-func (r *Runtime) VerifyCompletedToolReturn(ctx context.Context, expected Snapshot) error {
-	if r == nil || ctx == nil || expected.Run.ID == "" || expected.Run.Status != RunStatusCompleted {
+func (r *Runtime) VerifyExecutionCustody(ctx context.Context, expected Snapshot, requirement ExecutionCustody) error {
+	if r == nil || ctx == nil || expected.Run.ID == "" || !requirement.Valid() ||
+		(requirement == CustodyCompletedTool && expected.Run.Status != RunStatusCompleted) {
 		return ErrInvalidInput
 	}
-	store, ok := r.store.(CompletedToolReturnStore)
+	store, ok := r.store.(ExecutionCustodyStore)
 	if !ok {
 		return ErrExecutionRequired
 	}
-	return store.VerifyCompletedToolReturn(ctx, expected)
+	return store.VerifyExecutionCustody(ctx, expected, requirement)
 }
 
-// VerifyBoundedToolControl verifies the original read-only approval frames.
-// The fixed local Agent separately checks each consumed Tool owner's receipt.
-func (r *Runtime) VerifyBoundedToolControl(ctx context.Context, expected Snapshot) error {
-	if r == nil || ctx == nil || expected.Run.ID == "" {
+func (c ExecutionCustody) Valid() bool {
+	switch c {
+	case CustodyRetired, CustodyPrepared, CustodyCompletedTool, CustodyBoundedApproval, CustodyReturned:
+		return true
+	default:
+		return false
+	}
+}
+
+// VerifyExecutionCustodyFacts is the sole shared read reducer. Store adapters
+// supply the same locked original facts; only the requested read predicate
+// differs. Expired lease-only ownership may be ignored for retired proofs,
+// never for the retained original physical callback.
+func VerifyExecutionCustodyFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
+	hasActiveGrants bool, receipts []OwnedRetirementReceipt, grant ChildExecutionGrant, completion PhysicalCallbackCompletion,
+	requirement ExecutionCustody) error {
+	var operation string
+	var toolCustody OwnedCallbackCustody
+	switch requirement {
+	case CustodyRetired:
+	case CustodyPrepared:
+		if (expected.Run.Status != RunStatusRunning || expected.Run.Revision != 1) &&
+			(expected.Run.Status != RunStatusCancelled || expected.Run.Revision != 2 || expected.Run.ErrorCode != "run.cancelled") {
+			return ErrExecutionConflict
+		}
+		operation = "prepare"
+	case CustodyCompletedTool:
+		if expected.Run.Status != RunStatusCompleted {
+			return ErrExecutionConflict
+		}
+		toolCustody = OwnedToolResultReturn
+	case CustodyBoundedApproval:
+		toolCustody = OwnedBoundedApprovalReturn
+	case CustodyReturned:
+		return verifyReturnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, grant, completion, receipts, hasActiveGrants)
+	default:
 		return ErrInvalidInput
 	}
-	store, ok := r.store.(interface {
-		VerifyBoundedToolControl(context.Context, Snapshot) error
-	})
-	if !ok {
-		return ErrExecutionRequired
-	}
-	return store.VerifyBoundedToolControl(ctx, expected)
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, operation, toolCustody)
 }
 
-// RootSettlementCheck validates the facts gathered under a native Store's Run lock.
-type RootSettlementCheck func(Snapshot, Snapshot, uint64, uint64, ExecutionLease, bool, []OwnedRetirementReceipt) error
-
-// PreparedRootSettlementStore proves that the entire first-party PREPARE
-// callback returned and was retired, without ever entering Model, Tool
-// or Host approval/completion callbacks. The original Run lock serializes
-// this read with the next Resume/Start grant and native Kernel Cancel.
-type PreparedRootSettlementStore interface {
-	VerifyPreparedRootSettlement(context.Context, Snapshot) error
-}
-
-func (r *Runtime) VerifyPreparedRootSettlement(ctx context.Context, expected Snapshot) error {
-	if r == nil || ctx == nil || expected.Run.ID == "" {
-		return ErrInvalidInput
-	}
-	store, ok := r.store.(PreparedRootSettlementStore)
-	if !ok {
-		return ErrExecutionRequired
-	}
-	return store.VerifyPreparedRootSettlement(ctx, expected)
-}
-
-// VerifyOwnedRootSettlement never grants cancellation by matching a RunID or
-// lease expiration. A later Kernel.Cancel must still arbitrate its own CAS
-// against any new Start/Resume grant after this read.
-func (r *Runtime) VerifyOwnedRootSettlement(ctx context.Context, expected Snapshot) error {
-	if r == nil || ctx == nil || expected.Run.ID == "" {
-		return ErrInvalidInput
-	}
-	store, ok := r.store.(OwnedRootSettlementStore)
-	if !ok {
-		return ErrExecutionRequired
-	}
-	return store.VerifyOwnedRootSettlement(ctx, expected)
-}
-
-// VerifyOwnedRootSettlementFacts is shared by Memory and PostgreSQL Stores.
-// The latest callback must have *returned*, committed a verified retirement
-// and retired release of the latest actual physical admission. Its
-// Store-owned watermark is distinct from later lease-only epochs. Unknown,
-// borrowed, pre-ACK, missing, duplicate and stale historical receipts cannot
-// establish that the original middleware and external callbacks are quiescent.
 // exactOwnedRootCancelSuccessor recognizes only one native ControlCancel CAS
 // directly after the original retired callback. A terminal-looking
 // same-ID snapshot, a stale receipt or an arbitrary later mutation cannot
@@ -107,44 +98,6 @@ func exactOwnedRootCancelSuccessor(previous, current Snapshot) bool {
 	before.ErrorCode, before.ErrorDetail = after.ErrorCode, after.ErrorDetail
 	before.EndedAt, before.UpdatedAt = after.EndedAt, after.UpdatedAt
 	return ManagedDigest(before) == ManagedDigest(after)
-}
-
-// VerifyPreparedRootSettlementFacts shares the exact owner/epoch/receipt
-// predicate with ordinary terminal settlement, but requires a SINGLE actual
-// retired "prepare" callback. A later Model/approval callback can NEVER
-// inherit this pre-dispatch authorization. An exact retired no-entry
-// suffix is not a callback and cannot erase the unchanged original custody.
-func VerifyPreparedRootSettlementFacts(
-	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
-) error {
-	if (expected.Run.Status != RunStatusRunning || expected.Run.Revision != 1) &&
-		(expected.Run.Status != RunStatusCancelled || expected.Run.Revision != 2 ||
-			expected.Run.ErrorCode != "run.cancelled") {
-		return ErrExecutionConflict
-	}
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "prepare", "")
-}
-
-func VerifyOwnedRootSettlementFacts(
-	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
-) error {
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", "")
-}
-
-func VerifyCompletedToolReturnFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
-) error {
-	if expected.Run.Status != RunStatusCompleted {
-		return ErrExecutionConflict
-	}
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", OwnedToolResultReturn)
-}
-
-func VerifyBoundedToolControlFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	hasActiveGrants bool, receipts []OwnedRetirementReceipt) error {
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", OwnedBoundedApprovalReturn)
 }
 
 func verifyOwnedRootSettlementFacts(

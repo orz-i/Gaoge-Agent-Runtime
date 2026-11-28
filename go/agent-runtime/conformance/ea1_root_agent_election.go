@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -22,7 +21,7 @@ import (
 // every denial snapshot, and physical unknown never acquires retry authority.
 func RunEA1RootAgentElectionSuite(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, entry := range []string{"start", "resume"} {
-		for _, cut := range []string{"host", "model", "tool", "deadline", "unknown-model", "unknown-tool", "unknown-tool-renewed"} {
+		for _, cut := range []string{"admission", "model", "tool", "deadline", "unknown-model", "unknown-tool", "unknown-tool-renewed"} {
 			t.Run(entry+"/"+cut, func(t *testing.T) { ea1AgentElectionEntry(t, factory, entry, cut) })
 		}
 	}
@@ -35,10 +34,13 @@ func RunEA1RootAgentElectionSuite(t *testing.T, factory func(*testing.T) (kernel
 
 type ea1ElectionStore struct {
 	*ea1AgentReceiptFault
-	created          func(kernel.Snapshot)
-	acquired         kernel.ExecutionLease
-	receiptCommitted func(kernel.Snapshot)
-	afterApply       func(kernel.StoreMutation)
+	created                    func(kernel.Snapshot)
+	acquired                   kernel.ExecutionLease
+	receiptCommitted           func(kernel.Snapshot)
+	afterApply                 func(kernel.StoreMutation)
+	afterEntry                 func()
+	afterAdmission             func()
+	acquireCalls, releaseCalls int
 }
 
 func (s *ea1ElectionStore) Create(ctx context.Context, r kernel.Record, e []kernel.EventDraft) (kernel.Snapshot, error) {
@@ -49,57 +51,61 @@ func (s *ea1ElectionStore) Create(ctx context.Context, r kernel.Record, e []kern
 	return out, err
 }
 
-// Parented runs still use the real child lease admission.
+// Standalone lease calls are counted separately from atomic physical admission.
 func (s *ea1ElectionStore) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
+	s.acquireCalls++
 	lease, err := s.ExecutionStore.AcquireExecution(ctx, req)
 	if err == nil {
 		s.acquired = lease
 	}
 	return lease, err
 }
+func (s *ea1ElectionStore) ReleaseExecution(ctx context.Context, lease kernel.ExecutionLease) error {
+	s.releaseCalls++
+	return s.ExecutionStore.ReleaseExecution(ctx, lease)
+}
 
-func (s *ea1ElectionStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	v, e := s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, a)
+func (s *ea1ElectionStore) BeginPhysicalExecution(ctx context.Context, a kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	if !a.Candidate().Grant.IsOwned() {
+		return s.PhysicalExecutionStore.BeginPhysicalExecution(ctx, a)
+	}
+	v, e := s.PhysicalExecutionStore.BeginPhysicalExecution(ctx, a)
 	if e == nil && a.AcquiresLease() {
 		s.acquired = v.Lease
+		if s.afterAdmission != nil {
+			s.afterAdmission()
+		}
 	}
 	return v, e
 }
 
-func (s *ea1ElectionStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	out, err := s.ea1AgentReceiptFault.ApplyExecution(ctx, lease, revision, m)
-	if err == nil && s.afterApply != nil {
-		s.afterApply(m)
+func (s *ea1ElectionStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		out, _, err := s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.afterApply != nil {
+			s.afterApply(commitMutation)
+		}
+		return out, false, err
 	}
-	return out, err
+	if commitAuth.Recovery != nil {
+		out, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.receiptCommitted != nil {
+			s.receiptCommitted(out)
+		}
+		return out, false, err
+	}
+	return s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 // Observe only an actual successful Store receipt CAS, before later terminal
 // consumption removes its internal replay record. Never mint or alter proof.
-func (s *ea1ElectionStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	out, err := s.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
-	if err == nil && s.receiptCommitted != nil {
-		s.receiptCommitted(out)
-	}
-	return out, err
-}
 
-type ea1ElectionHost struct {
-	operation plugin.RunOperation
-	hook      func()
-	calls     int
-}
-
-func (*ea1ElectionHost) Name() string { return "ea1.election.original" }
-func (h *ea1ElectionHost) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if inv.Operation != h.operation || inv.ParentRunID != "" {
-		return kernel.Snapshot{}, errors.New("wrong original election entry")
+func (s *ea1ElectionStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	window, err := s.PhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
+	if err == nil && s.afterEntry != nil {
+		s.afterEntry()
 	}
-	h.calls++
-	if h.hook != nil {
-		h.hook()
-	}
-	return next(ctx)
+	return window, err
 }
 
 type ea1ElectionPhysical struct {
@@ -130,7 +136,6 @@ type ea1ElectionFixture struct {
 	reopen         func() kernel.Store
 	physical       *ea1ElectionPhysical
 	catalog        *tools.Registry
-	host           *ea1ElectionHost
 	request        agent.StartRequest
 	created        kernel.Snapshot
 	modelVerifier  agent.ModelOutcomeVerifier
@@ -140,8 +145,8 @@ type ea1ElectionFixture struct {
 
 func ea1NewElection(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), withTool bool) *ea1ElectionFixture {
 	backing, peer, reopen := factory(t)
-	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), injected: errors.New("original physical receipt not committed")}
-	f := &ea1ElectionFixture{t: t, store: &ea1ElectionStore{ea1AgentReceiptFault: fault}, peer: ea1StartRuntime(t, peer), peerStore: peer, reopen: reopen, host: &ea1ElectionHost{operation: plugin.RunStart}}
+	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("original physical receipt not committed")}
+	f := &ea1ElectionFixture{t: t, store: &ea1ElectionStore{ea1AgentReceiptFault: fault}, peer: ea1StartRuntime(t, peer), peerStore: peer, reopen: reopen}
 	f.rt = ea1StartRuntime(t, f.store)
 	f.physical = &ea1ElectionPhysical{ea1StartSettlementPhysical: &ea1StartSettlementPhysical{rt: f.rt, tool: withTool}}
 	var err error
@@ -167,9 +172,6 @@ func (f *ea1ElectionFixture) runner(rt *kernel.Runtime, owner string, host bool)
 		ttl, callTimeout = 4*time.Second, 2500*time.Millisecond
 	}
 	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, ModelOutcomeVerifier: f.modelVerifier, ToolOutcomeVerifier: f.toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ttl}, Execution: ea1FixtureExecutionPolicy(callTimeout)}
-	if host {
-		deps.RunMiddleware = []plugin.RunMiddleware{f.host}
-	}
 	r, e := agent.NewRunner(deps)
 	if e != nil {
 		f.t.Fatal(e)
@@ -316,7 +318,6 @@ func ea1AgentElectionEntry(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if _, e = f.rt.LookupChildExecution(ctx, f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatalf("Prepare scope retained: %v", e)
 		}
-		f.host.operation = plugin.RunResume
 	}
 	unknown := strings.HasPrefix(cut, "unknown-")
 	if unknown {
@@ -359,8 +360,8 @@ func ea1AgentElectionEntry(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 	}
 	switch cut {
-	case "host", "deadline":
-		f.host.hook = barrier
+	case "admission", "deadline":
+		f.store.afterEntry = barrier
 	case "model":
 		f.physical.modelHook = barrier
 	case "tool":
@@ -374,7 +375,7 @@ func ea1AgentElectionEntry(t *testing.T, factory func(*testing.T) (kernel.Store,
 	} else {
 		out, err = runner.Resume(ctx, f.request.ID, prepared.Run.Revision)
 	}
-	f.host.hook = nil
+	f.store.afterEntry = nil
 	f.physical.modelHook = nil
 	f.physical.toolHook = nil
 	if unknown {
@@ -452,7 +453,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	before := f.snapshot()
 	grant := f.grant()
 	f.originalReceipt(before, kind == "tool")
-	completion, err := f.rt.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	completion, err := f.rt.LookupPhysicalCallbackReturn(ctx, grant)
 	if err != nil || !completion.HostCompleted {
 		t.Fatalf("actual callback return missing: %v", err)
 	}
@@ -462,7 +463,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	// The peer has its own Store/connection; observe its winning CAS through
 	// the same faithful port, not through a fabricated post-hoc receipt.
 	originalPeer := f.peerStore
-	peerObserver := &ea1ElectionStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: originalPeer, ExecutionStore: originalPeer.(kernel.ExecutionStore), ControlStore: originalPeer.(kernel.ControlStore), ChildExecutionStore: originalPeer.(kernel.ChildExecutionStore), ExecutionQuarantineStore: originalPeer.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: originalPeer.(kernel.OwnedPhysicalExecutionStore)}, receiptCommitted: observeReceipt}
+	peerObserver := &ea1ElectionStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: originalPeer, ExecutionStore: originalPeer.(kernel.ExecutionStore), ExecutionQuarantineStore: originalPeer.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: originalPeer.(kernel.PhysicalExecutionStore)}, receiptCommitted: observeReceipt}
 	f.peer = ea1StartRuntime(t, peerObserver)
 	available := mode != "unknown-ttl"
 	lookups := 0
@@ -497,12 +498,6 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 			return r.ReconcileModelOutcome(ctx, f.request.ID, rev)
 		}
 		return r.ReconcileToolOutcome(ctx, f.request.ID, rev, "original-call")
-	}
-	// Even a configured effect-capable Host Run middleware must not enter
-	// while consuming a previously committed receipt past the Run deadline.
-	if mode == "deadline-known" {
-		f.host.operation = plugin.RunResume
-		f.host.hook = func() { t.Error("expired receipt consumption entered Host callback") }
 	}
 	runner := f.runner(f.rt, "recovery-original", mode == "deadline-known" && kind == "model")
 	verifyHook = func() {
@@ -545,7 +540,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 			t.Fatalf("TTL granted unknown replay: %v", err)
 		}
 		ea1ControlUnchanged(t, freshRT, before, grant)
-		if e := retry.ReconcileRootPhysicalExecution(ctx, f.request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+		if e := retry.ReconcilePhysicalExecution(ctx, f.request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
 			t.Fatalf("unknown retired after TTL: %v", e)
 		}
 		f.originalReceipt(before, kind == "tool")
@@ -570,16 +565,19 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	}
 	if kind == "tool" {
 		var state struct {
-			RecoveredTools []struct {
-				Call   tools.Call            `json:"call"`
-				Result tools.ExecutionResult `json:"result"`
-			} `json:"recoveredTools"`
+			PendingCalls []tools.Call `json:"pendingCalls"`
+			ToolReturns  []struct {
+				CallID  string `json:"callID"`
+				Outcome struct {
+					Result tools.ExecutionResult `json:"result"`
+				} `json:"outcome"`
+			} `json:"toolReturns"`
 		}
-		if e := json.Unmarshal(receiptWrites[0].State, &state); e != nil || len(state.RecoveredTools) != 1 {
+		if e := json.Unmarshal(receiptWrites[0].State, &state); e != nil || len(state.ToolReturns) != 1 || len(state.PendingCalls) == 0 || state.ToolReturns[0].CallID != state.PendingCalls[0].ID {
 			t.Fatalf("committed original receipt not observed: %v", e)
 		}
-		ea1StartSettlementJSONEqual(t, "full committed Tool receipt before consumption", state.RecoveredTools[0].Result, f.physical.receipts[0])
-		ea1StartSettlementJSONEqual(t, "committed original Tool Call", state.RecoveredTools[0].Call, f.physical.toolRequests[0].Call)
+		ea1StartSettlementJSONEqual(t, "full committed Tool receipt before consumption", state.ToolReturns[0].Outcome.Result, f.physical.receipts[0])
+		ea1StartSettlementJSONEqual(t, "committed original Tool Call", state.PendingCalls[0], f.physical.toolRequests[0].Call)
 	}
 	f.originalReceipt(out, true)
 	if kind == "tool" {
@@ -601,18 +599,11 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal("complete original receipt changed across reopen")
 	}
 	fresh := f.runner(freshRT, "fresh-after-receipt", false)
-	if e = fresh.ReconcileRootPhysicalExecution(ctx, f.request.ID); e != nil {
+	if e = fresh.ReconcilePhysicalExecution(ctx, f.request.ID); e != nil {
 		t.Fatalf("duplicate retirement invented scope: %v", e)
 	}
 	if kind == "model" {
 		// Continue=true is the original durable yield, not a request to resend.
-		if mode == "deadline-known" {
-			opaque := f.runner(freshRT, "opaque-after-deadline", true)
-			blocked, denyErr := opaque.Resume(ctx, persisted.Run.ID, persisted.Run.Revision)
-			if !errors.Is(denyErr, kernel.ErrDeadline) || kernel.ManagedDigest(blocked) != kernel.ManagedDigest(persisted) || f.host.calls != 0 {
-				t.Fatalf("opaque Run policy silently skipped or entered: %v", denyErr)
-			}
-		}
 		consumed, consumeErr := fresh.Resume(ctx, persisted.Run.ID, persisted.Run.Revision)
 		if consumeErr != nil {
 			t.Fatalf("known Model receipt consumption failed: %v", consumeErr)
@@ -627,8 +618,5 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	}
 	if len(f.physical.requests) != 1 || kind == "tool" && len(f.physical.toolRequests) != 1 {
 		t.Fatal("known recovery/continuation sent new physical work")
-	}
-	if mode == "deadline-known" && f.host.calls != 0 {
-		t.Fatal("expired receipt consumption invoked Host middleware")
 	}
 }

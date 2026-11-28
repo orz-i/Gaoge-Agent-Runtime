@@ -29,7 +29,7 @@ func TestACPCancelDuringInitialSessionOpenFencesLatePrompt(t *testing.T) {
 	if err != nil || original.Run.Status != kernel.RunStatusRunning || original.Run.Revision != 2 {
 		t.Fatalf("open intent absent: %+v %v", original.Run, err)
 	}
-	cancelled, err := runner.CancelRun(t.Context(), original.Run.ID, original.Run.Revision)
+	cancelled, err := runner.CancelRemote(t.Context(), original.Run.ID, original.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) || cancelled.Run.Revision != 3 || cancelled.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("cancel lacked durable pre-session fence: %+v %v", cancelled.Run, err)
 	}

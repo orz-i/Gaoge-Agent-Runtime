@@ -14,13 +14,16 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 var errProtocolUnknown = errors.New("original Host operation dispatched, receipt unknown")
+
+// These tests deliberately exercise opaque Host dispatch, not a native
+// selected Run or an independently metered first-party Agent.
+type hostProtocolAgent struct{ *agent.Runner }
 
 type protocolFixture struct {
 	r           *harness.Runner
@@ -37,6 +40,7 @@ func newProtocolFixture(t *testing.T, backend string, cut *protocolCut) protocol
 	if cut == nil {
 		cut = &protocolCut{}
 	}
+	cut.hostProtocol = true
 	r, s, rt, a, req := newGenerationHarnessBackend(t, backend, &generationModel{}, func(base generationStore) generationStore { cut.generationStore = base; return cut })
 	started, err := r.StartAgentTurn(t.Context(), req)
 	if err != nil || len(started.Subtasks) != 1 {
@@ -52,15 +56,12 @@ func newProtocolFixture(t *testing.T, backend string, cut *protocolCut) protocol
 
 func (f protocolFixture) controller(t *testing.T, c harness.RuntimeCanceller) *harness.Runner {
 	t.Helper()
-	route, err := handoff.NewDeferredAgent(f.agent)
+	route, err := handoff.New(handoff.Config{Local: f.agent, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: f.store, Ledgers: f.store, Relations: f.relations, Clock: generationClock{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := harness.NewRunner(harness.Dependencies{Runtime: f.runtime, Agent: f.agent, Store: f.store, Budget: shared, Handoffs: route, Relations: f.relations, Cancellation: c, Clock: generationClock{}})
+
+	r, err := harness.NewRunner(harness.Dependencies{Runtime: f.runtime, Agent: f.agent, Store: f.store, Handoffs: route, Relations: f.relations, Cancellation: c, Clock: generationClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,6 +305,7 @@ type protocolCut struct {
 	phase, runID, intentID          string
 	armed, hit, stopStart, startHit bool
 	stopRoot                        bool
+	hostProtocol                    bool
 	stopInvocation, invocationHit   bool
 }
 
@@ -314,6 +316,8 @@ func (s *protocolCut) CreateInvocation(ctx context.Context, inv harness.Invocati
 	}
 	return s.generationStore.CreateInvocation(ctx, inv)
 }
+
+func (s *protocolCut) hostProtocolFixture() bool { return s.hostProtocol }
 
 func (s *protocolCut) setGenerationRelations(r *runrelation.Registry) { s.relations = r }
 func (s *protocolCut) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
@@ -353,31 +357,41 @@ func (s *protocolCut) AppendItem(ctx context.Context, item harness.Item) (harnes
 	}
 	return saved, fresh, err
 }
-func (s *protocolCut) SaveBudget(ctx context.Context, l budget.Ledger, rev uint64) error {
-	cut := s.armed && !s.hit && strings.HasPrefix(s.phase, "budget-") && l.RunCancelled(s.runID)
-	if cut && strings.HasSuffix(s.phase, "before") {
-		s.hit = true
-		return errCancellationPhaseCut
-	}
-	err := s.generationStore.SaveBudget(ctx, l, rev)
-	if cut && err == nil {
-		s.hit = true
-		return errCancellationPhaseCut
-	}
-	return err
+
+type protocolCreationCut struct {
+	generationKernelPorts
+	protocol *protocolCut
 }
-func (s *protocolCut) SettleUncreatedRoot(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
-	cut := s.armed && !s.hit && strings.HasPrefix(s.phase, "atomic-")
+
+func (s *protocolCut) wrapGenerationKernel(k kernel.Store) kernel.Store {
+	return &protocolCreationCut{generationKernelPorts: k.(generationKernelPorts), protocol: s}
+}
+func (s *protocolCreationCut) DecideBeforeCreate(ctx context.Context, q kernel.RunCreationDecision) (kernel.RunCreationDecision, error) {
+	p := s.protocol
+	cut := p.armed && !p.hit && strings.HasPrefix(p.phase, "creation-") && q.RunID == p.runID && q.Status == kernel.RunStatusCancelled
+	if cut && strings.HasSuffix(p.phase, "before") {
+		p.hit = true
+		return kernel.RunCreationDecision{}, errCancellationPhaseCut
+	}
+	out, err := s.generationKernelPorts.DecideBeforeCreate(ctx, q)
+	if err == nil && cut {
+		p.hit = true
+		return kernel.RunCreationDecision{}, errCancellationPhaseCut
+	}
+	return out, err
+}
+func (s *protocolCut) UpdateTurn(ctx context.Context, turn harness.Turn, revision uint64) (harness.Turn, error) {
+	cut := s.armed && !s.hit && strings.HasPrefix(s.phase, "atomic-") && turn.Status == harness.TurnCancelled
 	if cut && strings.HasSuffix(s.phase, "before") {
 		s.hit = true
-		return harness.Invocation{}, harness.Turn{}, errCancellationPhaseCut
+		return harness.Turn{}, errCancellationPhaseCut
 	}
-	a, b, err := s.generationStore.SettleUncreatedRoot(ctx, inv, turn)
+	a, err := s.generationStore.UpdateTurn(ctx, turn, revision)
 	if cut && err == nil {
 		s.hit = true
-		return harness.Invocation{}, harness.Turn{}, errCancellationPhaseCut
+		return harness.Turn{}, errCancellationPhaseCut
 	}
-	return a, b, err
+	return a, err
 }
 
 func TestCancellationProtocolHostDurableCutRecovery(t *testing.T) {
@@ -421,7 +435,7 @@ func TestCancellationProtocolHostDurableCutRecovery(t *testing.T) {
 
 func TestCancellationProtocolWaitingNoDispatchAllDurableCuts(t *testing.T) {
 	for _, backend := range generationBackends {
-		for _, phase := range []string{"none", "intent-before", "intent-ack-loss", "requested-before", "requested-ack-loss", "budget-before", "budget-ack-loss", "confirmed-before", "confirmed-ack-loss", "projection-before", "projection-ack-loss", "completion-before", "completion-ack-loss"} {
+		for _, phase := range []string{"none", "requested-before", "requested-ack-loss", "creation-before", "creation-ack-loss", "confirmed-before", "confirmed-ack-loss", "projection-before", "projection-ack-loss"} {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				cut := &protocolCut{phase: phase}
 				m := &generationModel{}
@@ -442,6 +456,28 @@ func TestCancellationProtocolWaitingNoDispatchAllDurableCuts(t *testing.T) {
 				if _, err = s.GetInvocationByExecutionRefID(t.Context(), cut.runID); !errors.Is(err, harness.ErrNotFound) {
 					t.Fatalf("waiting admitted Invocation: %v", err)
 				}
+				// A public append may not mint the no-Run projection.
+				for _, source := range protocolItems(t, s, first.Turn.ID) {
+					if source.Kind != harness.ItemDelegation || source.RunID != cut.runID || source.Status != harness.ItemWaiting {
+						continue
+					}
+					var payload map[string]json.RawMessage
+					if err := json.Unmarshal(source.Payload, &payload); err != nil {
+						t.Fatal(err)
+					}
+					payload["status"] = json.RawMessage(`"cancelled"`)
+					raw, err := json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					forged := source
+					forged.Status, forged.Seq, forged.ParentItemID, forged.Payload = harness.ItemCancelled, 0, source.ID, raw
+					sum := sha256.Sum256([]byte(first.Turn.ID + "\x00" + wait.Delegation.ID + "\x00" + string(harness.ItemCancelled) + "\x00"))
+					forged.ID = "hid_" + hex.EncodeToString(sum[:])[:24]
+					if _, _, err = s.AppendItem(t.Context(), forged); !errors.Is(err, harness.ErrConflict) {
+						t.Fatalf("public native projection minted: %v", err)
+					}
+				}
 				calls := m.calls
 				cut.armed = true
 				_, firstErr := r.CancelSubtask(t.Context(), first.Turn.ID, wait.Delegation.ID, "cancel no-dispatch child")
@@ -454,8 +490,13 @@ func TestCancellationProtocolWaitingNoDispatchAllDurableCuts(t *testing.T) {
 				if _, err = r.Cancel(t.Context(), first.Turn.ID, "stop owning Turn"); err != nil {
 					t.Fatal(err)
 				}
-				if m.calls != calls || harness.ActiveCancellationFence(protocolItems(t, s, first.Turn.ID)) {
-					t.Fatal("waiting recovery changed physical effects or stranded fence")
+				if m.calls != calls {
+					t.Fatal("waiting recovery changed physical effects")
+				}
+				for _, item := range protocolItems(t, s, first.Turn.ID) {
+					if item.ParentItemID == harness.CancellationFenceParentItemID {
+						t.Fatal("native waiting cancellation elected Host authority")
+					}
 				}
 			})
 		}
@@ -465,9 +506,9 @@ func TestCancellationProtocolWaitingNoDispatchAllDurableCuts(t *testing.T) {
 func TestCancellationProtocolInitialRootNoDispatchAllDurableCuts(t *testing.T) {
 	for _, backend := range generationBackends {
 		for _, withBudget := range []bool{false, true} {
-			phases := []string{"none", "intent-before", "intent-ack-loss", "atomic-before", "atomic-ack-loss", "completion-before", "completion-ack-loss"}
+			phases := []string{"none", "creation-before", "creation-ack-loss", "atomic-before", "atomic-ack-loss"}
 			if withBudget {
-				phases = append(phases, "budget-before", "budget-ack-loss", "projection-before", "projection-ack-loss")
+				phases = append(phases, "projection-before", "projection-ack-loss")
 			}
 			for _, phase := range phases {
 				name := backend + "/plain/" + phase
@@ -475,7 +516,7 @@ func TestCancellationProtocolInitialRootNoDispatchAllDurableCuts(t *testing.T) {
 					name = backend + "/budget/" + phase
 				}
 				t.Run(name, func(t *testing.T) {
-					cut := &protocolCut{phase: phase, stopStart: withBudget, stopRoot: !withBudget}
+					cut := &protocolCut{phase: phase, stopRoot: true}
 					m := &generationModel{calls: 10}
 					r, s, rt, native, req := newGenerationHarnessBackend(t, backend, m, func(base generationStore) generationStore { cut.generationStore = base; return cut })
 					req.Config.ToolKeys, req.Config.ToolPolicies = nil, nil
@@ -561,7 +602,7 @@ func TestCancellationProtocolPreparedHandoffNoDispatchRecoversBothControls(t *te
 				if err = operate(); err != nil {
 					t.Fatal(err)
 				}
-				if _, err = f.r.Cancel(t.Context(), f.started.Turn.ID, "stop Turn"); err != nil {
+				if _, err = f.controller(t, f.runtime).Cancel(t.Context(), f.started.Turn.ID, "stop Turn"); err != nil {
 					t.Fatal(err)
 				}
 				if harness.ActiveCancellationFence(protocolItems(t, f.store, f.started.Turn.ID)) {
@@ -599,7 +640,7 @@ func TestCancellationProtocolFrozenStartedBeforeInvocationIsNoDispatch(t *testin
 				}
 				operate := func() error {
 					if entry == "root" {
-						_, err := f.r.Cancel(t.Context(), f.started.Turn.ID, "stop frozen subtree")
+						_, err := f.controller(t, f.runtime).Cancel(t.Context(), f.started.Turn.ID, "stop frozen subtree")
 						return err
 					}
 					_, err := f.r.CancelSubtask(t.Context(), f.started.Turn.ID, taskID, "stop pre-Invocation target")
@@ -612,7 +653,7 @@ func TestCancellationProtocolFrozenStartedBeforeInvocationIsNoDispatch(t *testin
 				if err := operate(); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.r.Cancel(t.Context(), f.started.Turn.ID, "stop owning Turn"); err != nil {
+				if _, err := f.controller(t, f.runtime).Cancel(t.Context(), f.started.Turn.ID, "stop owning Turn"); err != nil {
 					t.Fatal(err)
 				}
 				if harness.ActiveCancellationFence(protocolItems(t, f.store, f.started.Turn.ID)) {
@@ -631,7 +672,7 @@ func TestCancellationProtocolWaitingToStartedNoInvocationRetainsHistory(t *testi
 				name = backend + "/replacement"
 			}
 			t.Run(name, func(t *testing.T) {
-				cut := &protocolCut{phase: "intent-ack-loss"}
+				cut := &protocolCut{phase: "creation-ack-loss"}
 				m := &generationModel{}
 				r, store, rt, native, req := newGenerationHarnessBackend(t, backend, m, func(base generationStore) generationStore { cut.generationStore = base; return cut })
 				req.Config.SharedBudget.MaxConcurrentDescendants = 1
@@ -699,7 +740,7 @@ func TestCancellationProtocolWaitingToStartedNoInvocationRetainsHistory(t *testi
 func TestCancellationProtocolHistoricalNestedWaitingRejectsBeforeElection(t *testing.T) {
 	for _, backend := range generationBackends {
 		t.Run(backend, func(t *testing.T) {
-			r, store, _, _, req := newGenerationHarnessBackend(t, backend, &generationModel{})
+			r, store, rt, _, req := newGenerationHarnessBackend(t, backend, &generationModel{})
 			req.Config.SharedBudget.MaxConcurrentDescendants = 1
 			req.Config.DelegationPolicy.MaxDepth = 2
 			first, err := r.StartAgentTurn(t.Context(), req)
@@ -719,7 +760,7 @@ func TestCancellationProtocolHistoricalNestedWaitingRejectsBeforeElection(t *tes
 				t.Fatal(err)
 			}
 			before := protocolItems(t, store, first.Turn.ID)
-			ledger, err := store.LoadBudget(t.Context(), first.Turn.ID)
+			ledger, err := rt.BudgetStore().LoadBudget(t.Context(), first.Turn.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -727,7 +768,7 @@ func TestCancellationProtocolHistoricalNestedWaitingRejectsBeforeElection(t *tes
 				t.Fatalf("obsolete waiting target admitted: %v", err)
 			}
 			after := protocolItems(t, store, first.Turn.ID)
-			retained, err := store.LoadBudget(t.Context(), first.Turn.ID)
+			retained, err := rt.BudgetStore().LoadBudget(t.Context(), first.Turn.ID)
 			if err != nil || len(after) != len(before) || retained.Revision != ledger.Revision || harness.ActiveCancellationFence(after) {
 				t.Fatalf("historical nested control mutated successor admission/budget: %v", err)
 			}
@@ -841,7 +882,7 @@ func TestCancellationProtocolTerminalProjectionCompetesWithLateEffectClaim(t *te
 				name = backend + "/projection-wins"
 			}
 			t.Run(name, func(t *testing.T) {
-				s := &protocolProjectionRaceStore{protocolCut: &protocolCut{}, projectionWins: projectionWins, claimReady: make(chan struct{}), claimProceed: make(chan struct{}), projectionReady: make(chan struct{}), projectionProceed: make(chan struct{}), projectionApplied: make(chan struct{}), afterProjectionProceed: make(chan struct{})}
+				s := &protocolProjectionRaceStore{protocolCut: &protocolCut{hostProtocol: true}, projectionWins: projectionWins, claimReady: make(chan struct{}), claimProceed: make(chan struct{}), projectionReady: make(chan struct{}), projectionProceed: make(chan struct{}), projectionApplied: make(chan struct{}), afterProjectionProceed: make(chan struct{})}
 				r, store, rt, native, req := newGenerationHarnessBackend(t, backend, &generationModel{}, func(base generationStore) generationStore { s.generationStore = base; return s })
 				started, err := r.StartAgentTurn(t.Context(), req)
 				if err != nil {

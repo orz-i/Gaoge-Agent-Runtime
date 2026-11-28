@@ -8,19 +8,42 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
+type modelEvidenceLedgerFault struct {
+	*memory.Store
+}
+
+func (s *modelEvidenceLedgerFault) Commit(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation, authority kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if mutation.Ledger != nil && mutationHasEvent(mutation.Events, "agent.model_invocation.completed") {
+		return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
+	}
+	return s.Store.Commit(ctx, id, revision, mutation, authority)
+}
+
+type modelEvidenceBudgetPorts struct{ sharedDimensionBudgetPorts }
+
+func (modelEvidenceBudgetPorts) Project(context.Context, budget.Ledger) error {
+	return errors.New("original Host projection interrupted")
+}
+
 func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T) {
 	base := memory.NewStore()
-	fault := &modelInvocationFaultStore{Store: base, eventType: "agent.model_invocation.completed"}
+	fault := &modelEvidenceLedgerFault{Store: base}
 	rt := newModelInvocationRuntime(t, fault)
+	bounded, err := agent.NewBoundedBudgetAdapter(fault, modelEvidenceBudgetPorts{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	provider := &invocationRecordingModel{}
-	host := &rootCountingRunMiddleware{}
+	host := &rootCountingObserver{}
 	billingOnly, conflicting := true, false
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, RunMiddleware: []plugin.RunMiddleware{host}, ModelOutcomeVerifier: agent.ModelOutcomeVerifierFunc(func(_ context.Context, request model.Request) (model.Response, error) {
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, BoundedBudget: bounded, Observers: []plugin.Observer{host}, ModelOutcomeVerifier: agent.ModelOutcomeVerifierFunc(func(_ context.Context, request model.Request) (model.Response, error) {
 		original := provider.callsCopy()
 		if len(original) != 1 || !reflect.DeepEqual(request, original[0]) {
 			t.Fatal("verifier did not receive exact original request")
@@ -45,7 +68,7 @@ func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	completion, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if err != nil || completion.HostCompleted {
 		t.Fatalf("Host completion=%#v %v", completion, err)
 	}
@@ -87,7 +110,7 @@ func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T
 	}
 	prior := mustModelInvocationView(t, before).ModelInvocations[0]
 	after := mustModelInvocationView(t, evidence).ModelInvocations[0]
-	if after.Status != agent.ModelInvocationCompleted || after.ConsumedAt != nil || after.CompletedAt == nil || after.ID != prior.ID || after.RunID != prior.RunID || after.RequestHash != prior.RequestHash || after.SourceRevision != prior.SourceRevision || after.Provider != prior.Provider || after.BindingFingerprint != prior.BindingFingerprint || after.ExecutionAttempt != prior.ExecutionAttempt || after.DispatchAttempt != prior.DispatchAttempt || !reflect.DeepEqual(after.Request, prior.Request) || after.Response.Content != "done" || after.Usage == nil || after.Usage.InputTokens != 7 {
+	if after.Status != agent.ModelInvocationCompleted || after.ConsumedAt != nil || after.CompletedAt == nil || after.ID != prior.ID || after.RunID != prior.RunID || after.RequestHash != prior.RequestHash || after.SourceRevision != prior.SourceRevision || after.Provider != prior.Provider || after.BindingFingerprint != prior.BindingFingerprint || after.ExecutionAttempt != prior.ExecutionAttempt || after.DispatchAttempt != prior.DispatchAttempt || !reflect.DeepEqual(after.Request, prior.Request) || after.Response.Content != "done" || after.Response.Usage == nil || after.Response.Usage.InputTokens != 7 {
 		t.Fatalf("receipt/source mismatch: %+v", after)
 	}
 	duplicate, err := runner.ReconcileModelOutcome(t.Context(), evidence.Run.ID, evidence.Run.Revision)
@@ -111,7 +134,7 @@ func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T
 	if err != nil || retained != grant {
 		t.Fatal("evidence retired original grant")
 	}
-	finalCompletion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	finalCompletion, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if err != nil || finalCompletion != completion || host.calls.Load() != 1 || len(provider.callsCopy()) != 1 {
 		t.Fatal("evidence changed Host completion or replayed callbacks")
 	}

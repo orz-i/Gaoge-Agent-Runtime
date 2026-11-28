@@ -11,7 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type auditSwitchSessionActorStore struct {
@@ -45,15 +44,17 @@ func TestSessionFacadeFrozenOwnerRejectsInconsistentSessionReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prep, err := harness.NewContextRunMiddleware(hstore, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: &multiContextCaptureModel{}, RunMiddleware: []plugin.RunMiddleware{prep}, PrepareModelRequest: harness.MaterializeContextWindowRequest})
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctxman := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	prep, err := harness.NewBoundedContextAdapter(hstore, ctxman, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 512}, nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: &multiContextCaptureModel{}, BoundedContext: prep})
+	if err != nil {
+		t.Fatal(err)
+	}
 	baseRunner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: hstore, Clock: contextHarnessClock{}, Context: ctxman})
 	if err != nil {
 		t.Fatal(err)

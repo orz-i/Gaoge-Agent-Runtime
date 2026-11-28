@@ -47,19 +47,16 @@ func TestManagedContextActualEarlyReturnCanSuspendButIsNotCompletion(t *testing.
 	if e != nil {
 		t.Fatal(e)
 	}
-	chain, e := plugin.NewRunChain(adapter)
-	if e != nil {
-		t.Fatal(e)
-	}
+	runner := &Runner{boundedContext: adapter}
 	lifecycle := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "original"}, []any{adapter})
-	_, e = chain.Invoke(callbackscope.Bind(t.Context(), lifecycle), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, e = runner.invokeContextRun(callbackscope.Bind(t.Context(), lifecycle), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
 		request := model.Request{RunID: "run", Model: "first"}
 		if _, ok := callbackscope.ManagedObligationSuspension(ctx, adapter, nil, request, ""); ok {
 			t.Fatal("hydration alone certified preparation")
 		}
 		for _, name := range []string{"first", "second"} {
 			request.Model = name
-			if _, err := adapter.Prepare(ctx, request); err != nil {
+			if _, err := adapter.prepareManaged(ctx, request); err != nil {
 				t.Fatal(err)
 			}
 			if _, ok := callbackscope.ManagedObligationSuspension(ctx, adapter, nil, request, ""); !ok {
@@ -84,14 +81,11 @@ func TestManagedContextFailedPreparationCannotCreateSafePoint(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	chain, e := plugin.NewRunChain(adapter)
-	if e != nil {
-		t.Fatal(e)
-	}
+	runner := &Runner{boundedContext: adapter}
 	scope := callbackscope.New(callbackscope.Binding{RunID: "run"}, []any{adapter})
-	_, e = chain.Invoke(callbackscope.Bind(t.Context(), scope), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, e = runner.invokeContextRun(callbackscope.Bind(t.Context(), scope), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
 		request := model.Request{RunID: "run"}
-		_, err := adapter.Prepare(ctx, request)
+		_, err := adapter.prepareManaged(ctx, request)
 		if err == nil {
 			t.Fatal("missing fixture failure")
 		}

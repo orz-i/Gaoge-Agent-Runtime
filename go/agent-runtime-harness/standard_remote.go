@@ -12,7 +12,7 @@ import (
 func (runner *Runner) standardRemoteCoordinator() *handoff.Coordinator {
 	c, ok := runner.handoffs.(*handoff.Coordinator)
 	native, local := runner.cancellation.(*kernel.Runtime)
-	if !ok || !local || native != runner.runtime || !c.OwnsStandardRemoteRoutes(runner.runtime) {
+	if !ok || !local || native != runner.runtime || !c.OwnsRemoteRoutes(runner.runtime) {
 		return nil
 	}
 	return c
@@ -29,7 +29,7 @@ func (runner *Runner) standardDelegationReceiptOwner() *agent.Runner {
 	if !ok || !bound || !local || native != runner.runtime || !original.ObservesKernelRuntime(runner.runtime) {
 		return nil
 	}
-	if coordinator.UsesLocalAgentRunner(runner.runtime, original) || runner.standardRemoteCoordinator() != nil {
+	if coordinator.LocalAgent(runner.runtime) == original {
 		return original
 	}
 	return nil

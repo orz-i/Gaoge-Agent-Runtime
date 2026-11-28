@@ -13,7 +13,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -21,8 +20,7 @@ import (
 // N2 is limited to absence of NEW physical dispatch in receipt-only recovery;
 // the original physical owner and its competing-control fence remain tested.
 func RunEA1RootAgentReconcilePhases(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
-	t.Run("settled-tool-outcome", func(t *testing.T) { RunSettledToolRecovery(t, factory, nil) })
-	t.Run("P2/model-host-evidence", func(t *testing.T) { ea1RootReconcilePhase(t, factory, "P2-evidence", "model") })
+	t.Run("settled-tool-outcome", func(t *testing.T) { RunSettledToolRecovery(t, factory) })
 	for _, phase := range []string{"P0", "P1", "P2", "P3", "P4"} {
 		for _, kind := range []string{"model", "tool"} {
 			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootReconcilePhase(t, factory, phase, kind) })
@@ -43,15 +41,21 @@ type ea1RootRecoveryFault struct {
 	heldSource    kernel.Snapshot
 }
 
-func (s *ea1RootRecoveryFault) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	out, err := s.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
-	if err == nil && s.phase == "P3" && s.cuts == 0 {
-		s.cuts++
-		s.recoveryGrant = g
-		return kernel.Snapshot{}, s.injected
+func (s *ea1RootRecoveryFault) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Recovery != nil {
+		g := commitAuth.Recovery.Grant
+
+		out, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.phase == "P3" && s.cuts == 0 {
+			s.cuts++
+			s.recoveryGrant = g
+			return kernel.Snapshot{}, false, s.injected
+		}
+		return out, false, err
 	}
-	return out, err
+	return s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func (s *ea1RootRecoveryFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.phase == "P4" && s.cuts == 0 {
 		s.cuts++
@@ -65,12 +69,12 @@ func (s *ea1RootRecoveryFault) FinishChildExecution(ctx context.Context, g kerne
 			s.heldSource = source
 			return s.injected
 		}
-		if e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p); e != nil {
+		if e := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p); e != nil {
 			return e
 		}
 		return s.injected
 	}
-	return s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	return s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 }
 
 type ea1RootRecoveryPhysical struct {
@@ -97,7 +101,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if kind == "tool" {
 		event = "tool.completed"
 	}
-	initial := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: event, injected: injected}
+	initial := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: event, injected: injected}
 	fault := &ea1RootRecoveryFault{ea1AgentReceiptFault: initial}
 	rt := ea1StartRuntime(t, fault)
 	competitor := ea1StartRuntime(t, peer)
@@ -138,11 +142,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		return tools.CloneExecutionResult(verifiedToolResult), nil
 	})
 	runnerFor := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		var host []plugin.RunMiddleware
-		if phase == "P2-evidence" {
-			host = []plugin.RunMiddleware{&ea1AdmissionMiddleware{}}
-		}
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, RunMiddleware: host, Model: physical, Catalog: registry, Executor: registry, ModelOutcomeVerifier: modelVerifier, ToolOutcomeVerifier: toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: registry, Executor: registry, ModelOutcomeVerifier: modelVerifier, ToolOutcomeVerifier: toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -180,8 +180,8 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-	if err != nil || completion.HostCompleted != (phase != "P2-evidence") || completion.GrantID != grant.ID {
+	completion, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
+	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
 		t.Fatalf("positive recovery lacks actual whole-callback completion: %+v %v", completion, err)
 	}
 	lease := initial.lastLease()
@@ -196,7 +196,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if e != nil || g != grant {
 			t.Fatal("rejected recovery changed original grant")
 		}
-		c, e := runtime.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+		c, e := runtime.LookupPhysicalCallbackReturn(t.Context(), g)
 		if e != nil || !ea1RecoveryJSONEqual(c, completion) {
 			t.Fatal("original callback completion changed")
 		}
@@ -211,58 +211,8 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 		return r.ReconcileToolOutcome(t.Context(), request.ID, revision, call)
 	}
-	if phase == "P2-evidence" {
-		evidence, e := reconcile(runner, before.Run.Revision, "original-tool-call")
-		if !errors.Is(e, agent.ErrRootOutcomeUnknown) || evidence.Run.Revision != before.Run.Revision+1 {
-			t.Fatalf("Host-unknown evidence purpose failed: %v", e)
-		}
-		v, e := agent.ViewState(evidence)
-		if e != nil || len(v.ModelInvocations) != 1 || v.ModelInvocations[0].Status != agent.ModelInvocationCompleted || v.ModelInvocations[0].ID != inv.ID || v.ModelInvocations[0].RequestHash != inv.RequestHash || v.ModelInvocations[0].ExecutionAttempt != inv.ExecutionAttempt || v.ModelInvocations[0].DispatchAttempt != inv.DispatchAttempt || !ea1RecoveryJSONEqual(v.ModelInvocations[0].Response, physical.response) {
-			t.Fatal("evidence lost exact original receipt")
-		}
-		var oldState, newState map[string]json.RawMessage
-		if json.Unmarshal(before.State, &oldState) != nil || json.Unmarshal(evidence.State, &newState) != nil {
-			t.Fatal("invalid evidence state")
-		}
-		delete(oldState, "modelInvocations")
-		delete(newState, "modelInvocations")
-		// The private State seal must follow the original ModelInvocation
-		// receipt. Compare the remaining Agent fields without treating that
-		// expected seal revision as unrelated execution state.
-		delete(oldState, "_originalStateEvidence")
-		delete(newState, "_originalStateEvidence")
-		if !ea1RecoveryJSONEqual(oldState, newState) || !ea1RecoveryJSONEqual(evidence.Checkpoint, before.Checkpoint) || evidence.Run.Status != before.Run.Status || evidence.Run.ErrorCode != before.Run.ErrorCode || evidence.Run.ErrorDetail != before.Run.ErrorDetail {
-			t.Fatal("evidence consumed or changed other state")
-		}
-		fresh := reopen()
-		freshRT := ea1StartRuntime(t, fresh)
-		physical.rt = freshRT
-		next := runnerFor(freshRT, "fresh-owner")
-		_, e = reconcile(next, evidence.Run.Revision, "original-tool-call")
-		if !errors.Is(e, agent.ErrRootOutcomeUnknown) {
-			t.Fatalf("Hostfalse evidence upgraded: %v", e)
-		}
-		ea1CompBarrierUnchanged(t, freshRT, evidence)
-		if e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
-			t.Fatalf("Hostfalse scope retired: %v", e)
-		}
-		ea1CompBarrierUnchanged(t, freshRT, evidence)
-		g, e := freshRT.LookupChildExecution(t.Context(), request.ID)
-		if e != nil || g != grant {
-			t.Fatal("evidence changed original scope")
-		}
-		c, e := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
-		if e != nil || !ea1RecoveryJSONEqual(c, completion) {
-			t.Fatal("Hostfalse upgraded")
-		}
-		m, n := physical.counts()
-		if m != models || n != toolCalls {
-			t.Fatal("evidence physically replayed")
-		}
-		return
-	}
 	if phase == "P0" {
-		if e := runner.ReconcileRootPhysicalExecution(t.Context(), "missing-root"); !errors.Is(e, kernel.ErrNotFound) {
+		if e := runner.ReconcilePhysicalExecution(t.Context(), "missing-root"); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatalf("missing original Root accepted: %v", e)
 		}
 		if kind == "model" {
@@ -375,7 +325,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			t.Fatalf("unknown contract lost: %v", err)
 		}
 		unchanged(freshRT)
-		if e := next.ReconcileRootPhysicalExecution(t.Context(), request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+		if e := next.ReconcilePhysicalExecution(t.Context(), request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
 			t.Fatalf("unknown Root retired: %v", e)
 		}
 		unchanged(freshRT)
@@ -417,13 +367,16 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 	} else {
 		var state struct {
-			ToolDispatchID string `json:"toolDispatchID"`
-			RecoveredTools []struct {
-				Call   tools.Call            `json:"call"`
-				Result tools.ExecutionResult `json:"result"`
-			} `json:"recoveredTools"`
+			ToolDispatchID string       `json:"toolDispatchID"`
+			PendingCalls   []tools.Call `json:"pendingCalls"`
+			ToolReturns    []struct {
+				CallID  string `json:"callID"`
+				Outcome struct {
+					Result tools.ExecutionResult `json:"result"`
+				} `json:"outcome"`
+			} `json:"toolReturns"`
 		}
-		if json.Unmarshal(committed.State, &state) != nil || state.ToolDispatchID != "" || len(state.RecoveredTools) != 1 || !ea1RecoveryJSONEqual(state.RecoveredTools[0].Call, physical.tools[0].Call) || state.RecoveredTools[0].Result.Receipt.ExecutionID != "original-tool-call" || state.RecoveredTools[0].Result.Receipt.Disposition != "committed" || !ea1RecoveryJSONEqual(tools.CloneExecutionResult(state.RecoveredTools[0].Result), tools.CloneExecutionResult(verifiedToolResult)) {
+		if json.Unmarshal(committed.State, &state) != nil || state.ToolDispatchID != "" || len(state.ToolReturns) != 1 || len(state.PendingCalls) == 0 || state.ToolReturns[0].CallID != state.PendingCalls[0].ID || !ea1RecoveryJSONEqual(state.PendingCalls[0], physical.tools[0].Call) || state.ToolReturns[0].Outcome.Result.Receipt.ExecutionID != "original-tool-call" || state.ToolReturns[0].Outcome.Result.Receipt.Disposition != "committed" || !ea1RecoveryJSONEqual(tools.CloneExecutionResult(state.ToolReturns[0].Outcome.Result), tools.CloneExecutionResult(verifiedToolResult)) {
 			t.Fatal("original Tool receipt not durable")
 		}
 	}
@@ -447,7 +400,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if e != nil || current != grant {
 			t.Fatalf("held Finish lost original grant: %v", e)
 		}
-		c, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+		c, e := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 		if e != nil || c != completion {
 			t.Fatalf("held Finish changed original callback: %v", e)
 		}
@@ -463,7 +416,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e != nil || !ea1RecoveryJSONEqual(durable, committed) {
 		t.Fatal("receipt changed across reopen")
 	}
-	e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID)
+	e = next.ReconcilePhysicalExecution(t.Context(), request.ID)
 	if noHoldSuccess {
 		if e != nil {
 			t.Fatalf("current final retirement could not be observed: %v", e)
@@ -486,7 +439,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e != nil || !finalReceipt.Valid() || finalReceipt.Evidence.Grant != grant || !ea1RecoveryJSONEqual(finalReceipt.Evidence.Snapshot, committed) {
 		t.Fatalf("missing exact final retirement receipt: %v", e)
 	}
-	if e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID); e != nil {
+	if e = next.ReconcilePhysicalExecution(t.Context(), request.ID); e != nil {
 		t.Fatalf("repeat final receipt observation: %v", e)
 	}
 	if retained, e := freshRT.LoadOwnedRetirement(t.Context(), grant.ID); e != nil || !ea1RecoveryJSONEqual(retained, finalReceipt) {

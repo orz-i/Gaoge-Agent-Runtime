@@ -14,7 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -22,10 +21,19 @@ func TestPhysicalReceiptRejectsByteDistinctOpaqueRequest(t *testing.T) {
 	store, shared, r := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2})
 	r.Messages = append(r.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call1", ToolKey: "local.read", Arguments: json.RawMessage(`{"x": 1, "y": "<ok>"}`)}}})
 	var physical model.Request
-	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), r, nil, func(_ context.Context, q model.Request, _ model.StreamSink) (model.Response, error) {
-		physical = model.CloneRequest(q)
-		return model.Response{Content: "original effect", ResponseID: "receipt-1", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
-	})
+	var fixturePhysical1 model.Request
+	_, err := func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical1, admissionErr = admitModelLedgerFixture(t.Context(), shared, r)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
+		}
+		response, callErr := func(q model.Request) (model.Response, error) {
+			physical = model.CloneRequest(q)
+			return model.Response{Content: "original effect", ResponseID: "receipt-1", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
+		}(fixturePhysical1)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical1, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,10 +50,10 @@ func TestPhysicalReceiptRejectsByteDistinctOpaqueRequest(t *testing.T) {
 	if _, err = shared.VerifyModelOutcome(t.Context(), changed); !errors.Is(err, ErrConflict) {
 		t.Fatalf("byte-distinct request accepted: %v", err)
 	}
-	if _, err = mustBudgetAdapter(t, shared).Model(t.Context(), changed, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		t.Fatal("mutated logical intent dispatched")
-		return model.Response{}, nil
-	}); !errors.Is(err, budget.ErrLedgerConflict) {
+	if _, err = func() (model.Response, error) {
+		_, e := admitModelLedgerFixture(t.Context(), shared, changed)
+		return model.Response{}, e
+	}(); !errors.Is(err, budget.ErrLedgerConflict) {
 		t.Fatalf("logical identity lost original bytes: %v", err)
 	}
 	after, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
@@ -71,10 +79,27 @@ func (m *governanceReceiptModel) Generate(_ context.Context, r model.Request) (m
 	return model.CloneResponse(m.responses[len(m.requests)-1]), nil
 }
 
+func (m *governanceReceiptModel) VerifyModelOutcome(_ context.Context, q model.Request) (model.Response, error) {
+	for i, original := range m.requests {
+		if reflect.DeepEqual(model.CloneRequest(q), original) {
+			return model.CloneResponse(m.responses[i]), nil
+		}
+	}
+	return model.Response{}, ErrConflict
+}
+
 type governanceHostedCatalog struct{}
 
 func (governanceHostedCatalog) Resolve(_ context.Context, key, _ string) (model.HostedTool, bool, error) {
 	return model.HostedTool{Key: key, DefinitionVersion: "v1"}, key == "native.search", nil
+}
+
+func assertQuotaReceipt(t *testing.T, shared *BudgetAuthority, physical model.Request, original model.Response) {
+	t.Helper()
+	receipt, err := shared.VerifyModelOutcome(t.Context(), physical)
+	if !errors.Is(err, budget.ErrInvalidUsage) || !model.IsResponseRejectedError(err) || model.ClassifiedErrorCode(err) != "model.post_generation_failed" || receipt.Content != "" || len(receipt.HostedToolCalls) != 0 || receipt.ResponseID != original.ResponseID {
+		t.Fatalf("wrong durable rejection: %+v %v", receipt, err)
+	}
 }
 
 func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
@@ -92,24 +117,21 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 		for _, mode := range []string{"ordinary", "lost_receipt_commit", "external_success_cannot_override_rejection"} {
 			fault := mode != "ordinary"
 			t.Run(scenario.name+"/"+mode, func(t *testing.T) {
-				store, _, req := hostedBudgetFixture(t, scenario.limits)
+				_, fixtureAuthority, req := hostedBudgetFixture(t, scenario.limits)
 				client := &governanceReceiptModel{responses: []model.Response{scenario.response}}
-				shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}, Meter: client})
-				if err != nil {
-					t.Fatal(err)
-				}
 				base := memory.NewStore()
 				var backing kernel.Store = base
 				if fault {
-					backing = &receiptFaultStore{Store: base}
+					backing = &receiptFaultStore{Store: base, afterCommit: mode == "external_success_cannot_override_rejection"}
 				}
 				now := time.Now().UTC()
 				rt, err := kernel.New(kernel.Dependencies{Store: backing, Clock: durabilityTestClock{now: now}})
 				if err != nil {
 					t.Fatal(err)
 				}
+				shared := bindHostedBudgetAuthority(t, rt, fixtureAuthority, client)
 				adapter := mustBudgetAdapter(t, shared)
-				deps := agent.Dependencies{Runtime: rt, Model: client, Clock: durabilityTestClock{now: now}, ModelOutcomeVerifier: shared, RunMiddleware: []plugin.RunMiddleware{adapter}, ModelMiddleware: []plugin.ModelMiddleware{adapter}}
+				deps := agent.Dependencies{Runtime: rt, Model: client, Clock: durabilityTestClock{now: now}, ModelOutcomeVerifier: client, BoundedBudget: adapter}
 				start := agent.StartRequest{ID: req.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "quota-recovery"}, Goal: "finish", MaxModelOutputTokens: 128, Limits: budget.Limits{MaxLLMCalls: 1}}
 				if scenario.hosted {
 					deps.HostedTools = governanceHostedCatalog{}
@@ -132,16 +154,20 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				} else if physical.MaxOutputTokens != 48 {
 					t.Fatal("token quota fixture")
 				}
-				ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+				ledger, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 				if err != nil {
 					t.Fatal(err)
 				}
-				receipt, receiptErr := shared.VerifyModelOutcome(t.Context(), physical)
-				if !errors.Is(receiptErr, budget.ErrInvalidUsage) || !model.IsResponseRejectedError(receiptErr) || model.ClassifiedErrorCode(receiptErr) != "model.post_generation_failed" || receipt.Content != "" || len(receipt.HostedToolCalls) != 0 || receipt.ResponseID != "receipt" {
-					t.Fatalf("wrong durable rejection: %+v %v", receipt, receiptErr)
-				}
-				if ledger.View("").Usage.LLMCalls != 1 || ledger.View("").Usage.OutputTokens != scenario.response.Usage.OutputTokens {
-					t.Fatal("observed charge was lost")
+				originalReservation := ledger.Reservations["model:"+physical.InvocationID]
+				if mode == "lost_receipt_commit" {
+					if !originalReservation.Dispatched || originalReservation.Status != budget.ReservationHeld || ledger.View("").Usage.LLMCalls != 0 {
+						t.Fatal("pre-commit failure split quota", originalReservation)
+					}
+				} else {
+					assertQuotaReceipt(t, shared, physical, scenario.response)
+					if ledger.View("").Usage.LLMCalls != 1 || ledger.View("").Usage.OutputTokens != scenario.response.Usage.OutputTokens {
+						t.Fatal("observed charge was lost")
+					}
 				}
 				if !fault {
 					if result.Run.Status != kernel.RunStatusFailed || result.Run.ErrorCode != "model.post_generation_failed" {
@@ -153,13 +179,17 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				grant, err := rt.LookupChildExecution(t.Context(), req.RunID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				cb, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-				if err != nil || !cb.HostCompleted {
-					t.Fatalf("fixture must retain returned Host: %+v %v", cb, err)
+				if mode == "lost_receipt_commit" {
+					grant, e := rt.LookupChildExecution(t.Context(), req.RunID)
+					if e != nil {
+						t.Fatal(e)
+					}
+					cb, e := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
+					if e != nil || !cb.HostCompleted {
+						t.Fatal("fixture must retain returned Host", cb, e)
+					}
+				} else if _, e := rt.LookupChildExecution(t.Context(), req.RunID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatal("ACKed native receipt did not retire", e)
 				}
 				if mode == "external_success_cannot_override_rejection" {
 					deps.ModelOutcomeVerifier = agent.ModelOutcomeVerifierFunc(func(context.Context, model.Request) (model.Response, error) {
@@ -171,18 +201,25 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				repaired, err := restarted.ReconcileModelOutcome(t.Context(), pending.Run.ID, pending.Run.Revision)
-				if err != nil {
-					t.Fatal(err)
+				repaired := pending
+				if mode == "lost_receipt_commit" {
+					repaired, err = restarted.ReconcileModelOutcome(t.Context(), pending.Run.ID, pending.Run.Revision)
+					if err != nil {
+						t.Fatal(err)
+					}
 				}
 				view, err := agent.ViewState(repaired)
 				if err != nil || view.ModelInvocations[0].ErrorCode != "model.post_generation_failed" || view.ModelInvocations[0].Response.Content != "" {
 					t.Fatalf("recovery promoted rejection: %+v %v", view, err)
 				}
-				unchanged, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-				if err != nil || !reflect.DeepEqual(unchanged, ledger) {
+				settled, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
+				if err != nil || settled.View("").Usage.LLMCalls != 1 || settled.View("").Usage.OutputTokens != scenario.response.Usage.OutputTokens {
+					t.Fatal("recovery lost original accounting", err)
+				}
+				if mode == "external_success_cannot_override_rejection" && !reflect.DeepEqual(settled, ledger) {
 					t.Fatal("reconciliation changed settled accounting")
 				}
+				assertQuotaReceipt(t, shared, physical, scenario.response)
 				final, resumeErr := restarted.Resume(t.Context(), repaired.Run.ID, repaired.Run.Revision)
 				if final.Run.Status != kernel.RunStatusFailed || final.Run.ErrorCode != "model.post_generation_failed" || resumeErr == nil || len(client.requests) != 1 {
 					t.Fatalf("resume promoted rejected outcome: %+v %v", final.Run, resumeErr)
@@ -193,21 +230,18 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 }
 
 func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T) {
-	store, _, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxInputTokens: 1000, MaxOutputTokens: 128, MaxToolCalls: 2})
+	_, fixtureAuthority, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxInputTokens: 1000, MaxOutputTokens: 128, MaxToolCalls: 2})
 	raw := json.RawMessage(`{"x": "<>&", "y":9007199254740993}`)
 	replay := json.RawMessage(`{"opaque": "<>&", "sig":"signed"}`)
 	original := model.Response{Content: "  exact original content  ", ResponseID: "opaque-receipt", Usage: &model.Usage{InputTokens: 20, OutputTokens: 2}, ToolCalls: []tools.Call{{ID: "call1", ToolKey: "lookup", Name: "lookup", Arguments: raw}}, ProviderReplay: &model.ProviderReplay{Provider: "audit", Format: "signed", Data: replay}}
 	client := &governanceReceiptModel{responses: []model.Response{original, {Content: "done", ResponseID: "final", Usage: &model.Usage{InputTokens: 20, OutputTokens: 2}}}}
-	shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}, Meter: client})
-	if err != nil {
-		t.Fatal(err)
-	}
 	base := memory.NewStore()
 	fault := &receiptFaultStore{Store: base}
 	rt, err := kernel.New(kernel.Dependencies{Store: fault})
 	if err != nil {
 		t.Fatal(err)
 	}
+	shared := bindHostedBudgetAuthority(t, rt, fixtureAuthority, client)
 	effects := 0
 	registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
 		effects++
@@ -220,7 +254,7 @@ func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T)
 		t.Fatal(err)
 	}
 	adapter := mustBudgetAdapter(t, shared)
-	deps := agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Catalog: registry, Executor: registry, RunMiddleware: []plugin.RunMiddleware{adapter}, ModelMiddleware: []plugin.ModelMiddleware{adapter}, ToolMiddleware: []plugin.ToolMiddleware{adapter}}
+	deps := agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: client, Catalog: registry, Executor: registry, BoundedBudget: adapter}
 	runner, err := agent.NewRunner(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -229,9 +263,9 @@ func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T)
 	if err == nil || !fault.fired || len(client.requests) != 1 || effects != 0 {
 		t.Fatalf("missing receipt fault: %v", err)
 	}
-	receipt, err := shared.VerifyModelOutcome(t.Context(), client.requests[0])
-	if err != nil || !reflect.DeepEqual(model.CloneResponse(receipt), model.CloneResponse(original)) {
-		t.Fatalf("ledger changed original: %+v %v", receipt, err)
+	l, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
+	if err != nil || l.Reservations["model:"+client.requests[0].InvocationID].Status != budget.ReservationHeld || l.View("").Usage.LLMCalls != 0 {
+		t.Fatal("uncommitted original receipt escaped transaction", err)
 	}
 	restarted, err := agent.NewRunner(deps)
 	if err != nil {
@@ -240,6 +274,10 @@ func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T)
 	repaired, err := restarted.ReconcileModelOutcome(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
+	}
+	receipt, err := shared.VerifyModelOutcome(t.Context(), client.requests[0])
+	if err != nil || !reflect.DeepEqual(model.CloneResponse(receipt), model.CloneResponse(original)) {
+		t.Fatalf("ledger changed original: %+v %v", receipt, err)
 	}
 	view, err := agent.ViewState(repaired)
 	publicOriginal := model.CloneResponse(original)
@@ -268,7 +306,7 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 			for _, missing := range []bool{true, false} {
 				label := map[bool]string{true: "missing", false: "explicit_null"}[missing]
 				t.Run(mode+"/"+fault+"/"+label, func(t *testing.T) {
-					store, shared, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxToolCalls: 2})
+					_, fixtureAuthority, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxToolCalls: 2})
 					args := json.RawMessage("null")
 					if missing {
 						args = nil
@@ -282,6 +320,10 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 					rt, err := kernel.New(kernel.Dependencies{Store: backing})
 					if err != nil {
 						t.Fatal(err)
+					}
+					var shared *BudgetAuthority
+					if mode == "shared_budget" {
+						shared = bindHostedBudgetAuthority(t, rt, fixtureAuthority)
 					}
 					effects := 0
 					registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{}`)}, Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -303,10 +345,7 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 						})}
 					if mode == "shared_budget" {
 						adapter := mustBudgetAdapter(t, shared)
-						deps.ModelMiddleware = []plugin.ModelMiddleware{adapter}
-						deps.RunMiddleware = []plugin.RunMiddleware{adapter}
-						deps.ToolMiddleware = []plugin.ToolMiddleware{adapter}
-						deps.ModelOutcomeVerifier = shared
+						deps.BoundedBudget = adapter
 					}
 					runner, err := agent.NewRunner(deps)
 					if err != nil {
@@ -344,7 +383,7 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 						t.Fatalf("explicit null did not retain valid schema authority: status=%s err=%v effects=%d calls=%d", final.Run.Status, callErr, effects, len(client.requests))
 					}
 					if mode == "shared_budget" {
-						ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+						ledger, e := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 						if e != nil {
 							t.Fatal(e)
 						}
@@ -369,10 +408,19 @@ func TestPhysicalReceiptRejectsMissingAndExplicitNullSubstitution(t *testing.T) 
 			}
 			request.Messages = append(request.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call", ToolKey: "local.read", Arguments: original}}})
 			var physical model.Request
-			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, r model.Request, _ model.StreamSink) (model.Response, error) {
-				physical = model.CloneRequest(r)
-				return model.Response{Content: "effect", ResponseID: "original", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
-			})
+			var fixturePhysical2 model.Request
+			_, err := func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical2, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
+				}
+				response, callErr := func(r model.Request) (model.Response, error) {
+					physical = model.CloneRequest(r)
+					return model.Response{Content: "effect", ResponseID: "original", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
+				}(fixturePhysical2)
+				return settleModelLedgerFixture(t.Context(), shared, fixturePhysical2, response, callErr)
+			}()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -388,10 +436,10 @@ func TestPhysicalReceiptRejectsMissingAndExplicitNullSubstitution(t *testing.T) 
 			if _, err := shared.VerifyModelOutcome(t.Context(), changed); !errors.Is(err, ErrConflict) {
 				t.Fatalf("substituted receipt identity accepted: %v", err)
 			}
-			if _, err = mustBudgetAdapter(t, shared).Model(t.Context(), changed, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-				t.Fatal("changed invocation dispatched")
-				return model.Response{}, nil
-			}); !errors.Is(err, budget.ErrLedgerConflict) {
+			if _, err = func() (model.Response, error) {
+				_, e := admitModelLedgerFixture(t.Context(), shared, changed)
+				return model.Response{}, e
+			}(); !errors.Is(err, budget.ErrLedgerConflict) {
 				t.Fatalf("substituted logical identity accepted: %v", err)
 			}
 			after, err := store.LoadBudget(t.Context(), "hosted-budget-turn")

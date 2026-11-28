@@ -14,8 +14,9 @@ import (
 // local Tool calls in one Agent Run. Zero omits segmentation for that
 // dimension; its frozen absolute budget.Limits still applies.
 type CallAllowance struct {
-	LLMCalls  int `json:"llmCalls,omitempty"`
-	ToolCalls int `json:"toolCalls,omitempty"`
+	LLMCalls  int                  `json:"llmCalls,omitempty"`
+	ToolCalls int                  `json:"toolCalls,omitempty"`
+	Renewal   *AutoAllowancePolicy `json:"renewal,omitempty"`
 }
 
 var (
@@ -28,33 +29,62 @@ const (
 	toolAllowanceErrorCode  = "agent.tool_allowance_exhausted"
 )
 
-func resolvedCallAllowance(request *CallAllowance, hard Limits) (*CallAllowance, error) {
+// Clone freezes the sole segment configuration at the Host/Run boundary.
+func (a *CallAllowance) Clone() *CallAllowance {
+	if a == nil {
+		return nil
+	}
+	v := *a
+	if a.Renewal != nil {
+		policy := *a.Renewal
+		v.Renewal = &policy
+	}
+	return &v
+}
+
+type callAllowanceState struct {
+	CallAllowance
+	AutoAllowanceProgress
+	ModelFingerprint string `json:"modelFingerprint,omitempty"`
+	ToolFingerprint  string `json:"toolFingerprint,omitempty"`
+}
+
+func resolvedCallAllowance(request *CallAllowance, hard Limits) (*callAllowanceState, error) {
 	if request == nil {
 		return nil, nil
 	}
-	if request.LLMCalls < 0 || request.ToolCalls < 0 ||
-		request.LLMCalls == 0 && request.ToolCalls == 0 ||
-		request.LLMCalls > hard.MaxLLMCalls || request.ToolCalls > hard.MaxToolCalls {
+	s := &callAllowanceState{CallAllowance: *request.Clone()}
+	if !validCallAllowance(s, hard) {
 		return nil, ErrInvalidCallAllowance
 	}
-	copied := *request
-	return &copied, nil
+	return s, nil
 }
 
-func validCallAllowance(allowance *CallAllowance, hard Limits) bool {
-	if allowance == nil {
+func validCallAllowance(s *callAllowanceState, hard Limits) bool {
+	if s == nil {
 		return true
 	}
-	_, err := resolvedCallAllowance(allowance, hard)
-	return err == nil
+	if s.LLMCalls < 0 || s.ToolCalls < 0 || s.LLMCalls == 0 && s.ToolCalls == 0 || s.LLMCalls > hard.MaxLLMCalls || s.ToolCalls > hard.MaxToolCalls {
+		return false
+	}
+	return validRenewalState(s, hard)
 }
 
-func cloneCallAllowance(value *CallAllowance) *CallAllowance {
-	if value == nil {
-		return nil
+// Both automatic and elected manual grants advance the same cumulative
+// ceiling. Neither may change the frozen renewal policy or hard Run limit.
+func (s *runState) extendCallAllowance(increment CallAllowance) error {
+	if s.CallAllowance == nil || increment.Renewal != nil || increment.LLMCalls < 0 || increment.ToolCalls < 0 ||
+		(increment.LLMCalls == 0) == (increment.ToolCalls == 0) {
+		return ErrInvalidCallAllowance
 	}
-	cloned := *value
-	return &cloned
+	next := *s.CallAllowance
+	if increment.LLMCalls > s.Budget.Limits.MaxLLMCalls-next.LLMCalls || increment.ToolCalls > s.Budget.Limits.MaxToolCalls-next.ToolCalls {
+		return ErrInvalidCallAllowance
+	}
+	next.LLMCalls += increment.LLMCalls
+	next.ToolCalls += increment.ToolCalls
+	s.CallAllowance = &next
+	return nil
 }
 
 func allowanceExhausted(state runState, dimension string) bool {
@@ -104,7 +134,7 @@ func (runner *Runner) GrantCallAllowance(
 	ctx context.Context, runID string, expectedRevision uint64, increment CallAllowance,
 ) (kernel.Snapshot, error) {
 	if runner == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 ||
-		increment.LLMCalls < 0 || increment.ToolCalls < 0 ||
+		increment.Renewal != nil || increment.LLMCalls < 0 || increment.ToolCalls < 0 ||
 		increment.LLMCalls == 0 && increment.ToolCalls == 0 {
 		return kernel.Snapshot{}, agentControlNoEffect(ErrInvalidCallAllowance)
 	}
@@ -135,14 +165,9 @@ func (runner *Runner) GrantCallAllowance(
 	default:
 		return snapshot, agentControlNoEffect(ErrRunNotBudgetPaused)
 	}
-	next := *state.CallAllowance
-	if increment.LLMCalls > state.Budget.Limits.MaxLLMCalls-next.LLMCalls ||
-		increment.ToolCalls > state.Budget.Limits.MaxToolCalls-next.ToolCalls {
-		return snapshot, agentControlNoEffect(ErrInvalidCallAllowance)
+	if err = state.extendCallAllowance(increment); err != nil {
+		return snapshot, agentControlNoEffect(err)
 	}
-	next.LLMCalls += increment.LLMCalls
-	next.ToolCalls += increment.ToolCalls
-	state.CallAllowance = &next
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, agentControlNoEffect(err)

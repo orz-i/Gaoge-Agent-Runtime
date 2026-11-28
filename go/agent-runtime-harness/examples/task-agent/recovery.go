@@ -47,23 +47,28 @@ type interruptStore struct {
 	observe func(context.Context, kernel.ExecutionLease, kernel.Snapshot) error
 }
 
-func (store *interruptStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	snapshot, err := store.Store.ApplyExecution(ctx, lease, revision, mutation)
-	if err != nil {
-		return snapshot, err
-	}
-	for _, event := range mutation.Events {
-		if event.Type == "tool.completed" && event.Message == "committed" && store.fired.CompareAndSwap(false, true) {
-			store.hits.Add(1)
-			if store.observe != nil {
-				if observationErr := store.observe(ctx, lease, snapshot); observationErr != nil {
-					return snapshot, errors.Join(errInterrupted, observationErr)
-				}
-			}
-			return snapshot, errInterrupted
+func (store *interruptStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		lease := *commitAuth.Lease
+
+		snapshot, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return snapshot, false, err
 		}
+		for _, event := range commitMutation.Events {
+			if event.Type == "tool.completed" && event.Message == "committed" && store.fired.CompareAndSwap(false, true) {
+				store.hits.Add(1)
+				if store.observe != nil {
+					if observationErr := store.observe(commitCtx, lease, snapshot); observationErr != nil {
+						return snapshot, false, errors.Join(errInterrupted, observationErr)
+					}
+				}
+				return snapshot, false, errInterrupted
+			}
+		}
+		return snapshot, false, nil
 	}
-	return snapshot, nil
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type recoveryChecks struct {

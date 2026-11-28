@@ -19,12 +19,12 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 	kernelStore := memory.NewStore()
 	harnessStore := harness.NewMemoryStore()
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
-	prepare, err := harness.NewManagedContextPreparer(harnessStore, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	prepare, err := harness.NewBoundedContextAdapter(harnessStore, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 		if request.Model != "fixture" {
 			t.Fatalf("wrong model window request: %s", request.Model)
 		}
 		return runtimecontext.ModelWindow{ContextTokens: 2000, ReservedOutputTokens: 128}, nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 			t.Fatal(err)
 		}
 		direct, err := agent.NewRunner(agent.Dependencies{
-			Runtime: rt, Model: provider, Catalog: reg, Executor: reg, PrepareModelRequest: prepare,
+			Runtime: rt, Model: provider, Catalog: reg, Executor: reg, BoundedContext: prepare,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -151,9 +151,9 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 func TestManagedContextRefusesLossyCompactionWithoutArtifactReader(t *testing.T) {
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	store := harness.NewMemoryStore()
-	prepare, err := harness.NewManagedContextPreparer(store, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+	prepare, err := harness.NewBoundedContextAdapter(store, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 		return runtimecontext.ModelWindow{ContextTokens: 1000, ReservedOutputTokens: 128}, nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestManagedContextRefusesLossyCompactionWithoutArtifactReader(t *testing.T)
 		t.Fatal(err)
 	}
 	provider := &multiContextCaptureModel{}
-	direct, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, PrepareModelRequest: prepare})
+	direct, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, BoundedContext: prepare})
 	if err != nil {
 		t.Fatal(err)
 	}

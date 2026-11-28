@@ -38,11 +38,12 @@ func (p *pendingMemberOwner) VerifyExternalToolNoEffect(_ context.Context, req t
 }
 
 type memberExternalCase struct {
-	host   *harness.Runner
-	native *agent.Runner
-	store  *harness.MemoryStore
-	model  *roleBudgetModel
-	owner  *pendingMemberOwner
+	host    *harness.Runner
+	native  *agent.Runner
+	runtime *kernel.Runtime
+	store   *harness.MemoryStore
+	model   *roleBudgetModel
+	owner   *pendingMemberOwner
 }
 
 func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExternalCase {
@@ -56,13 +57,14 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 	c := memberExternalCase{store: harness.NewMemoryStore(), model: &roleBudgetModel{}, owner: &pendingMemberOwner{}}
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	fail(err)
+	c.runtime = rt
 	edges, err := runrelation.New(memory.NewRunRelationStore(), nil)
 	fail(err)
 	delegate := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegate),
 		{Definition: tools.Definition{Key: roleEvidenceTool, Name: "prepare_browser", InputSchema: []byte(`{"type":"object"}`)}, Handler: c.owner}})
 	fail(err)
-	d := harness.BudgetAuthorityDependencies{Store: c.store, Relations: edges, Meter: c.model, Clock: fixedClock{}}
+	d := harness.BudgetAuthorityDependencies{Runtime: rt, Store: c.store, Relations: edges, Meter: c.model, Clock: fixedClock{}}
 	shared, err := harness.NewBudgetAuthority(d)
 	fail(err)
 	bounded, err := shared.Adapter()
@@ -77,10 +79,9 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 		committed = delegate
 	}
 	c.native, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: c.model, Catalog: registry, Executor: registry, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
-		ToolOutcomeVerifier: committed, DelegatedToolResults: delegate, ExternalToolNoEffectVerifier: c.owner, RunMiddleware: []plugin.RunMiddleware{bounded},
-		ModelMiddleware: []plugin.ModelMiddleware{bounded}, ToolMiddleware: []plugin.ToolMiddleware{bounded}})
+		ToolOutcomeVerifier: committed, DelegatedToolResults: delegate, ExternalToolNoEffectVerifier: c.owner, BoundedBudget: bounded})
 	fail(err)
-	route, err := handoff.NewDeferredAgent(c.native)
+	route, err := handoff.New(handoff.Config{Local: c.native, PrepareLocal: true})
 	fail(err)
 	policy := hostSelectedAgentPolicy{MemberID: "researcher", MemberRevision: "v3", Agent: agent.StartRequest{Model: "specialist-model", Instructions: "Find evidence", ToolKeys: []string{roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2}}}
 	c.host, err = harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: c.native, Store: c.store, Clock: fixedClock{}, Handoffs: route, Relations: edges, Budget: shared, DelegationPolicy: policy})
@@ -132,11 +133,15 @@ func TestExternalWaitOnMemberOnlyToolUsesExactElectedSubtree(t *testing.T) {
 			if verify(selected, control) == nil {
 				t.Fatal("accepted control before native election")
 			}
-			if _, err = cancel(); err == nil {
+			_, cancelErr := cancel()
+			if cancelErr == nil {
 				t.Fatal("cancelled before external owner returned proof")
 			}
 			if err = verify(selected, control); err != nil {
-				t.Fatalf("original election: %v", err)
+				ledger, ledgerErr := c.runtime.BudgetStore().LoadBudget(ctx, start.Turn.ID)
+				items, itemsErr := c.store.ListItems(ctx, start.Turn.ID, 0, 500)
+				t.Fatalf("original election: %v; cancellation: %v; native wait: %v; budget cancelled=%t ledgerErr=%v; active fence=%t itemsErr=%v",
+					err, cancelErr, c.native.VerifyExternalToolControlWait(ctx, wait.Run.Revision, control), ledger.RunCancelled(selected), ledgerErr, harness.ActiveCancellationFence(items), itemsErr)
 			}
 			swapped := control
 			swapped.ParentRunID = member.RunID
@@ -166,7 +171,7 @@ func TestExternalWaitOnMemberOnlyToolUsesExactElectedSubtree(t *testing.T) {
 			if target == "root" && out.Turn.Status != harness.TurnCancelled || target == "member" && out.Turn.Status == harness.TurnCancelled {
 				t.Fatalf("scope widened or lost: %+v", out.Turn)
 			}
-			ledger, err := c.store.LoadBudget(ctx, start.Turn.ID)
+			ledger, err := c.runtime.BudgetStore().LoadBudget(ctx, start.Turn.ID)
 			if err != nil {
 				t.Fatal(err)
 			}

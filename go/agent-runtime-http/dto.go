@@ -6,12 +6,11 @@ import (
 	"errors"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 var (
@@ -43,11 +42,6 @@ func BindStrictJSON(context *gin.Context, target interface{}) error {
 	return bindStrictJSON(context, target)
 }
 
-// SnapshotResponse projects feature-neutral durable Run facts.
-func SnapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
-	return snapshotResponse(snapshot)
-}
-
 type TextInputRequest struct {
 	Content string `json:"content" binding:"required,max=200000"`
 }
@@ -57,41 +51,32 @@ type CancelRunRequest struct {
 	Reason           string `json:"reason" binding:"omitempty,max=2000"`
 }
 
-type CancelRunResponse struct {
-	Run kernel.Run `json:"run"`
-}
-
 type RunSnapshotResponse struct {
-	Run         kernel.Run           `json:"run"`
-	State       json.RawMessage      `json:"state"`
-	Checkpoint  *kernel.Checkpoint   `json:"checkpoint,omitempty"`
-	Result      *kernel.Result       `json:"result,omitempty"`
-	EventHead   int64                `json:"eventHead"`
-	PendingTool *PendingToolResponse `json:"pendingTool,omitempty"`
+	Run         kernel.Run             `json:"run"`
+	State       json.RawMessage        `json:"state"`
+	Checkpoint  *kernel.Checkpoint     `json:"checkpoint,omitempty"`
+	Result      *kernel.Result         `json:"result,omitempty"`
+	EventHead   int64                  `json:"eventHead"`
+	PendingTool *agent.PendingToolView `json:"pendingTool,omitempty"`
 }
-
-// PendingToolResponse is bounded transport data supplied by a feature projector.
-type PendingToolResponse struct {
-	Kind       tools.PendingKind `json:"kind"`
-	CallID     string            `json:"callID"`
-	ToolKey    string            `json:"toolKey"`
-	DeadlineAt *time.Time        `json:"deadlineAt,omitempty"`
-	Ready      bool              `json:"ready"`
-}
-
-// PendingToolProjector reads feature-owned state after object authorization.
-type PendingToolProjector func(kernel.Snapshot) *PendingToolResponse
 
 type RunEventPageResponse struct {
 	Events    []kernel.Event `json:"events"`
 	EventHead int64          `json:"eventHead"`
 }
 
-func snapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
+// SnapshotResponse is the single public projection for start, read and cancel.
+// Callers must authorize the Run before projecting its Agent-owned wait view.
+func SnapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
 	response := RunSnapshotResponse{
 		Run: PublicRun(snapshot.Run), State: PublicDiagnosticPayload(snapshot.State),
 		Checkpoint: publicRunCheckpoint(snapshot.Checkpoint), Result: snapshot.Result,
 		EventHead: snapshot.EventHead,
+	}
+	if snapshot.Run.Kind == agent.RunKind {
+		if view, err := agent.ViewState(snapshot); err == nil {
+			response.PendingTool = view.PendingTool
+		}
 	}
 	return response
 }

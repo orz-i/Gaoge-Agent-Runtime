@@ -387,11 +387,14 @@ type durableWaitStore struct {
 	recoveryFaults    int
 }
 
-func (s *durableWaitStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, proof kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	if s.recoveryConflicts > 0 {
-		s.recoveryConflicts--
-		s.recoveryFaults++
-		return kernel.Snapshot{}, kernel.ErrConflict
+func (s *durableWaitStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Recovery != nil {
+		if s.recoveryConflicts > 0 {
+			s.recoveryConflicts--
+			s.recoveryFaults++
+			return kernel.Snapshot{}, false, kernel.ErrConflict
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, proof)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }

@@ -21,7 +21,7 @@ late_input=new_turn answer=alpha: 09:00
 fixture_only=true persistence=memory
 ```
 
-The Host uses `OpenAgentSession` with `Inputs`, starts a real Tool, submits input through
+The Host uses `OpenAgentSession` with `Inputs`, starts a real Tool, submits input through the Session's `Steer` method, which uses
 the authenticated Run/Actor/Thread boundary, and reports queue acceptance
 separately from application. After completion it refuses a late enqueue and
 explicitly creates a new Turn. It preserves the initial prompt, applied user

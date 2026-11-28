@@ -14,12 +14,10 @@ import (
 type noEntryKernelPorts interface {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
-	kernel.OwnedRetirementStore
-	kernel.OwnedRootSettlementStore
-	kernel.PreparedRootSettlementStore
+
+	kernel.PhysicalExecutionStore
+
+	kernel.ExecutionCustodyStore
 }
 
 var errNoEntryCut = errors.New("entry observation unavailable")
@@ -30,14 +28,24 @@ type noEntryKernelCut struct {
 	deny, loseEvidence, loseFinish  bool
 	grant                           kernel.ChildExecutionGrant
 	beforeAdmission, afterAdmission func()
+	beforeCancel                    func()
 }
 
-func (s *noEntryKernelCut) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *noEntryKernelCut) Commit(ctx context.Context, id string, rev uint64, m kernel.StoreMutation, a kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if a.Control != nil && a.Control.Kind == kernel.ControlCancel && s.beforeCancel != nil {
+		hook := s.beforeCancel
+		s.beforeCancel = nil
+		hook()
+	}
+	return s.noEntryKernelPorts.Commit(ctx, id, rev, m, a)
+}
+
+func (s *noEntryKernelCut) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	if hook := s.beforeAdmission; hook != nil {
 		s.beforeAdmission = nil
 		hook()
 	}
-	out, err := s.noEntryKernelPorts.BeginOwnedPhysicalExecution(ctx, p)
+	out, err := s.noEntryKernelPorts.BeginPhysicalExecution(ctx, p)
 	if hook := s.afterAdmission; hook != nil && err == nil {
 		s.afterAdmission = nil
 		hook()
@@ -55,11 +63,11 @@ func (s *noEntryKernelCut) CheckOwnedPhysicalEntry(ctx context.Context, g kernel
 	}
 	return s.noEntryKernelPorts.CheckOwnedPhysicalEntry(ctx, g, l, v)
 }
-func (s *noEntryKernelCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+func (s *noEntryKernelCut) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if s.loseEvidence && g == s.grant {
 		return errNoEntryCut
 	}
-	return s.noEntryKernelPorts.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	return s.noEntryKernelPorts.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 }
 
 func (s *noEntryKernelCut) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
@@ -70,20 +78,6 @@ func (s *noEntryKernelCut) FinishChildExecution(ctx context.Context, g kernel.Ch
 	return s.noEntryKernelPorts.FinishChildExecution(ctx, g, p)
 }
 
-type noEntryHostCut struct {
-	harness.Store
-	beforeIntent func()
-}
-
-func (s *noEntryHostCut) AppendItem(ctx context.Context, i harness.Item) (harness.Item, bool, error) {
-	if s.beforeIntent != nil && i.ParentItemID == harness.CancellationFenceParentItemID {
-		hook := s.beforeIntent
-		s.beforeIntent = nil
-		hook()
-	}
-	return s.Store.AppendItem(ctx, i)
-}
-
 type noEntryModel struct{ calls int }
 
 func (m *noEntryModel) Generate(context.Context, model.Request) (model.Response, error) {
@@ -91,11 +85,9 @@ func (m *noEntryModel) Generate(context.Context, model.Request) (model.Response,
 	return model.Response{Content: "original receipt", Continue: m.calls == 1}, nil
 }
 
-// NoEntryCancellation verifies the same Host/Kernel retirement protocol
-// across independent Store instances. The interleaving inserts the rejected
-// Resume AFTER Cancel's first inspection but BEFORE its intent is committed.
-// Native Finish repair must also work under the elected cancellation fence;
-// no Host Resume dispatch is ever written.
+// NoEntryCancellation verifies original Runtime retirement across independent
+// Store instances, including Resume after Cancel's read but before its native
+// commit. Neither operation elects a Host diagnostic grant or cancellation.
 func NoEntryCancellation(t *testing.T, factory func(*testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store))) {
 	for _, mode := range []string{"receipt-lost", "during-election", "unknown-no-entry", "cancel-before-admission", "cancel-after-admission"} {
 		t.Run(mode, func(t *testing.T) {
@@ -106,7 +98,6 @@ func NoEntryCancellation(t *testing.T, factory func(*testing.T) (kernel.Store, h
 				t.Fatal("native fixture lacks original retirement ports")
 			}
 			cut := &noEntryKernelCut{noEntryKernelPorts: ports}
-			hostCut := &noEntryHostCut{Store: host}
 			m := &noEntryModel{}
 			makeRunner := func(k kernel.Store, h harness.Store) (*harness.Runner, *kernel.Runtime) {
 				t.Helper()
@@ -124,7 +115,7 @@ func NoEntryCancellation(t *testing.T, factory func(*testing.T) (kernel.Store, h
 				}
 				return r, rt
 			}
-			r, rt := makeRunner(cut, hostCut)
+			r, rt := makeRunner(cut, host)
 			initial, e := r.StartAgentTurn(ctx, harness.StartRequest{
 				HostThread: harness.HostRef{Kind: "conversation", ID: "no-entry-thread"}, HostTurn: harness.HostRef{Kind: "turn", ID: "no-entry-turn"},
 				Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "no-entry-thread"},
@@ -186,7 +177,7 @@ func NoEntryCancellation(t *testing.T, factory func(*testing.T) (kernel.Store, h
 					t.Fatalf("native resume still wrote a Host dispatch: %v", e)
 				}
 				if mode != "unknown-no-entry" {
-					returned, e := rt.LookupOwnedPhysicalCallbackReturn(ctx, cut.grant)
+					returned, e := rt.LookupPhysicalCallbackReturn(ctx, cut.grant)
 					if e != nil || !returned.MatchesNotEnteredSnapshot(cut.grant, before) {
 						t.Fatalf("exact original no-entry missing: %v", e)
 					}
@@ -194,7 +185,7 @@ func NoEntryCancellation(t *testing.T, factory func(*testing.T) (kernel.Store, h
 			}
 			var cancelled harness.Snapshot
 			if mode == "during-election" {
-				hostCut.beforeIntent = failResume
+				cut.beforeCancel = failResume
 				cancelled, e = r.Cancel(ctx, initial.Turn.ID, "original stop")
 			} else {
 				failResume()

@@ -15,7 +15,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func TestSessionFacadeRestartsAcrossTurnsWithFrozenContextProjection(t *testing.T) {
@@ -51,20 +50,22 @@ func TestSessionFacadeRestartsAcrossTurnsWithFrozenContextProjection(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		rehydrate, err := harness.NewContextRunMiddleware(harnessStore, nil)
+		manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+		rehydrate, err := harness.NewBoundedContextAdapter(harnessStore, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+			return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 512}, nil
+		}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		direct, err := agent.NewRunner(agent.Dependencies{
-			Runtime: runtime, Model: provider, RunMiddleware: []plugin.RunMiddleware{rehydrate},
-			PrepareModelRequest: harness.MaterializeContextWindowRequest,
+			Runtime: runtime, Model: provider, BoundedContext: rehydrate,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		runner, err := harness.NewRunner(harness.Dependencies{
 			Runtime: runtime, Agent: direct, Store: harnessStore, Clock: contextHarnessClock{},
-			Context: runtimecontext.NewManager(runtimecontext.Dependencies{}),
+			Context: manager,
 		})
 		if err != nil {
 			t.Fatal(err)

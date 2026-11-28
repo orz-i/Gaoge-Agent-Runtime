@@ -36,6 +36,9 @@ func (runner *Runner) prepareTopLevelStartEnvelope(
 	if err != nil {
 		return topLevelStartEnvelope{}, err
 	}
+	if _, native := runner.agent.(*agent.Runner); native && resolvedConfig.SharedBudget != nil && !runner.nativeBudget() {
+		return topLevelStartEnvelope{}, ErrInvalidRequest
+	}
 	request, err = sealStartAdmission(request, &resolvedConfig, root)
 	if err != nil {
 		return topLevelStartEnvelope{}, err
@@ -78,7 +81,7 @@ func (runner *Runner) finishTopLevelStart(
 				}
 			}
 		}
-		if native, e := runner.nativeRootCommands(ctx, turn.ID, true); e != nil {
+		if native, e := runner.nativeRootCommands(ctx, turn.ID); e != nil {
 			return Snapshot{}, errors.Join(startErr, e)
 		} else if native != nil {
 			return runner.finishNativeRootStart(ctx, turn, invocation, startErr)
@@ -125,8 +128,8 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if !frozen.NativeLocal && coordinator.ObservesLocalKernelRunner(runner.runtime) &&
-		!coordinator.OwnsLocalKernelRunner(runner.runtime) && !coordinator.SupportsDeferredAgent(runner.runtime) {
+	if original := coordinator.LocalAgent(runner.runtime); original != nil && !frozen.NativeLocal &&
+		!coordinator.PreparesLocal() && !original.OwnsKernelRuntime(runner.runtime) {
 		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
@@ -295,7 +298,7 @@ func (runner *Runner) startInvocationAttempt(
 	}
 	requestID := stableID("hretry", invocation.ID, attemptString(invocation.Attempt))
 	var input agentInvocationInput
-	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+	if !decodeTypedAuthorityJSON(invocation.Input, &input) {
 		return kernel.Snapshot{}, ErrConflict
 	}
 	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
@@ -304,7 +307,7 @@ func (runner *Runner) startInvocationAttempt(
 	}
 	start := rootAgentStartRequest(config, invocation.ExecutionRefID, actor, thread,
 		requestID, input.Goal, input.InitialToolKeys, input.RequiredToolKeys)
-	start.CallAllowance, start.AutoAllowance = input.CallAllowance, input.AutoAllowance
+	start.CallAllowance = input.CallAllowance
 	return runner.startOriginalRoot(ctx, invocation, "start-retry", start)
 }
 
@@ -350,7 +353,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 		}
 	}()
 	ctx = withCancellationElection(ctx, intent)
-	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, nil)
+	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, turn, invocation.ExecutionRefID, reason, nil)
 	if err != nil {
 		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
 	}
@@ -401,24 +404,26 @@ func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItem
 	return nil
 }
 
-// Native eligibility is operation-specific. An opaque callback or actual
-// independent accounting/cancellation domain needs Host arbitration; invalid
-// original evidence is a rejection, never permission to fall back.
-func (runner *Runner) nativeRootCommands(ctx context.Context, turnID string, scoped bool) (*agent.Runner, error) {
+// Concrete first-party Agents always use their Runtime execution authority.
+// Invalid composition is an error, never permission to elect a Host dispatch.
+func (runner *Runner) nativeRootCommands(ctx context.Context, turnID string) (*agent.Runner, error) {
 	native, ok := runner.agent.(*agent.Runner)
-	if !ok || !native.ObservesKernelRuntime(runner.runtime) {
+	if !ok {
 		return nil, nil
+	}
+	if !native.ObservesKernelRuntime(runner.runtime) {
+		return nil, ErrInvalidRequest
 	}
 	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, turnID)
 	if err != nil {
 		return nil, err
 	}
 	ledger, err := runner.frozenTurnBudget(ctx, turn)
-	cancel, local := runner.cancellation.(*kernel.Runtime)
-	_, bound := runner.runtime.BoundExecutionLease()
-	if err != nil || ledger != nil && !runner.nativeBudget() ||
-		!local || cancel != runner.runtime || bound || scoped && !native.NativeRootCallbacksScoped() {
+	if err != nil {
 		return nil, err
+	}
+	if ledger != nil && !runner.nativeBudget() {
+		return nil, ErrInvalidRequest
 	}
 	return native, nil
 }
@@ -452,29 +457,16 @@ func (runner *Runner) originalNativeCommand(ctx context.Context, inv Invocation)
 	} else if e = runner.requireLiveInvocationParents(ctx, inv); e != nil {
 		return e
 	}
-	// Re-read after at most one exact original receipt repair, including
-	// the cancellation fence; repair itself is not new admission.
-	for attempt := range 2 {
-		items, e := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
-		if e != nil {
-			return e
-		}
-		if ActiveCancellationFence(items) {
-			return ErrConflict
-		}
-		if !PendingExecutionDispatch(items, inv.ID) {
-			return nil
-		}
-		if inv.ParentItemID != "" {
-			return ErrConflict
-		}
-		if attempt == 0 {
-			if repaired, e := runner.recoverOriginalPhysicalDispatch(ctx, inv); e != nil || !repaired {
-				return errors.Join(ErrExecutionOutcomeUnknown, e)
-			}
-		}
+	// Only genuinely external work retains a Host fence. Native physical
+	// admission, unknown effects and recovery are checked by the Runtime.
+	items, e := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
+	if e != nil {
+		return e
 	}
-	return ErrExecutionOutcomeUnknown
+	if ActiveCancellationFence(items) || PendingExecutionDispatch(items, inv.ID) {
+		return ErrConflict
+	}
+	return nil
 }
 
 func (runner *Runner) resumeInvocationExecution(
@@ -508,14 +500,11 @@ func (runner *Runner) resumeInvocationExecution(
 	if snapshot, managed, managedErr := runner.recoverManagedInvocation(ctx, invocation); managed {
 		return snapshot, managedErr
 	}
-	if native, e := runner.nativeRootCommands(ctx, turn.ID, false); e != nil {
+	if native, e := runner.nativeRootCommands(ctx, turn.ID); e != nil {
 		return kernel.Snapshot{}, e
 	} else if native != nil {
 		if e := runner.originalNativeCommand(ctx, invocation); e != nil {
 			return kernel.Snapshot{}, e
-		}
-		if !native.SupportsManagedRecovery() {
-			return native.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
 		}
 		snap, _, e := runner.observeNativeCommand(ctx, native, invocation, "resume", nil, func(c context.Context) (kernel.Snapshot, error) {
 			return native.Resume(c, invocation.ExecutionRefID, expectedRevision)

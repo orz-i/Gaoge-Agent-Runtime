@@ -14,6 +14,6 @@ func SupportsRemoteGoalOnly(request StartRequest) bool {
 		len(request.ToolKeys) == 0 && len(request.InitialToolKeys) == 0 &&
 		len(request.RequiredToolKeys) == 0 && len(request.HostedToolGrants) == 0 &&
 		request.WorkingStateSummary == nil && request.CallAllowance == nil &&
-		request.AutoAllowance == nil && request.ParentRunID == "" &&
+		request.ParentRunID == "" &&
 		request.OriginFingerprint == "" && request.LogicalParentRunID == "" && request.DeadlineAt == nil
 }

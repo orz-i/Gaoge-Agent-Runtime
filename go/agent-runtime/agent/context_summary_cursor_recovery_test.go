@@ -8,7 +8,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type backdatedSummaryPorts struct{ *summaryCorePorts }
@@ -37,7 +36,7 @@ func TestContextSummaryReconcilesBackdatedCommitTimeAfterACKLoss(t *testing.T) {
 					t.Fatal(err)
 				}
 				runner, err := NewRunner(Dependencies{Runtime: runtime, Model: provider, Clock: clock,
-					RunMiddleware: []plugin.RunMiddleware{bounded}, ContextSummary: summary})
+					ContextSummary: summary})
 				if err != nil {
 					t.Fatal(err)
 				}

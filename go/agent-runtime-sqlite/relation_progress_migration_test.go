@@ -1,9 +1,6 @@
 package sqlite
 
 import (
-	"context"
-	"database/sql"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,42 +10,19 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
+func TestEncryptedCurrentRelationReopenPreservesOriginalAuthority(t *testing.T) {
 	ctx := t.Context()
-	path := ownedPrivatePath(t, "encrypted-v8.sqlite")
+	path := ownedPrivatePath(t, "encrypted-v14.sqlite")
 	var key [32]byte
 	key[0] = 27
 	defer clear(key[:])
 	open := encrypted.WithKey(&key)
-	initialize := func(ctx context.Context, db *sql.DB) error {
-		if _, err := db.ExecContext(ctx, "PRAGMA journal_mode=WAL"); err != nil {
-			return err
-		}
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = tx.Rollback() }()
-		for _, ddl := range schemaV8DDL() {
-			if _, err = tx.ExecContext(ctx, ddl); err != nil {
-				return err
-			}
-		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version=8"); err != nil {
-			return err
-		}
-		if err = initializeManagedAuthority(ctx, tx); err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
-	validate := func(ctx context.Context, db *sql.DB) error { return validateSchemaDDL(ctx, db, schemaV8DDL()) }
-	db, err := open.CreateNew(ctx, path, initialize, validate)
+	s, err := CreateNewWith(ctx, path, open)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Store{db: db}
-	rt, err := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{s}})
+
+	rt, err := kernel.New(kernel.Dependencies{Store: s})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,39 +38,18 @@ func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authority, err := sqliteManagedAuthority(ctx, db)
+	authority, err := sqliteManagedAuthority(ctx, s.db)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = OpenExistingWith(ctx, path, open); !errors.Is(err, ErrUnsupportedSchema) {
-		t.Fatal("implicit migration", err)
-	}
 	var wrong [32]byte
-	if err = MigrateV8ToV9With(ctx, path, encrypted.WithKey(&wrong)); err == nil {
-		t.Fatal("wrong key migrated original")
+	if _, err = OpenExistingWith(ctx, path, encrypted.WithKey(&wrong)); err == nil {
+		t.Fatal("wrong key opened original")
 	}
-	for range 2 {
-		if err = MigrateV8ToV9With(ctx, path, open); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err = OpenExistingWith(ctx, path, open); !errors.Is(err, ErrUnsupportedSchema) {
-		t.Fatal("implicit v10 migration", err)
-	}
-	if err = MigrateV9ToV10With(ctx, path, encrypted.WithKey(&wrong)); err == nil {
-		t.Fatal("wrong key migrated original v9")
-	}
-	for range 2 {
-		if err = MigrateV9ToV10With(ctx, path, open); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = MigrateV10ToV11With(ctx, path, open); err != nil {
-		t.Fatal(err)
-	}
+
 	s, err = OpenExistingWith(ctx, path, open)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +69,7 @@ func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
 	}
 	var count int
 	if err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM runtime_run_relation_progress").Scan(&count); err != nil || count != 0 {
-		t.Fatal("migration invented progress", err)
+		t.Fatal("reopen invented progress", err)
 	}
 }
 

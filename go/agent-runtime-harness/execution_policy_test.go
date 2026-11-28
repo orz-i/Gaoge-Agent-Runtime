@@ -85,23 +85,26 @@ func newExecutionPolicyHarness(t *testing.T, execution harness.ExecutionPolicy, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: directModel{}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	store := harness.NewMemoryStore()
+	agentDependencies := agent.Dependencies{Runtime: runtime, Model: directModel{}}
 	dependencies := harness.Dependencies{
-		Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{}, Execution: execution,
+		Runtime: runtime, Store: store, Clock: fixedClock{}, Execution: execution,
 	}
 	if withBudget {
 		shared, budgetErr := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
-			Store: store, Clock: fixedClock{},
+			Runtime: runtime, Store: store, Clock: fixedClock{},
 		})
 		if budgetErr != nil {
 			t.Fatal(budgetErr)
 		}
 		dependencies.Budget = shared
+		agentDependencies.BoundedBudget = mustBudgetAdapter(t, shared)
 	}
+	direct, err := agent.NewRunner(agentDependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencies.Agent = direct
 	runner, err := harness.NewRunner(dependencies)
 	if err != nil {
 		t.Fatal(err)

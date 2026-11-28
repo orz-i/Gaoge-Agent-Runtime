@@ -10,7 +10,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -22,7 +21,7 @@ func RunEA1RootAgentResumePhases(t *testing.T, factory func(*testing.T) (kernel.
 		t.Run("P0/"+vector, func(t *testing.T) { ea1RootResumePreflight(t, factory, vector) })
 	}
 	t.Run("P1/admitted-before-dispatch", func(t *testing.T) { ea1RootResumeBarrier(t, factory) })
-	for _, kind := range []string{"model", "tool", "host"} {
+	for _, kind := range []string{"model", "tool"} {
 		t.Run("P2/"+kind, func(t *testing.T) { ea1RootResumeUnknown(t, factory, kind) })
 	}
 	// Reproduce slow, successful Model-side intent reads independently
@@ -43,33 +42,8 @@ type ea1ResumeFixture struct {
 	catalog           *tools.Registry
 	request           agent.StartRequest
 	created, prepared kernel.Snapshot
-	host              *ea1ResumeHost
-}
-type ea1ResumeHost struct {
-	t            *testing.T
-	request      agent.StartRequest
-	calls, sends int
-	before       func(context.Context) error
-	unknown      error
 }
 
-func (*ea1ResumeHost) Name() string { return "ea1.actual.resume.host" }
-func (h *ea1ResumeHost) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	h.calls++
-	if inv.Operation != plugin.RunResume || inv.RunID != h.request.ID || inv.Actor != h.request.Actor || inv.Thread != h.request.Thread || inv.Goal != h.request.Goal || inv.ParentRunID != "" {
-		h.t.Fatal("callback did not preserve actual original Resume identity")
-	}
-	if h.before != nil {
-		if e := h.before(ctx); e != nil {
-			return kernel.Snapshot{}, e
-		}
-	}
-	if h.unknown != nil {
-		h.sends++
-		return kernel.Snapshot{}, h.unknown
-	}
-	return next(ctx)
-}
 func ea1NewResumeFixture(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), tool bool) *ea1ResumeFixture {
 	backing, peer, reopen := factory(t)
 	wrapped := ea1AgentAdmissionWrap(t, backing)
@@ -85,7 +59,6 @@ func ea1NewResumeFixture(t *testing.T, factory func(*testing.T) (kernel.Store, k
 	if tool {
 		f.request.ToolKeys = []string{"effect"}
 	}
-	f.host = &ea1ResumeHost{t: t, request: f.request}
 	setup := f.runner(rt, "prepare-owner", false)
 	wrapped.afterCreate = func(_ context.Context, s kernel.Snapshot) error {
 		f.created = s
@@ -102,7 +75,7 @@ func ea1NewResumeFixture(t *testing.T, factory func(*testing.T) (kernel.Store, k
 		t.Fatal("PrepareRun source not preserved")
 	}
 	m, n := f.physical.counts()
-	if m != 0 || n != 0 || f.host.calls != 0 {
+	if m != 0 || n != 0 {
 		t.Fatal("Prepare dispatched measured callbacks")
 	}
 	if _, e = rt.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -112,11 +85,7 @@ func ea1NewResumeFixture(t *testing.T, factory func(*testing.T) (kernel.Store, k
 	return f
 }
 func (f *ea1ResumeFixture) runner(rt *kernel.Runtime, owner string, withHost bool) *agent.Runner {
-	var middleware []plugin.RunMiddleware
-	if withHost {
-		middleware = []plugin.RunMiddleware{f.host}
-	}
-	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunMiddleware: middleware, Clock: ea1UnknownAgentClock{offset: f.clockOffset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
+	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, Clock: ea1UnknownAgentClock{offset: f.clockOffset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
 	if e != nil {
 		f.t.Fatal(e)
 	}
@@ -125,7 +94,7 @@ func (f *ea1ResumeFixture) runner(rt *kernel.Runtime, owner string, withHost boo
 func (f *ea1ResumeFixture) zero() {
 	f.t.Helper()
 	m, n := f.physical.counts()
-	if m != 0 || n != 0 || f.host.calls != 0 || f.host.sends != 0 {
+	if m != 0 || n != 0 {
 		f.t.Fatal("rejected Resume dispatched callback")
 	}
 }
@@ -200,7 +169,6 @@ func ea1RootResumePreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 func ea1RootResumeBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	f := ea1NewResumeFixture(t, factory, false)
 	runner := f.runner(f.rt, "resume-owner", true)
-	stop := errors.New("actual Resume Host held before physical dispatch")
 	checkpoints := 0
 	var original kernel.ChildExecutionGrant
 	check := func(ctx context.Context, hostEntered bool) {
@@ -225,9 +193,6 @@ func ea1RootResumeBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		} else if g != original {
 			t.Fatal("callback borrowed another scope")
 		}
-		if f.host.calls != map[bool]int{false: 0, true: 1}[hostEntered] {
-			t.Fatal("wrong callback cutpoint")
-		}
 		m, n := f.physical.counts()
 		if m != 0 || n != 0 {
 			t.Fatal("P1 already physically dispatched")
@@ -242,7 +207,7 @@ func ea1RootResumeBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, 
 			if hostEntered && e != nil || !hostEntered && (!errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy)) {
 				t.Fatalf("original entry qualification changed: %v", e)
 			}
-			if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(e, kernel.ErrNotFound) {
+			if _, e = f.observer.LookupPhysicalCallbackReturn(ctx, g); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatalf("active callback fabricated return fact: %v", e)
 			}
 		}
@@ -278,23 +243,17 @@ func ea1RootResumeBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		unchanged()
 	}
 	f.store.afterOwned = func(ctx context.Context, _ kernel.ChildExecutionGrant) error { check(ctx, false); return nil }
-	f.host.before = func(ctx context.Context) error { check(ctx, true); return stop }
-	_, e := runner.Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
-	if !errors.Is(e, stop) || checkpoints != 2 || f.host.calls != 1 {
+	f.store.afterEntry = func(ctx context.Context) error { check(ctx, true); return nil }
+	out, e := runner.Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
+	if e != nil || checkpoints != 2 || out.Run.Status != kernel.RunStatusCompleted || !runner.VerifyFrozenStartRequest(out, f.request) {
 		t.Fatalf("actual Resume P1 not hit: %v checks=%d", e, checkpoints)
 	}
-	ea1CompBarrierUnchanged(t, f.observer, f.prepared)
-	g, e := f.observer.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g != original {
-		t.Fatal("opaque Host error lost original scope")
-	}
-	completion, e := f.observer.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
-	if e != nil || completion.HostCompleted {
-		t.Fatalf("opaque Host failure fabricated completion: %v", e)
+	if _, e = f.observer.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("completed Resume did not retire original scope: %v", e)
 	}
 	m, n := f.physical.counts()
-	if m != 0 || n != 0 {
-		t.Fatal("P1 physically dispatched")
+	if m != 1 || n != 0 {
+		t.Fatal("P1 continuation did not dispatch exactly once")
 	}
 }
 func ea1RootResumeUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string) {
@@ -312,15 +271,12 @@ func ea1RootUnknownResume(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if kind == "tool" {
 		event = "tool.completed"
 	}
-	fault := &ea1AgentReceiptFault{Store: f.store, ExecutionStore: f.store, ControlStore: f.store, ChildExecutionStore: f.store, ExecutionQuarantineStore: f.store, OwnedPhysicalExecutionStore: f.store, event: event, injected: injected}
+	fault := &ea1AgentReceiptFault{Store: f.store, ExecutionStore: f.store, ExecutionQuarantineStore: f.store, PhysicalExecutionStore: f.store, event: event, injected: injected}
 	rt := ea1StartRuntime(t, fault)
 	f.physical.rt = rt
-	if kind == "host" {
-		f.host.unknown = injected
-	}
 	runner := f.runner(rt, "resume-owner", true)
 	_, e := runner.Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
-	if !errors.Is(e, injected) || f.host.calls != 1 {
+	if !errors.Is(e, injected) {
 		t.Fatalf("actual Resume unknown cut missing: %v", e)
 	}
 	before, e := rt.Load(t.Context(), f.request.ID)
@@ -335,16 +291,12 @@ func ea1RootUnknownResume(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if g.AdmissionOperation != "resume" || g.ExpectedRevision != f.prepared.Run.Revision || g.ExecutionOwnerID != lease.OwnerID || g.ExecutionLeaseID != lease.LeaseID || g.ExecutionEpoch != lease.Epoch {
 		t.Fatal("unknown lost original Resume authority")
 	}
-	completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
-	if e != nil || completion.HostCompleted {
-		t.Fatalf("actual opaque Host error not retained: %v", e)
+	completion, e := rt.LookupPhysicalCallbackReturn(t.Context(), g)
+	if e != nil || !completion.HostCompleted {
+		t.Fatalf("actual native return not retained: %v", e)
 	}
 	m, n := f.physical.counts()
-	if kind == "host" {
-		if m != 0 || n != 0 || f.host.sends != 1 || fault.failures != 0 {
-			t.Fatal("Host fixture substituted Model/Tool send")
-		}
-	} else {
+	{
 		if fault.failures != 1 || m != 1 || (kind == "tool" && n != 1) || (kind == "model" && n != 0) {
 			t.Fatal("actual Resume dispatch not reached")
 		}
@@ -416,12 +368,12 @@ func ea1RootUnknownResume(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		if err != nil || same != g {
 			t.Fatal("TTL recovery changed original scope")
 		}
-		c, err := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+		c, err := freshRT.LookupPhysicalCallbackReturn(t.Context(), g)
 		if err != nil || !ea1RecoveryJSONEqual(c, completion) {
 			t.Fatal("TTL upgraded Host unknown")
 		}
 		a, b := f.physical.counts()
-		if a != m || b != n || f.host.calls != 1 || (kind == "host" && f.host.sends != 1) {
+		if a != m || b != n {
 			t.Fatal("unknown Resume replayed physical callback")
 		}
 		if err = fresh.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, &lease); !errors.Is(err, kernel.ErrExecutionConflict) {

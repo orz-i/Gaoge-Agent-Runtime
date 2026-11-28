@@ -5,9 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
 	kernelpostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/driver/postgres"
@@ -38,8 +36,8 @@ func closeToolRecoveryDB(t *testing.T, db *gorm.DB) {
 	}
 }
 
-// Exercise the shared Call/approval matrix with independent real Kernel and
-// Harness ledger pools, not a Memory ledger paired with a PostgreSQL Kernel.
+// Exercise the Call/approval matrix with independently reopened real Kernel
+// pools; accounting lives in the same native Store, not a Harness ledger.
 func TestRealPostgresToolApprovalAndLedgerReopen(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
 	if dsn == "" {
@@ -55,23 +53,6 @@ func TestRealPostgresToolApprovalAndLedgerReopen(t *testing.T) {
 			closeToolRecoveryDB(t, db)
 			closeToolRecoveryDB(t, peer)
 			return kernelpostgres.NewKernelStore(reopenToolRecoveryDB(t, isolated))
-		}
-	}, func(t *testing.T) (budget.LedgerStore, func() budget.LedgerStore) {
-		db, isolated := openIsolatedHarnessPostgres(t, dsn)
-		if err := harnesspostgres.Migrate(db); err != nil {
-			t.Fatal(err)
-		}
-		original, err := harnesspostgres.New(db)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return original, func() budget.LedgerStore {
-			closeToolRecoveryDB(t, db)
-			fresh, err := harnesspostgres.New(reopenToolRecoveryDB(t, isolated))
-			if err != nil {
-				t.Fatal(err)
-			}
-			return fresh
 		}
 	})
 }

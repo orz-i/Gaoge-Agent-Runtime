@@ -96,10 +96,6 @@ func TestEA1RealPostgresChildAgentStartPhases(t *testing.T) {
 	conformance.RunEA1ChildAgentStartPhases(t, realEA1(t).peerReopen)
 }
 
-func TestEA1RealPostgresMiddlewareNextLifetime(t *testing.T) {
-	conformance.RunEA1MiddlewareNextLifetime(t, realEA1(t).peerReopen)
-}
-
 func TestEA1RealPostgresOwnedCallbackReturn(t *testing.T) {
 	conformance.RunEA1OwnedCallbackReturn(t, realEA1(t).pair)
 }

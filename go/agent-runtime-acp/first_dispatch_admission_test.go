@@ -49,7 +49,7 @@ func TestPR151CancelBeforeOriginalCreateAck(t *testing.T) {
 		done <- outcome{snap, e}
 	}()
 	original := <-store.created
-	before, err := runner.CancelRun(t.Context(), original.Run.ID, original.Run.Revision)
+	before, err := runner.CancelRemote(t.Context(), original.Run.ID, original.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("expected cancellation pending before Session ID; got %+v %v", before.Run, err)
 	}
@@ -154,7 +154,7 @@ func TestPR151RealStdioACPFirstSessionAfterCancel(t *testing.T) {
 		done <- outcome{snap, e}
 	}()
 	original := <-store.created
-	before, err := runner.CancelRun(t.Context(), original.Run.ID, original.Run.Revision)
+	before, err := runner.CancelRemote(t.Context(), original.Run.ID, original.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("no durable cancellation: %+v %v", before.Run, err)
 	}
@@ -175,13 +175,16 @@ type independentOpenAdmissionACKFence struct {
 	release   chan struct{}
 }
 
-func (s *independentOpenAdmissionACKFence) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, rev, m)
-	if err == nil && rev == 1 && len(m.Events) != 0 && m.Events[0].Type == "acp.remote_open_dispatch_admitted" {
-		s.committed <- snap
-		<-s.release
+func (s *independentOpenAdmissionACKFence) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && commitRev == 1 && len(commitMutation.Events) != 0 && commitMutation.Events[0].Type == "acp.remote_open_dispatch_admitted" {
+			s.committed <- snap
+			<-s.release
+		}
+		return snap, false, err
 	}
-	return snap, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestPR151ACPDelayedFirstDispatchClaimCannotOutliveCancel(t *testing.T) {
@@ -208,7 +211,7 @@ func TestPR151ACPDelayedFirstDispatchClaimCannotOutliveCancel(t *testing.T) {
 		done <- outcome{snap, startErr}
 	}()
 	admitted := <-store.committed
-	cancelled, cancelErr := runner.CancelRun(t.Context(), admitted.Run.ID, admitted.Run.Revision)
+	cancelled, cancelErr := runner.CancelRemote(t.Context(), admitted.Run.ID, admitted.Run.Revision)
 	if !errors.Is(cancelErr, ErrOutcomeUnknown) || cancelled.Run.Revision != admitted.Run.Revision+1 {
 		close(store.release)
 		t.Fatalf("original cancellation was not serialized after first-dispatch claim: %+v %v", cancelled.Run, cancelErr)

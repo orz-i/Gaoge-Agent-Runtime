@@ -21,9 +21,8 @@ func TestRegistryRejectsInvalidDiscoveredSchema(t *testing.T) {
 	t.Parallel()
 	_, err := NewRegistry(&registryCaller{}, Discovery{
 		ProtocolVersion: ProtocolVersion,
-		Catalog:         CatalogSnapshot{Endpoint: testRegistryEndpoint},
+		Endpoint:        testRegistryEndpoint,
 		Tools: []DiscoveredTool{{
-			Name: testLookupTool,
 			Definition: tools.Definition{
 				Key: testLookupTool, Name: testLookupTool,
 				InputSchema: json.RawMessage(`{"type":"not-a-real-type"}`),
@@ -40,9 +39,8 @@ func TestRegistryRejectsArgumentsBeforeRemoteCall(t *testing.T) {
 	caller := &registryCaller{}
 	registry, err := NewRegistry(caller, Discovery{
 		ProtocolVersion: ProtocolVersion,
-		Catalog:         CatalogSnapshot{Endpoint: testRegistryEndpoint},
+		Endpoint:        testRegistryEndpoint,
 		Tools: []DiscoveredTool{{
-			Name: testLookupTool,
 			Definition: tools.Definition{
 				Key: testLookupTool, Name: testLookupTool,
 				InputSchema: json.RawMessage(`{
@@ -77,9 +75,8 @@ func TestRegistryImplementsRuntimeCatalogAndExecutor(t *testing.T) {
 	caller := &registryCaller{}
 	discovery := Discovery{
 		ProtocolVersion: ProtocolVersion,
-		Catalog:         CatalogSnapshot{Endpoint: testRegistryEndpoint},
+		Endpoint:        testRegistryEndpoint,
 		Tools: []DiscoveredTool{{
-			Name: testLookupTool,
 			Definition: tools.Definition{
 				Key: testLookupTool, Name: testLookupTool, InputSchema: json.RawMessage(`{"type":"object"}`),
 			},
@@ -99,7 +96,7 @@ func TestRegistryImplementsRuntimeCatalogAndExecutor(t *testing.T) {
 		RunID: "run-1",
 		Call:  tools.Call{ID: "call-1", ToolKey: testLookupTool, Arguments: json.RawMessage(`{"id":"42"}`)},
 	})
-	if err != nil || caller.endpoint != discovery.Catalog.Endpoint || caller.request.Name != testLookupTool ||
+	if err != nil || caller.endpoint != discovery.Endpoint || caller.request.Name != testLookupTool ||
 		result.Receipt.ExecutionID != "call-1" || result.Receipt.Disposition != "committed" {
 		t.Fatalf("caller=%#v result=%#v err=%v", caller, result, err)
 	}
@@ -109,9 +106,8 @@ func TestRegistryClonesDiscoveredDefinitions(t *testing.T) {
 	t.Parallel()
 	discovery := Discovery{
 		ProtocolVersion: ProtocolVersion,
-		Catalog:         CatalogSnapshot{Endpoint: testRegistryEndpoint},
+		Endpoint:        testRegistryEndpoint,
 		Tools: []DiscoveredTool{{
-			Name: testLookupTool,
 			Definition: tools.Definition{
 				Key: testLookupTool, Name: testLookupTool, InputSchema: json.RawMessage(`{"type":"object"}`),
 			},

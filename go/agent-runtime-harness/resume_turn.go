@@ -132,11 +132,6 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	// Approval or allowance control may already be committed while the Turn
 	// projection is stale. The Run and unresolved interactions own this gate.
 	if status != TurnRunning {
-		if !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
-			if _, err = runner.recoverOriginalPhysicalDispatch(ctx, invocation); err != nil {
-				return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
-			}
-		}
 		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
 	}
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {

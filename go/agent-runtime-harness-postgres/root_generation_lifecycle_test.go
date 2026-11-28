@@ -21,7 +21,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	"gorm.io/gorm"
@@ -110,6 +109,11 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	for _, wrap := range wrappers {
 		hs = wrap(hs)
 	}
+	if capture, ok := hs.(interface {
+		wrapGenerationKernel(kernel.Store) kernel.Store
+	}); ok {
+		ks = capture.wrapGenerationKernel(ks)
+	}
 	rt, err := kernel.New(kernel.Dependencies{Store: ks})
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +125,7 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	if capture, ok := hs.(interface{ setGenerationRelations(*runrelation.Registry) }); ok {
 		capture.setGenerationRelations(relations)
 	}
-	deps := harness.BudgetAuthorityDependencies{Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
+	deps := harness.BudgetAuthorityDependencies{Runtime: rt, Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
 	shared, err := harness.NewBudgetAuthority(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -137,15 +141,26 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	}
 	original, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry,
 		ToolOutcomeVerifier: d,
-		RunMiddleware:       []plugin.RunMiddleware{bounded}, ModelMiddleware: []plugin.ModelMiddleware{bounded}, ToolMiddleware: []plugin.ToolMiddleware{bounded}})
+		BoundedBudget:       bounded})
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.NewDeferredAgent(original)
+	c, err := handoff.New(handoff.Config{Local: original, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: original, Store: hs, Clock: generationClock{}, Handoffs: c, Relations: relations, Budget: shared, DelegationPolicy: generationPolicy{}})
+	if capture, ok := hs.(interface {
+		setGenerationBudget(*harness.BudgetAuthority)
+	}); ok {
+		capture.setGenerationBudget(shared)
+	}
+	hd := harness.Dependencies{Runtime: rt, Agent: original, Store: hs, Clock: generationClock{}, Handoffs: c, Relations: relations, Budget: shared, DelegationPolicy: generationPolicy{}}
+	hostOnly, _ := hs.(interface{ hostProtocolFixture() bool })
+	if hostOnly != nil && hostOnly.hostProtocolFixture() {
+		hd.Agent = hostProtocolAgent{original}
+		hd.Budget = nil
+	}
+	r, err := harness.NewRunner(hd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +177,9 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 
 				ToolKeys: []string{harness.DelegationToolKey}},
 		},
+	}
+	if hostOnly != nil && hostOnly.hostProtocolFixture() {
+		req.Config.SharedBudget = nil
 	}
 	return r, hs, rt, original, req
 }
@@ -246,7 +264,17 @@ func TestGenerationControlRejectsForeignCallbackCustody(t *testing.T) {
 				t.Fatalf("delegation fixture: %+v %v", first.Turn, err)
 			}
 			release, finished := make(chan struct{}), make(chan struct{})
-			foreign, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, CompletionPolicies: []agent.CompletionPolicy{detachedGenerationCompletion{release, finished}}})
+			// Accounting is the same native Run binding; only the foreign
+			// completion policy differs from the original scoped composition.
+			shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: hs, Meter: m, Clock: generationClock{}})
+			if e != nil {
+				t.Fatal(e)
+			}
+			bounded, e := shared.Adapter()
+			if e != nil {
+				t.Fatal(e)
+			}
+			foreign, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, BoundedBudget: bounded, CompletionPolicies: []agent.CompletionPolicy{detachedGenerationCompletion{release, finished}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -307,8 +335,9 @@ func TestRetriedRootCancellationCleansItsDeferredChildren(t *testing.T) {
 				if err != nil || child.Run.Status != kernel.RunStatusCancelled {
 					t.Fatalf("live child after cancellation: %+v %v", child.Run, err)
 				}
-				ledger, err := hs.LoadBudget(t.Context(), next.Turn.ID)
-				if err != nil || ledger.Cancelled != closeOriginal || !ledger.View("").Cancelled || ledger.View("").Usage.LLMCalls != 2 {
+				ledger, err := rt.BudgetStore().LoadBudget(t.Context(), next.Turn.ID)
+				current, ok := harness.TopLevelInvocation(next)
+				if err != nil || !ok || ledger.Cancelled || !ledger.RunCancelled(current.ExecutionRefID) || ledger.View("").Usage.LLMCalls != 2 {
 					t.Fatalf("changed history or divergent current cancellation: %+v %v", ledger, err)
 				}
 				items, err := hs.ListItems(t.Context(), first.Turn.ID, 0, 500)
@@ -453,18 +482,22 @@ func TestPreparedChildCancellationSurvivesLeaseOnlyEpochs(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if cancelWhileHeld {
-					if _, err = r.CancelSubtask(t.Context(), first.Turn.ID, first.Subtasks[0].ID, "compete with undispatched lease"); err == nil {
-						t.Fatal("live execution lease incorrectly claimed settled")
+				// A lease without an entered physical Grant carries no effect.
+				// The native Cancel CAS can revoke it; its bearer may not renew.
+				if !cancelWhileHeld {
+					if err = rt.ReleaseExecution(t.Context(), lease); err != nil {
+						t.Fatal(err)
+					}
+					if err = rt.VerifyExecutionCustody(t.Context(), child, kernel.CustodyPrepared); err != nil {
+						t.Fatalf("lease-only epoch invalidated physical history: %v", err)
 					}
 				}
-				if err = rt.ReleaseExecution(t.Context(), lease); err != nil {
-					t.Fatal(err)
-				}
-				if err = rt.VerifyPreparedRootSettlement(t.Context(), child); err != nil {
-					t.Fatalf("lease-only epoch invalidated physical history: %v", err)
-				}
 				cancelled, err := r.CancelSubtask(t.Context(), first.Turn.ID, first.Subtasks[0].ID, "stop undispatched child")
+				if cancelWhileHeld && err == nil {
+					if _, renewErr := rt.RenewExecution(t.Context(), kernel.ExecutionRenewRequest{Lease: lease, LeaseDuration: time.Minute}); renewErr == nil {
+						t.Fatal("cancelled lease retained authority")
+					}
+				}
 				if err != nil || len(cancelled.Subtasks) != 1 || cancelled.Subtasks[0].Status != "cancelled" {
 					t.Fatalf("original prepared cancellation/recovery: %+v %v", cancelled.Subtasks, err)
 				}

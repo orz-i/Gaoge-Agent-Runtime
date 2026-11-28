@@ -13,8 +13,8 @@ func retirementFixture() (OwnedRetirementReceipt, ExecutionLease) {
 	l := ExecutionLease{RunID: "root", OwnerID: "owner", LeaseID: "lease", Epoch: 1}
 	g := ChildExecutionGrant{ID: "scope", ChildRunID: "root", ExpectedRevision: 1, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
 	s := Snapshot{Run: Run{ID: "root", Kind: "agent", Status: RunStatusRunning, Revision: 2}, State: json.RawMessage(`{"receipt":"original"}`)}
-	c := OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 2, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
-	r := OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c}, Closures: []ManagedTransfer{}}
+	c := PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 2, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
+	r := OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c}, ClosureRefs: []ManagedClosureRef{}}
 	r.Digest = r.Identity()
 	return r, l
 }
@@ -34,8 +34,8 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 			t.Fatalf("retired wire accepted: %s", field)
 		}
 	}
-	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", g.ID, s.State, s)}
-	receipt, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, []ManagedTransfer{})
+	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_physical_settled", g.ID, s.State, s)}
+	receipt, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, ManagedAuthority{}, ManagedTransfer{})
 	if e != nil || !receipt.Valid() || receipt.Identity() != r.Identity() {
 		t.Fatalf("finish: %v", e)
 	}
@@ -52,7 +52,7 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 			case "unknown-return":
 				completion.HostCompleted = false
 			case "missing-return":
-				completion = OwnedPhysicalCallbackCompletion{}
+				completion = PhysicalCallbackCompletion{}
 			case "old-intermediate":
 				old := r
 
@@ -70,17 +70,31 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 				return
 			case "nil-closures":
 				bad := r
-				bad.Closures = nil
+				bad.ClosureRefs = nil
 				bad.Digest = bad.Identity()
 				if bad.Valid() {
 					t.Fatal("null closure accepted")
 				}
 				return
 			}
-			if _, e := BuildOwnedRetirementReceipt(g, current, owner, completion, p, []ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
+			if _, e := BuildOwnedRetirementReceipt(g, current, owner, completion, p, ManagedAuthority{}, ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
 				t.Fatalf("invalid finish: %v", e)
 			}
 		})
+	}
+	// A lease binding must not give a physical child the root's relaxed
+	// post-return revision or deferred-custody semantics.
+	s.Run.ParentRunID = "parent"
+	o := PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
+	c.ReturnSourceHash = ManagedDigest(PhysicalCallbackReturnPayload(s, o))
+	permit = ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_physical_settled", g.ID, s.State, s)}
+	if _, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, ManagedAuthority{}, ManagedTransfer{}); e != nil {
+		t.Fatal("exact leased child return rejected", e)
+	}
+	s.Run.Revision++
+	permit = ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_physical_settled", g.ID, s.State, s)}
+	if _, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, ManagedAuthority{}, ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
+		t.Fatal("leased child retired at a different return revision", e)
 	}
 }
 

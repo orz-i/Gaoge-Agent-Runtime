@@ -66,7 +66,8 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 				return shadow
 			}
 			d := handoff.Delegation{Remote: true, ID: "delegation", MemberID: "a2a:remote", MemberRevision: "r1", ChildRunID: "unresolved-child", Goal: "remote goal", Status: handoff.StatusQueued}
-			coordinator, err := handoff.New(newChild())
+			original := newChild()
+			coordinator, err := handoff.New(handoff.Config{Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return original, nil })})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +85,8 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 			}
 			// A restarted Handoff must not retry SendMessage or accept a
 			// fabricated remote Task ID by inspecting public Kernel fields.
-			reopened, err := handoff.New(newChild())
+			recovered := newChild()
+			reopened, err := handoff.New(handoff.Config{Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return recovered, nil })})
 			if err != nil {
 				t.Fatal(err)
 			}

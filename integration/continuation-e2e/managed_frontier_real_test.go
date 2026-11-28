@@ -30,21 +30,24 @@ type managedFrontierProcessStore struct {
 	before bool
 }
 
-func (s *managedFrontierProcessStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	hit := false
-	for _, e := range m.Events {
-		if e.Type == s.event {
-			hit = true
+func (s *managedFrontierProcessStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		hit := false
+		for _, e := range commitMutation.Events {
+			if e.Type == s.event {
+				hit = true
+			}
 		}
+		if hit && s.before {
+			os.Exit(managedRecoveryCrashExit)
+		}
+		out, _, err := s.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && hit {
+			os.Exit(managedRecoveryCrashExit)
+		}
+		return out, false, err
 	}
-	if hit && s.before {
-		os.Exit(managedRecoveryCrashExit)
-	}
-	out, err := s.KernelStore.ApplyExecution(ctx, lease, revision, m)
-	if err == nil && hit {
-		os.Exit(managedRecoveryCrashExit)
-	}
-	return out, err
+	return s.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type managedFrontierProcessModel struct {
@@ -130,7 +133,7 @@ func openManagedFrontierProcess(t *testing.T, db *gorm.DB, files, phase string) 
 	session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 		LocalTools: local,
 		Runtime:    rt, Store: host, Model: managedFrontierProcessModel{files: files, phase: phase}, Inputs: managedRecoveryFileInputs{path: filepath.Join(files, "inputs.jsonl")},
-		Session: options, Context: harness.AgentSessionContextOptions{ManagedRecovery: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		Session: options, Context: harness.AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 			return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 		}},
 		Execution:    execution,

@@ -52,7 +52,7 @@ func (s *admissionACKStore) CheckOwnedPhysicalEntry(ctx context.Context, g kerne
 	if s.mode == "entry-unavailable" || strings.HasPrefix(s.mode, "no-entry-") {
 		return kernel.OwnedPhysicalEntryWindow{}, errAdmissionTransport
 	}
-	window, err := s.OwnedPhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
+	window, err := s.PhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
 	if err == nil && s.mode == "cancelled-at-entry" {
 		s.cancel()
 	}
@@ -70,8 +70,8 @@ func (s *admissionACKStore) CheckOwnedPhysicalEntry(ctx context.Context, g kerne
 	return window, err
 }
 
-func (s *admissionACKStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := s.OwnedPhysicalExecutionStore.RecordOwnedPhysicalCallbackReturn(ctx, g, revision, o, p)
+func (s *admissionACKStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	err := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, revision, o, p)
 	if err == nil && s.mode == "no-entry-record-ack" {
 		return errAdmissionTransport
 	}
@@ -82,14 +82,14 @@ func (s *admissionACKStore) FinishChildExecution(ctx context.Context, g kernel.C
 	if s.mode == "no-entry-finish-unavailable" {
 		return errAdmissionTransport
 	}
-	err := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	err := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if err == nil && s.mode == "no-entry-finish-ack" {
 		return errAdmissionTransport
 	}
 	return err
 }
 
-func (s *admissionACKStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *admissionACKStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	l := p.Candidate().Lease
 	g := p.Candidate().Grant
 	s.grant = g
@@ -97,16 +97,16 @@ func (s *admissionACKStore) BeginOwnedPhysicalExecution(ctx context.Context, p k
 	var err error
 	s.source, err = s.Load(ctx, g.ChildRunID)
 	if err != nil {
-		return kernel.OwnedPhysicalAdmissionResult{}, err
+		return kernel.PhysicalAdmissionResult{}, err
 	}
 	defer func() { s.attempted = true }()
 	switch s.mode {
 	case "denied-before":
-		return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
+		return kernel.PhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 	case "unknown-before":
-		return kernel.OwnedPhysicalAdmissionResult{}, p.CommitOutcome(errAdmissionTransport)
+		return kernel.PhysicalAdmissionResult{}, p.CommitOutcome(errAdmissionTransport)
 	}
-	v, nativeErr := s.ea1AgentAdmissionStore.BeginOwnedPhysicalExecution(ctx, p)
+	v, nativeErr := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	s.nativeErr = nativeErr
 	if v.Grant.ID != "" {
 		s.grant, s.lease = v.Grant, v.Lease
@@ -164,7 +164,7 @@ func (s *admissionACKStore) LookupChildExecution(ctx context.Context, id string)
 			return kernel.ChildExecutionGrant{}, errAdmissionTransport
 		}
 	}
-	return s.ChildExecutionStore.LookupChildExecution(ctx, id)
+	return s.PhysicalExecutionStore.LookupChildExecution(ctx, id)
 }
 
 // RunPhysicalAdmissionACKSuite verifies the same write-capable admission
@@ -201,13 +201,13 @@ func RunPhysicalAdmissionACKSuite(t *testing.T, factory func(*testing.T) (kernel
 	}
 }
 
-func admissionACKRunner(t *testing.T, rt *kernel.Runtime, m *ea1AdmissionModel, host *ea1AdmissionMiddleware, ttl ...time.Duration) *agent.Runner {
+func admissionACKRunner(t *testing.T, rt *kernel.Runtime, m *ea1AdmissionModel, barrier *agent.ModelAdmissionBarrier, ttl ...time.Duration) *agent.Runner {
 	t.Helper()
 	duration := time.Minute
 	if len(ttl) > 0 {
 		duration = ttl[0]
 	}
-	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, RunExecution: &agent.RunExecution{OwnerID: "admission-ack-owner", LeaseDuration: duration}, RunMiddleware: []plugin.RunMiddleware{host}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1}, Tool: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1}}})
+	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, RunExecution: &agent.RunExecution{OwnerID: "admission-ack-owner", LeaseDuration: duration}, ModelAdmissionBarrier: barrier, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1}, Tool: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1}}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -233,23 +233,23 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	if operation == "resume" && mode == "entry-unavailable" {
 		before := resume.observer
-		if e := before.VerifyPreparedRootSettlement(t.Context(), resume.prepared); e != nil {
+		if e := before.VerifyExecutionCustody(t.Context(), resume.prepared, kernel.CustodyPrepared); e != nil {
 			t.Fatalf("fixture missing original prepared custody: %v", e)
 		}
 	}
 	w := &admissionACKStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, backing), mode: mode, cancel: cancel}
 	rt := ea1StartRuntime(t, w)
-	m, host := &ea1AdmissionModel{}, &ea1AdmissionMiddleware{}
+	m := &ea1AdmissionModel{}
 	var out kernel.Snapshot
 	var err error
 	var observed agent.PhysicalCallOutcome
 	dispatchID := "dispatch-fixture-" + operation
-	var hostCalls, modelCalls, toolCalls, approvalCalls int
+	var modelCalls, toolCalls, approvalCalls int
 	ttl := time.Minute
 	if strings.HasPrefix(mode, "expired-") {
 		ttl = 2100 * time.Millisecond
 	}
-	r := admissionACKRunner(t, rt, m, host, ttl)
+	r := admissionACKRunner(t, rt, m, nil, ttl)
 	wantStatus := kernel.RunStatusCompleted
 	switch operation {
 	case "start":
@@ -277,9 +277,9 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	if approval != nil {
 		modelCalls, toolCalls = approval.physical.counts()
 		modelCalls-- // original model result belongs to setup, not this approval
-		hostCalls, approvalCalls = approval.host.calls, approval.approval.calls
+		approvalCalls = approval.approval.calls
 	} else {
-		modelCalls, hostCalls = int(m.calls.Load()), int(host.calls.Load())
+		modelCalls = int(m.calls.Load())
 	}
 	if w.grant.ID == "" || w.grant.AdmissionOperation != operation {
 		t.Fatalf("did not measure real %s admission: %+v %v", operation, w.grant, err)
@@ -302,8 +302,8 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 		case "entry-unavailable", "no-entry-finish-unavailable", "no-entry-record-ack", "no-entry-finish-ack":
 			want = errAdmissionTransport
 		}
-		if !errors.Is(err, want) || hostCalls != 0 || approvalCalls != 0 || modelCalls != 0 || toolCalls != 0 || w.nativeErr != nil {
-			t.Fatalf("acknowledged but invalid entry: host=%d approval=%d model=%d tool=%d native=%v err=%v", hostCalls, approvalCalls, modelCalls, toolCalls, w.nativeErr, err)
+		if !errors.Is(err, want) || approvalCalls != 0 || modelCalls != 0 || toolCalls != 0 || w.nativeErr != nil {
+			t.Fatalf("acknowledged but invalid entry: approval=%d model=%d tool=%d native=%v err=%v", approvalCalls, modelCalls, toolCalls, w.nativeErr, err)
 		}
 		if out.Run.ID != w.source.Run.ID {
 			t.Fatalf("denial lost original Run: %+v", out.Run)
@@ -318,11 +318,11 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 			if lookupErr != nil || g != w.grant || !errors.Is(err, agent.ErrRootOutcomeUnknown) {
 				t.Fatalf("unacknowledged cleanup lost fence: %+v %v %v", g, lookupErr, err)
 			}
-			c, e := fresh.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+			c, e := fresh.LookupPhysicalCallbackReturn(t.Context(), g)
 			if e != nil || !c.MatchesNotEnteredSnapshot(g, w.source) || c.HostCompleted || c.MatchesReturnSnapshot(w.source) {
 				t.Fatalf("durable no-entry fact not distinct: %+v %v", c, e)
 			}
-			obs := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, &ea1AdmissionMiddleware{})
+			obs := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, nil)
 			repaired, e := obs.ReconcileUnenteredPhysicalDispatch(t.Context(), g.ChildRunID, plugin.RunResume, dispatchID)
 			if e != nil || !repaired {
 				t.Fatalf("restart could not consume exact no-entry retirement: %t %v", repaired, e)
@@ -332,7 +332,7 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 		}
 		assertNoEntryRetirement(t, fresh, w.grant, w.source, true)
 		if operation != "prepare" {
-			obs := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, &ea1AdmissionMiddleware{})
+			obs := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, nil)
 			op := plugin.RunStart
 			if operation == "resume" {
 				op = plugin.RunResume
@@ -348,14 +348,14 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 			}
 		}
 		if operation == "resume" {
-			e := fresh.VerifyPreparedRootSettlement(t.Context(), resume.prepared)
+			e := fresh.VerifyExecutionCustody(t.Context(), resume.prepared, kernel.CustodyPrepared)
 			t.Logf("original prepared custody after exact no-entry retirement: %v", e)
 			if e != nil {
 				t.Errorf("no-entry erased original prepared custody: %v", e)
 			}
 		}
 		if operation == "start" || operation == "prepare" {
-			if e := fresh.VerifyOwnedRootSettlement(t.Context(), w.source); e == nil {
+			if e := fresh.VerifyExecutionCustody(t.Context(), w.source, kernel.CustodyRetired); e == nil {
 				t.Fatal("no-entry without prior actual callback manufactured custody")
 			}
 		}
@@ -397,8 +397,8 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 		if operation == "approval" {
 			wantApproval = 1
 		}
-		if err != nil || out.Run.Status != wantStatus || hostCalls != 1 || modelCalls != wantModel || toolCalls != 0 || approvalCalls != wantApproval {
-			t.Fatalf("original admission not executed exactly once: status=%s host=%d model=%d tool=%d approval=%d err=%v", out.Run.Status, hostCalls, modelCalls, toolCalls, approvalCalls, err)
+		if err != nil || out.Run.Status != wantStatus || modelCalls != wantModel || toolCalls != 0 || approvalCalls != wantApproval {
+			t.Fatalf("original admission not executed exactly once: status=%s model=%d tool=%d approval=%d err=%v", out.Run.Status, modelCalls, toolCalls, approvalCalls, err)
 		}
 		if !errors.Is(lookupErr, kernel.ErrNotFound) {
 			t.Fatalf("successful attempt left fence: %+v %v", g, lookupErr)
@@ -423,8 +423,8 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	case "unknown-before", "cancelled-after", "unreadable-after", "untied-unknown":
 		want = kernel.ErrPhysicalAdmissionCommitUnknown
 	}
-	if !errors.Is(err, want) || hostCalls != 0 || modelCalls != 0 || toolCalls != 0 || approvalCalls != 0 {
-		t.Fatalf("rejected admission crossed callback boundary: host=%d model=%d tool=%d approval=%d err=%v", hostCalls, modelCalls, toolCalls, approvalCalls, err)
+	if !errors.Is(err, want) || modelCalls != 0 || toolCalls != 0 || approvalCalls != 0 {
+		t.Fatalf("rejected admission crossed callback boundary: model=%d tool=%d approval=%d err=%v", modelCalls, toolCalls, approvalCalls, err)
 	}
 	wantReadbacks := 0
 	if mode == "unknown-before" || mode == "unreadable-after" {
@@ -458,13 +458,13 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	if lookupErr != nil || g != w.grant {
 		t.Fatalf("committed but unqualified ACK lost original fence: %+v %v", g, lookupErr)
 	}
-	if _, e = fresh.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+	if _, e = fresh.LookupPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("unentered callback fabricated return: %v", e)
 	}
 	// Restart/reconciliation cannot invent a callback from the persisted
 	// attempt alone or retire a barrier without its original return.
-	observerRunner := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, &ea1AdmissionMiddleware{})
-	if e = observerRunner.ReconcileRootPhysicalExecution(t.Context(), g.ChildRunID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+	observerRunner := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, nil)
+	if e = observerRunner.ReconcilePhysicalExecution(t.Context(), g.ChildRunID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
 		t.Fatalf("observer adopted admission without original ACK: %v", e)
 	}
 	if retained, e := fresh.LookupChildExecution(t.Context(), g.ChildRunID); e != nil || retained != g {
@@ -478,7 +478,7 @@ func assertNoEntryRetirement(t *testing.T, rt *kernel.Runtime, g kernel.ChildExe
 	c := receipt.Evidence.Completion
 	if e != nil || !receipt.Valid() || receipt.Evidence.Grant != g || !receipt.Evidence.Completion.NotEntered() ||
 		!c.MatchesNotEnteredSnapshot(g, source) || c.HostCompleted || c.LeaseOwned != owned || c.ToolReturns != "" || c.MatchesReturnSnapshot(source) ||
-		len(receipt.Closures) != 0 || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(source) {
+		len(receipt.ClosureRefs) != 0 || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(source) {
 		t.Fatalf("invalid original no-entry retirement: %+v %v", receipt, e)
 	}
 }
@@ -496,15 +496,15 @@ func runPhysicalEntryExternalLease(t *testing.T, factory func(*testing.T) (kerne
 	if e != nil {
 		t.Fatal(e)
 	}
-	m, host := &ea1AdmissionModel{}, &ea1AdmissionMiddleware{}
-	r := admissionACKRunner(t, rt, m, host)
+	m := &ea1AdmissionModel{}
+	r := admissionACKRunner(t, rt, m, nil)
 	_, e = r.Resume(ctx, f.prepared.Run.ID, f.prepared.Run.Revision)
-	if !errors.Is(e, context.Canceled) || m.calls.Load() != 0 || host.calls.Load() != 0 || w.entryChecks != 1 {
+	if !errors.Is(e, context.Canceled) || m.calls.Load() != 0 || w.entryChecks != 1 {
 		t.Fatalf("external denial entered callback: %v", e)
 	}
 	fresh := ea1StartRuntime(t, f.reopen())
 	assertNoEntryRetirement(t, fresh, w.grant, w.source, false)
-	if e := fresh.VerifyOwnedRootSettlement(t.Context(), w.source); e == nil {
+	if e := fresh.VerifyExecutionCustody(t.Context(), w.source, kernel.CustodyRetired); e == nil {
 		t.Fatal("no-entry with a borrowed lease created control custody")
 	}
 	if e = fresh.RequireExecution(t.Context(), w.grant.ChildRunID); !errors.Is(e, kernel.ErrExecutionRequired) {
@@ -518,9 +518,9 @@ func runPhysicalEntryExternalLease(t *testing.T, factory func(*testing.T) (kerne
 		t.Fatalf("no-entry retirement released caller-owned lease: %v", e)
 	}
 	// The same caller lease can admit a new real attempt, never the old ID.
-	r = admissionACKRunner(t, bound, m, host)
+	r = admissionACKRunner(t, bound, m, nil)
 	out, e := r.Resume(t.Context(), f.prepared.Run.ID, f.prepared.Run.Revision)
-	if e != nil || out.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 || host.calls.Load() != 1 {
+	if e != nil || out.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 {
 		t.Fatalf("fresh physical attempt did not execute: %v", e)
 	}
 }
@@ -546,13 +546,12 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	arrived := make(chan attempt, 2)
 	releaseAdmissions := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
-	entered := make(chan int, 2)
+	entered := [2]chan struct{}{make(chan struct{}, 1), make(chan struct{}, 1)}
 	releaseHost := make(chan struct{})
 	results := make(chan result, 2)
 	var runners [2]*agent.Runner
 	var stores [2]*admissionACKStore
 	var models [2]*ea1AdmissionModel
-	var hosts [2]*ea1AdmissionMiddleware
 	for i, backing := range []kernel.Store{f.store.Store, f.peer} {
 		w := &admissionACKStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, backing)}
 		if i == 1 && mode == "unknown-after-denial" {
@@ -575,21 +574,10 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 		if e != nil {
 			t.Fatal(e)
 		}
-		host := &ea1AdmissionMiddleware{before: func(ctx context.Context) error {
-			entered <- i
-			if i == 0 {
-				select {
-				case <-releaseHost:
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-			return nil
-		}}
+		barrier := agent.NewModelAdmissionBarrier(entered[i], releaseHost)
 		m := &ea1AdmissionModel{}
-		stores[i], hosts[i], models[i] = w, host, m
-		runners[i] = admissionACKRunner(t, bound, m, host)
+		stores[i], models[i] = w, m
+		runners[i] = admissionACKRunner(t, bound, m, barrier)
 	}
 	var completed int
 	defer func() {
@@ -620,20 +608,23 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	close(releaseAdmissions[0])
 	select {
-	case i := <-entered:
-		if i != 0 {
-			t.Fatal("unexpected first callback")
-		}
+	case <-entered[0]:
 	case got := <-results:
 		completed++
 		t.Fatalf("first admission rejected: %v", got.err)
 	case <-ctx.Done():
 		t.Fatal("first callback absent")
 	}
+	// The fixed Model admission barrier follows committed Model intent.
+	// Compare the winner's exact paused snapshot, not the pre-admission one.
+	winnerSnapshot, e := f.observer.Load(ctx, f.prepared.Run.ID)
+	if e != nil || winnerSnapshot.Run.Revision <= f.prepared.Run.Revision || models[0].calls.Load() != 0 {
+		t.Fatalf("winner did not stop after intent and before Provider dispatch: %+v %v", winnerSnapshot.Run, e)
+	}
 	close(releaseAdmissions[1])
 	select {
-	case i := <-entered:
-		t.Fatalf("losing contender entered actual Host callback %d", i)
+	case <-entered[1]:
+		t.Fatal("losing contender entered model admission barrier")
 	case got := <-results:
 		completed++
 		want := kernel.ErrExecutionConflict
@@ -650,14 +641,14 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 	if mode == "unknown-after-denial" {
 		wantReads = 1
 	}
-	if stores[1].readbacks != wantReads || hosts[1].calls.Load() != 0 || models[1].calls.Load() != 0 {
-		t.Fatalf("losing contender crossed ACK/dispatch boundary: reads=%d host=%d model=%d", stores[1].readbacks, hosts[1].calls.Load(), models[1].calls.Load())
+	if stores[1].readbacks != wantReads || models[1].calls.Load() != 0 {
+		t.Fatalf("losing contender crossed ACK/dispatch boundary: reads=%d model=%d", stores[1].readbacks, models[1].calls.Load())
 	}
 	if g, e := f.observer.LookupChildExecution(ctx, f.prepared.Run.ID); e != nil || g != grants[0] {
 		t.Fatalf("losing admission changed first active grant: %+v %v", g, e)
 	}
-	ea1CompBarrierUnchanged(t, f.observer, f.prepared)
-	if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(ctx, grants[0]); !errors.Is(e, kernel.ErrNotFound) {
+	ea1CompBarrierUnchanged(t, f.observer, winnerSnapshot)
+	if _, e = f.observer.LookupPhysicalCallbackReturn(ctx, grants[0]); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("loser manufactured callback return: %v", e)
 	}
 	if _, e = f.observer.LoadOwnedRetirement(ctx, grants[0].ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -673,7 +664,7 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 	case <-ctx.Done():
 		t.Fatal("original callback did not finish")
 	}
-	if hosts[0].calls.Load() != 1 || models[0].calls.Load() != 1 {
+	if models[0].calls.Load() != 1 {
 		t.Fatal("original physical callback did not execute exactly once")
 	}
 	fresh := ea1StartRuntime(t, f.reopen())
@@ -694,12 +685,12 @@ func RunPhysicalAdmissionCommitRollback(t *testing.T, backing kernel.Store, remo
 	if e != nil {
 		t.Fatal(e)
 	}
-	m, host := &ea1AdmissionModel{}, &ea1AdmissionMiddleware{}
-	r := admissionACKRunner(t, rt, m, host)
+	m := &ea1AdmissionModel{}
+	r := admissionACKRunner(t, rt, m, nil)
 	source, e := r.StartRun(t.Context(), ea1AdmissionRequest())
 	if !errors.Is(e, kernel.ErrPhysicalAdmissionCommitUnknown) || !errors.Is(w.nativeErr, kernel.ErrPhysicalAdmissionCommitUnknown) ||
-		source.Run.ID == "" || host.calls.Load() != 0 || m.calls.Load() != 0 || w.readbacks != 1 {
-		t.Fatalf("native COMMIT rollback did not remain non-executable: source=%+v host=%d model=%d readback=%d error=%v native=%v", source.Run, host.calls.Load(), m.calls.Load(), w.readbacks, e, w.nativeErr)
+		source.Run.ID == "" || m.calls.Load() != 0 || w.readbacks != 1 {
+		t.Fatalf("native COMMIT rollback did not remain non-executable: source=%+v model=%d readback=%d error=%v native=%v", source.Run, m.calls.Load(), w.readbacks, e, w.nativeErr)
 	}
 	aborted := w.grant
 	observer := ea1StartRuntime(t, backing)
@@ -713,8 +704,8 @@ func RunPhysicalAdmissionCommitRollback(t *testing.T, backing kernel.Store, remo
 	// The existing Run has not entered any callback. Only a new actual
 	// successful admission may execute, including a new attempt commitment.
 	out, e := r.Resume(t.Context(), source.Run.ID, source.Run.Revision)
-	if e != nil || out.Run.Status != kernel.RunStatusCompleted || host.calls.Load() != 1 || m.calls.Load() != 1 || w.grant.ID != aborted.ID || w.grant.ExecutionEpoch != aborted.ExecutionEpoch || w.grant.AdmissionSourceHash == aborted.AdmissionSourceHash {
-		t.Fatalf("rollback did not free original uncommitted reservation: status=%s host=%d model=%d err=%v", out.Run.Status, host.calls.Load(), m.calls.Load(), e)
+	if e != nil || out.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 || w.grant.ID != aborted.ID || w.grant.ExecutionEpoch != aborted.ExecutionEpoch || w.grant.AdmissionSourceHash == aborted.AdmissionSourceHash {
+		t.Fatalf("rollback did not free original uncommitted reservation: status=%s model=%d err=%v", out.Run.Status, m.calls.Load(), e)
 	}
 	receipt, e := observer.LoadOwnedRetirement(t.Context(), w.grant.ID)
 	if e != nil || receipt.Evidence.Grant != w.grant || !receipt.Evidence.Completion.HostCompleted {

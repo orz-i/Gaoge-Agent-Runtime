@@ -15,18 +15,23 @@ import (
 
 // StreamRunFeed replays retained events and follows the Run without owning or cancelling its execution.
 func (handler *Handler) StreamRunFeed(context *gin.Context) {
-	subscription, snapshot, afterSeq, ok := handler.prepareRunFeed(context)
+	subscription, snapshot, _, ok := handler.prepareRunFeed(context)
 	if !ok {
 		return
 	}
 	defer subscription.Close()
+	// The snapshot can prove completion, not invent a Feed sequence. A drained
+	// terminal stream stops reconnecting without manufacturing a journal event.
+	if terminalRunStatus(snapshot.Run.Status) && len(subscription.Replay) == 0 {
+		context.Status(http.StatusNoContent)
+		return
+	}
 	beginRunFeedStream(context)
-	lastSeq, terminal := writeRunFeedReplay(context, subscription.Replay, afterSeq)
+	terminal := writeRunFeedReplay(context, subscription.Replay)
 	if terminal {
 		return
 	}
 	if terminalRunStatus(snapshot.Run.Status) {
-		_ = writeRunFeedEvent(context, terminalSnapshotFeedEvent(snapshot, lastSeq+1))
 		return
 	}
 	followRunFeed(context, subscription)
@@ -123,18 +128,16 @@ func beginRunFeedStream(context *gin.Context) {
 	context.Writer.Flush()
 }
 
-func writeRunFeedReplay(context *gin.Context, replay []runfeed.Event, afterSeq int64) (int64, bool) {
-	lastSeq := afterSeq
+func writeRunFeedReplay(context *gin.Context, replay []runfeed.Event) bool {
 	for _, event := range replay {
 		if err := writeRunFeedEvent(context, event); err != nil {
-			return lastSeq, true
+			return true
 		}
-		lastSeq = event.Seq
 		if event.Terminal {
-			return lastSeq, true
+			return true
 		}
 	}
-	return lastSeq, false
+	return false
 }
 
 func writeRunFeedEvent(context *gin.Context, event runfeed.Event) error {
@@ -147,23 +150,6 @@ func writeRunFeedEvent(context *gin.Context, event runfeed.Event) error {
 	}
 	context.Writer.Flush()
 	return nil
-}
-
-func terminalSnapshotFeedEvent(snapshot kernel.Snapshot, sequence int64) runfeed.Event {
-	eventType := runfeed.EventRunFailed
-	switch snapshot.Run.Status {
-	case kernel.RunStatusCompleted:
-		eventType = runfeed.EventRunCompleted
-	case kernel.RunStatusCancelled:
-		eventType = runfeed.EventRunCancelled
-	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget, kernel.RunStatusFailed:
-		// The caller only synthesizes terminal snapshots; failed is the safe default.
-	}
-	return runfeed.Event{
-		Seq: sequence, RunID: snapshot.Run.ID, Type: eventType, Message: snapshot.Run.ErrorDetail,
-		Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status), Terminal: true,
-		CreatedAt: snapshot.Run.UpdatedAt,
-	}
 }
 
 func terminalRunStatus(status kernel.RunStatus) bool {

@@ -42,7 +42,7 @@ func TestHarnessAutomaticAllowanceDoesNotRewriteContextCheckpoint(t *testing.T) 
 		contextEntry("source-three", "current-turn", model.RoleUser, "continue now", true),
 	)
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1,
 	}
 	snapshot, err := host.StartAgentTurn(t.Context(), request)

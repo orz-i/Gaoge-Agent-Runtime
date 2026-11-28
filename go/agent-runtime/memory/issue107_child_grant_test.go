@@ -15,7 +15,7 @@ import (
 
 func newIssue107Run(t *testing.T, rt *kernel.Runtime, id, parent string) kernel.Snapshot {
 	t.Helper()
-	snapshot, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", ParentRunID: parent, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, RequestID: id, Goal: "original child authority", State: []byte(`{}`)})
+	snapshot, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", ExecutionRequired: true, ParentRunID: parent, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, RequestID: id, Goal: "original child authority", State: []byte(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	root := newIssue107Run(t, rt, "root", "")
 	mid := newIssue107Run(t, rt, "middle-child", root.Run.ID)
 	child := newIssue107Run(t, rt, "agentchild", mid.Run.ID)
-	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+	grant, err := conformance.AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +50,8 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unsafe original pre-callback release accepted: %v", err)
 	}
-	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
-	if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
+	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", grant.ID, child.State, child)
+	if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {
@@ -64,10 +64,10 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 		t.Fatalf("verified settlement did not unlock ancestor: %+v err=%v", cancelled.Run, err)
 	}
-	if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = conformance.AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("terminated ancestor admitted child: %v", err)
 	}
-	if _, err = rt.Create(t.Context(), kernel.CreateRequest{ID: "late-child", Kind: "agent", ParentRunID: root.Run.ID, Actor: root.Run.Actor, Thread: root.Run.Thread, Goal: "late", State: []byte(`{}`)}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = rt.Create(t.Context(), kernel.CreateRequest{ID: "late-child", Kind: "agent", ExecutionRequired: true, ParentRunID: root.Run.ID, Actor: root.Run.Actor, Thread: root.Run.Thread, Goal: "late", State: []byte(`{}`)}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("late child created after parent Cancel: %v", err)
 	}
 }
@@ -89,7 +89,7 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				grant, beginErr = rt.BeginChildExecution(context.Background(), child.Run.ID, child.Run.Revision)
+				grant, beginErr = conformance.AdmitChildFixture(context.Background(), rt, child.Run.ID, child.Run.Revision)
 			}()
 			go func() {
 				defer wg.Done()
@@ -105,8 +105,8 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 				if !errors.Is(cancelErr, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("child won but parent Cancel=%v", cancelErr)
 				}
-				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
-				if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
+				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", grant.ID, child.State, child)
+				if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); err != nil {
 					t.Fatal(err)
 				}
 				if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {

@@ -42,7 +42,7 @@ func TestPublicSDKFailureProjectionKeepsCodesWithoutDiagnosticBytes(t *testing.T
 		!strings.Contains(internal.ErrorDetail, "sk-PRIVATE") {
 		t.Fatalf("public Run lost semantics, leaked bytes, or mutated internal state: %#v", public)
 	}
-	encoded, _ := json.Marshal(snapshotResponse(kernel.Snapshot{
+	encoded, _ := json.Marshal(SnapshotResponse(kernel.Snapshot{
 		Run: internal, State: json.RawMessage(`{"userContent":"hello","errorMessage":"Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"}`),
 	}))
 	if strings.Contains(string(encoded), privateDiagnosticFixture) || !strings.Contains(string(encoded), "model.upstream_auth_failed") ||

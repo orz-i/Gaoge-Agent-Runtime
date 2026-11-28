@@ -3,6 +3,7 @@ package conformance
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -79,8 +80,15 @@ func RunEA1P0SourceAdmissionSuite(t *testing.T, makeStore func(*testing.T) kerne
 		}
 		actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
+		parent, err := rt.Create(t.Context(), kernel.CreateRequest{ID: "admission-parent", Kind: "agent", Actor: actor, Thread: thread, Goal: "parent", State: []byte("{}")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err = rt.AdmitPhysicalExecution(t.Context(), parent, kernel.ExecutionAcquireRequest{}, nil, "start", ""); !errors.Is(err, kernel.ErrInvalidInput) {
+			t.Fatalf("unleased root admission: %v", err)
+		}
 		root, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "root", Kind: "agent", Actor: actor, Thread: thread,
+			ID: "root", ParentRunID: parent.Run.ID, Kind: "agent", ExecutionRequired: true, Actor: actor, Thread: thread,
 			Goal: "original owner", State: []byte(`{}`),
 		})
 		if err != nil {
@@ -99,34 +107,45 @@ func RunEA1P0SourceAdmissionSuite(t *testing.T, makeStore func(*testing.T) kerne
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = rt.BeginChildExecution(t.Context(), foreign.Run.ID, foreign.Run.Revision); !errors.Is(err, kernel.ErrExecutionRequired) {
+		if _, err = AdmitChildFixture(t.Context(), rt, foreign.Run.ID, foreign.Run.Revision); !errors.Is(err, kernel.ErrExecutionRequired) {
 			t.Fatalf("unsupported kind acquired external physical authority: %v", err)
 		}
-		next, err := rt.Apply(t.Context(), root.Run.ID, root.Run.Revision, kernel.Mutation{
+		lease, err := rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: root.Run.ID, OwnerID: "fixture", LeaseDuration: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound, err := rt.WithExecution(lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, err := bound.Apply(t.Context(), root.Run.ID, root.Run.Revision, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: root.State,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+		if err := rt.ReleaseExecution(t.Context(), lease); err != nil {
+			t.Fatal(err)
+		}
 		for _, rev := range []uint64{root.Run.Revision, next.Run.Revision + 1} {
-			if _, err = rt.BeginChildExecution(t.Context(), root.Run.ID, rev); !errors.Is(err, kernel.ErrExecutionConflict) {
+			if _, err = AdmitChildFixture(t.Context(), rt, root.Run.ID, rev); !errors.Is(err, kernel.ErrConflict) {
 				t.Fatalf("stale/future expected Revision %d admitted physical Grant: %v", rev, err)
 			}
 		}
-		if _, err = rt.BeginChildExecution(t.Context(), root.Run.ID, 0); !errors.Is(err, kernel.ErrInvalidInput) {
+		if _, err = AdmitChildFixture(t.Context(), rt, root.Run.ID, 0); !errors.Is(err, kernel.ErrInvalidInput) {
 			t.Fatalf("zero expected Revision authorized physical Grant: %v", err)
 		}
 		if _, err = rt.LookupChildExecution(t.Context(), root.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
 			t.Fatalf("invalid admission left an original Grant: %v", err)
 		}
-		grant, err := rt.BeginChildExecution(t.Context(), root.Run.ID, next.Run.Revision)
+		grant, err := AdmitChildFixture(t.Context(), rt, root.Run.ID, next.Run.Revision)
 		if err != nil {
 			t.Fatalf("valid original Revision denied: %v", err)
 		}
 		if grant.ExpectedRevision != next.Run.Revision {
 			t.Fatalf("original Revision not sealed: %+v", grant)
 		}
-		if _, err = rt.BeginChildExecution(t.Context(), root.Run.ID, next.Run.Revision); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		if _, err = AdmitChildFixture(t.Context(), rt, root.Run.ID, next.Run.Revision); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("duplicate original physical admission accepted: %v", err)
 		}
 	})

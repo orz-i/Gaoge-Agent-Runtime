@@ -133,7 +133,7 @@ type RemoteShadowObserver interface {
 
 // LocalKernelChildRunner is an explicit Host contract that its ChildRunner
 // executes directly in the supplied Kernel Runtime, not in a remote ChildRunner
-// or A2A shadow. Only a fixed New(children) Coordinator can use this proof;
+// or remote shadow. Only an explicitly fixed Config.Local can use this proof;
 // custom route implementations must never claim it based on Run metadata.
 type LocalKernelChildRunner interface {
 	ChildRunner
@@ -161,109 +161,67 @@ func (resolver ChildRunnerResolverFunc) ResolveChild(
 	return resolver(ctx, delegation)
 }
 
-type staticChildRunnerResolver struct{ children ChildRunner }
-
-func (resolver staticChildRunnerResolver) ResolveChild(context.Context, Delegation) (ChildRunner, error) {
-	if resolver.children == nil {
-		return nil, ErrChildUnavailable
-	}
-	return resolver.children, nil
+// Config fixes the Host's local executor and independently authorized remote
+// resolver. The frozen Delegation.Remote bit selects between them. Opaque is
+// only for custom nonremote executors; it cannot confer local Kernel authority
+// and cannot be combined with Local. Keep this composition stable on recovery.
+type Config struct {
+	Local  ChildRunner
+	Remote ChildRunnerResolver
+	Opaque ChildRunnerResolver
+	// PrepareLocal leaves scheduling to the Host. The same fixed Agent prepares
+	// the Run and later resumes it; there is no deferred ChildRunner engine.
+	PrepareLocal bool
 }
 
 // Coordinator starts or recovers stable delegated Child Agent Runs.
-type Coordinator struct {
-	resolver      ChildRunnerResolver
-	deferredAgent *agent.Runner
-}
+type Coordinator struct{ config Config }
 
-// New constructs the Handoff capability without owning a root Run.
-func New(children ChildRunner) (*Coordinator, error) {
-	if children == nil {
+func New(config Config) (*Coordinator, error) {
+	if config.Local == nil && config.Remote == nil && config.Opaque == nil ||
+		config.Local != nil && config.Opaque != nil {
 		return nil, ErrInvalidDelegation
 	}
-	return &Coordinator{
-		resolver: staticChildRunnerResolver{children: children},
-	}, nil
-}
-
-// NewDeferredAgent binds one concrete local Agent while leaving physical
-// continuation to the caller's existing worker. PrepareRun may execute Host
-// middleware; it does not dispatch Model or Tool work. Observation, continuation,
-// and cancellation retain New's separate identity and ownership checks.
-// This is a static local composition, not proof about any routed/remote child.
-func NewDeferredAgent(original *agent.Runner) (*Coordinator, error) {
-	if original == nil {
+	if _, remote := config.Local.(RemoteShadowObserver); remote {
 		return nil, ErrInvalidDelegation
 	}
-	coordinator, err := New(original)
-	if err != nil {
-		return nil, err
-	}
-	coordinator.deferredAgent = original
-	return coordinator, nil
-}
-
-// NewRouted constructs Handoff with a finite host-owned child routing policy.
-// The Host explicitly owns the resolver and concrete ChildRunner dependencies.
-func NewRouted(resolver ChildRunnerResolver) (*Coordinator, error) {
-	if resolver == nil {
+	if native, ok := config.Local.(*agent.Runner); ok && native == nil {
 		return nil, ErrInvalidDelegation
 	}
-	return &Coordinator{resolver: resolver}, nil
+	if config.PrepareLocal {
+		if _, ok := config.Local.(*agent.Runner); !ok {
+			return nil, ErrInvalidDelegation
+		}
+	}
+	return &Coordinator{config: config}, nil
 }
 
-// OwnsLocalKernelRunner is a narrow composition proof, not an identity
-// comparison of Kernel Runs. Only New's permanently bound ChildRunner may
-// certify ownership of the exact Kernel used by Harness. A dynamically
-// resolved route (NewRouted), a custom HandoffStarter or a ChildRunner that
-// cannot attest to its runtime must fail closed during local cancellation.
-// The Host remains responsible for keeping static routes stable for the
-// lifetime of admitted delegated children, including process recovery.
-func (coordinator *Coordinator) OwnsLocalKernelRunner(runtime *kernel.Runtime) bool {
-	if coordinator == nil || runtime == nil {
-		return false
-	}
-	fixed, ok := coordinator.resolver.(staticChildRunnerResolver)
-	if !ok {
-		return false
-	}
-	owner, ok := fixed.children.(LocalKernelChildRunner)
-	return ok && owner.OwnsKernelRuntime(runtime)
-}
-
-// ObservesLocalKernelRunner is read-only ownership evidence for the fixed
-// ChildRunner's LoadRun. Unlike cancellation ownership, a first-party Agent
-// may attest to its Kernel even with Host middleware: observation itself
-// does not allow Kernel cancellation or continued physical execution.
-// Dynamically resolved or custom routes do not have stable ownership proof.
+// ObservesLocalKernelRunner describes the fixed local binding, not authority
+// over a particular Delegation. Opaque and remote resolvers are never called.
 func (coordinator *Coordinator) ObservesLocalKernelRunner(runtime *kernel.Runtime) bool {
 	if coordinator == nil || runtime == nil {
 		return false
 	}
-	fixed, ok := coordinator.resolver.(staticChildRunnerResolver)
-	if !ok {
-		return false
-	}
-	if child, ok := fixed.children.(*agent.Runner); ok {
+	if child, ok := coordinator.config.Local.(*agent.Runner); ok {
 		return child.ObservesKernelRuntime(runtime)
 	}
-	owner, ok := fixed.children.(LocalKernelChildRunner)
+	owner, ok := coordinator.config.Local.(LocalKernelChildRunner)
 	return ok && owner.OwnsKernelRuntime(runtime)
 }
 
-// UsesLocalAgentRunner proves physical continuation will use the original
-// fixed first-party Agent, not another runner sharing its Kernel. Read-only
-// ownership alone cannot authorize a substitute Model/Tool/middleware route.
-func (coordinator *Coordinator) UsesLocalAgentRunner(runtime *kernel.Runtime, candidate *agent.Runner) bool {
-	if coordinator == nil || runtime == nil || candidate == nil {
-		return false
+// LocalAgent returns only the original native executor, never a same-Kernel
+// substitute supplied by an opaque or remote resolver.
+func (coordinator *Coordinator) LocalAgent(runtime *kernel.Runtime) *agent.Runner {
+	if !coordinator.ObservesLocalKernelRunner(runtime) {
+		return nil
 	}
-	fixed, ok := coordinator.resolver.(staticChildRunnerResolver)
-	if !ok {
-		return false
-	}
-	original, ok := fixed.children.(*agent.Runner)
-	return ok && original == candidate && candidate.ObservesKernelRuntime(runtime)
+	original, _ := coordinator.config.Local.(*agent.Runner)
+	return original
+}
+
+// PreparesLocal is a Host scheduling choice, not execution ownership.
+func (coordinator *Coordinator) PreparesLocal() bool {
+	return coordinator != nil && coordinator.config.PrepareLocal
 }
 
 // StartOrLoad returns the existing Child Run or starts it with the persisted ID.
@@ -283,8 +241,8 @@ func (coordinator *Coordinator) StartOrLoad(
 		return Delegation{}, err
 	}
 	start := children.StartRun
-	if coordinator.deferredAgent != nil {
-		start = coordinator.deferredAgent.PrepareRun
+	if !delegation.Remote && coordinator.PreparesLocal() {
+		start = coordinator.config.Local.(*agent.Runner).PrepareRun
 	}
 	childCtx := ctx
 	childDeadline := parent.Run.DeadlineAt
@@ -319,7 +277,7 @@ func (coordinator *Coordinator) StartOrLoad(
 // remote response. Native Create arbitrates the immutable Run identity.
 func (c *Coordinator) StartNative(ctx context.Context, rt *kernel.Runtime, native *agent.Runner, parent kernel.Snapshot, d Delegation, frozenInput []byte) (kernel.Snapshot, error) {
 	if !d.NativeLocal || d.Remote || !validDelegation(d) || !validParentOrigin(parent.Run) ||
-		len(frozenInput) == 0 || !c.UsesLocalAgentForDelegation(rt, native, d) {
+		len(frozenInput) == 0 || native == nil || c.LocalAgent(rt) != native {
 		return kernel.Snapshot{}, ErrInvalidDelegation
 	}
 	d, err := boundDelegationModelOutput(parent, d)
@@ -329,7 +287,7 @@ func (c *Coordinator) StartNative(ctx context.Context, rt *kernel.Runtime, nativ
 	req := childStartRequest(parent.Run, d)
 	req.LogicalParentRunID = parent.Run.ID
 	req.OriginFingerprint = agent.FrozenOriginFingerprint(frozenInput)
-	if c.IsDeferredLocalDelegation(rt, d) {
+	if c.PreparesLocal() {
 		return native.PrepareRun(ctx, req)
 	}
 	return native.StartRun(ctx, req)
@@ -370,7 +328,7 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, parent kernel.Snaps
 // A routed read selects and validates the same immutable original for Start
 // and Refresh. Only a missing Run from that selected runner permits Start.
 func (coordinator *Coordinator) observeRoutedChild(ctx context.Context, parent kernel.Snapshot, d Delegation) (Delegation, ChildRunner, kernel.Snapshot, error) {
-	if coordinator == nil || coordinator.resolver == nil || !validDelegation(d) || !validParentOrigin(parent.Run) {
+	if coordinator == nil || !validDelegation(d) || !validParentOrigin(parent.Run) {
 		return d, nil, kernel.Snapshot{}, ErrInvalidDelegation
 	}
 	d, err := boundDelegationModelOutput(parent, d)
@@ -495,7 +453,15 @@ func boundDelegationModelOutput(parent kernel.Snapshot, delegation Delegation) (
 }
 
 func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Delegation) (ChildRunner, error) {
-	children, err := coordinator.resolver.ResolveChild(ctx, cloneDelegation(delegation))
+	children := coordinator.config.Local
+	resolver := coordinator.config.Opaque
+	if delegation.Remote {
+		children, resolver = nil, coordinator.config.Remote
+	}
+	var err error
+	if resolver != nil {
+		children, err = resolver.ResolveChild(ctx, cloneDelegation(delegation))
+	}
 	if err != nil {
 		return nil, errors.Join(ErrChildUnavailable, err)
 	}
@@ -514,17 +480,13 @@ func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Del
 		// never impersonate either a remote shadow or a native Agent.
 		return nil, ErrInvalidDelegation
 	}
+	if delegation.Remote {
+		if local, ok := coordinator.config.Local.(*agent.Runner); ok && !local.ObservesKernelRuntime(remote.RemoteRuntime()) {
+			return nil, ErrChildRunUnverified
+		}
+	}
 	if delegation.OutputContract != nil {
-		switch child := children.(type) {
-		case *agent.Runner:
-			if child == nil {
-				return nil, ErrInvalidDelegation
-			}
-		case deferredAgentChild:
-			if child.original == nil {
-				return nil, ErrInvalidDelegation
-			}
-		default:
+		if child, ok := children.(*agent.Runner); !ok || child == nil {
 			return nil, ErrInvalidDelegation
 		}
 	}

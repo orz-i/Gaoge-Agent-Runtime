@@ -41,7 +41,7 @@ func TestAutoAllowanceHostedYieldSurvivesRestartWithoutToolReplay(t *testing.T) 
 	}
 	request := startRequest("auto-restore", "auto-restore-request", "complete after restart", manifestToolKey)
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1, ToolCalls: 2}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1,
 	}
 	first, err := newRunner().StartRun(t.Context(), request)

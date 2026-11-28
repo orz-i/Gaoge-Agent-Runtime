@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -34,19 +35,20 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+	q := kernel.ExecutionAcquireRequest{RunID: child.Run.ID, OwnerID: "fixture", LeaseDuration: time.Minute}
+	admissionProof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), child.State, child)
+	owned, admission, err := rt.AdmitPhysicalExecution(t.Context(), child, q, admissionProof, "start", "")
+	original := admission.Grant
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owned.CheckOwnedPhysicalEntry(t.Context(), child); err != nil {
 		t.Fatal(err)
 	}
 	// Synthetic trusted callback owns the original Agent per-revision
 	// mutation capability. Other, unbound writers cannot rewrite a child
 	// while an external operation is physically in flight.
-	ownerProof := featurecontrol.Seal(child.Run.ID, child.Run.Revision,
-		"agent_physical_owner", original.ID, child.State, child.Checkpoint)
-	owned, bindErr := rt.WithPhysicalGrant(t.Context(), original, ownerProof)
-	if bindErr != nil {
-		t.Fatal(bindErr)
-	}
+
 	if _, err = rt.Cancel(t.Context(), parent.Run.ID, parent.Run.Revision, "unknown external work"); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("lost Grant did not block parent terminal: %v", err)
 	}
@@ -65,7 +67,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = runner.ReconcileChildPhysicalGrant(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("unknown external dispatch was retired: %v", err)
 	}
 	if got, lookupErr := rt.LookupChildExecution(t.Context(), child.Run.ID); lookupErr != nil || got != original {
@@ -91,17 +93,16 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	proof := featurecontrol.Seal(final.Run.ID, final.Run.Revision, "agent_child_physical_settled", original.ID, final.State, final.Checkpoint)
-	if markErr := rt.MarkChildExecutionSettled(t.Context(), original, proof); markErr != nil {
+	if markErr := rt.RecordPhysicalCallbackReturn(t.Context(), original, final.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(final.Run.ID, final.Run.Revision, "agent_physical_callback_return", original.ID, kernel.PhysicalCallbackReturnPayload(final, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); markErr != nil {
 		t.Fatal(markErr)
 	}
-	if err = runner.ReconcileChildPhysicalGrant(t.Context(), child.Run.ID); err != nil {
+	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); err != nil {
 		t.Fatalf("known-satisfied physical Grant could not recover: %v", err)
 	}
 	if _, err = rt.Cancel(t.Context(), parent.Run.ID, parent.Run.Revision, "after trusted receipt"); err != nil {
 		t.Fatal(err)
 	}
-	if err = runner.ReconcileChildPhysicalGrant(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
+	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); err != nil {
 		t.Fatalf("retired Grant replay accepted: %v", err)
 	}
 }

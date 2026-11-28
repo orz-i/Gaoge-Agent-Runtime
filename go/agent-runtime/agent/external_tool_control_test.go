@@ -124,7 +124,7 @@ func TestExternalNoEffectSurvivesLostResponseAndParksWorker(t *testing.T) {
 
 type withoutExternalReturn struct{ *memory.Store }
 
-func (s withoutExternalReturn) RecordOwnedPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.OwnedPhysicalCallbackOutcome, kernel.OwnedPhysicalCallbackReturn) error {
+func (s withoutExternalReturn) RecordPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.PhysicalCallbackOutcome, kernel.PhysicalCallbackReturn) error {
 	return errors.New("original callback return was not persisted")
 }
 

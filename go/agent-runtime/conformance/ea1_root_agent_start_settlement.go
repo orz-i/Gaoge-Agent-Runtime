@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,18 +28,16 @@ func RunEA1RootAgentStartSettlementSuite(t *testing.T, factory func(*testing.T) 
 	for _, phase := range []string{"P3", "P4"} {
 		for _, tool := range []bool{false, true} {
 			kind := map[bool]string{false: "model-yield", true: "terminal-tool"}[tool]
-			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootSettlement(t, factory, phase, tool, false, "start", false) })
+			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootSettlement(t, factory, phase, tool, "start", false) })
 		}
 	}
-	t.Run("P3/committed-model-receipt-unknown-host", func(t *testing.T) { ea1RootSettlement(t, factory, "P3", false, true, "start", false) })
 }
 
 type ea1StartSettlementStore struct {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
+
+	kernel.PhysicalExecutionStore
 	mode                                  string
 	fault                                 error
 	created                               func(kernel.Snapshot)
@@ -53,9 +52,12 @@ func (s *ea1StartSettlementStore) Create(ctx context.Context, r kernel.Record, e
 	}
 	return snap, err
 }
-func (s *ea1StartSettlementStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *ea1StartSettlementStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if g.IsOwned() {
+		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	}
 	s.markCalls++
-	return s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 }
 func (s *ea1StartSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.finishCalls++
@@ -63,7 +65,7 @@ func (s *ea1StartSettlementStore) FinishChildExecution(ctx context.Context, g ke
 	if s.mode == "P3" {
 		return s.fault
 	}
-	err := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	err := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if err == nil {
 		s.finishCommits++
 		if s.mode == "P4" {
@@ -99,32 +101,11 @@ type ea1StartSettlementPhysical struct {
 	toolInvocations []plugin.ToolInvocation
 	toolRequests    []tools.ExecutionRequest
 	receipts        []tools.ExecutionResult
-	hostCalls       int
-	hostSends       int
-	hostUnknown     bool
-	hostFault       error
 }
 
 func (*ea1StartSettlementPhysical) ProviderName() string { return "ea1-settlement-provider" }
 func (*ea1StartSettlementPhysical) BindingFingerprintForRequest(model.Request) string {
 	return strings.Repeat("b", 64)
-}
-func (p *ea1StartSettlementPhysical) Name() string { return "ea1.original-start-callback" }
-func (p *ea1StartSettlementPhysical) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	p.mu.Lock()
-	p.hostCalls++
-	p.mu.Unlock()
-	if inv.Operation != plugin.RunStart || inv.ParentRunID != "" {
-		return kernel.Snapshot{}, errors.New("not the original Root Start callback")
-	}
-	result, err := next(ctx)
-	if p.hostUnknown {
-		p.mu.Lock()
-		p.hostSends++
-		p.mu.Unlock()
-		return result, errors.Join(err, p.hostFault)
-	}
-	return result, err
 }
 func (p *ea1StartSettlementPhysical) Generate(ctx context.Context, req model.Request) (model.Response, error) {
 	if p.modelReadDelay > 0 {
@@ -163,51 +144,45 @@ func (p *ea1StartSettlementPhysical) Generate(ctx context.Context, req model.Req
 	p.mu.Unlock()
 	return response, nil
 }
-func (p *ea1StartSettlementPhysical) Tool(ctx context.Context, inv plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
-	p.mu.Lock()
-	p.toolInvocations = append(p.toolInvocations, inv)
-	p.mu.Unlock()
-	return next(ctx)
-}
-func (p *ea1StartSettlementPhysical) execute(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+func (p *ea1StartSettlementPhysical) execute(ctx context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+	snapshot, err := p.rt.Load(ctx, req.RunID)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
 	result := tools.ExecutionResult{Content: json.RawMessage(`{"committed":"original"}`), Receipt: tools.Receipt{ExecutionID: req.Call.ID, Disposition: "committed"}}
 	p.mu.Lock()
+	p.toolInvocations = append(p.toolInvocations, plugin.ToolInvocation{Run: snapshot.Run, Request: tools.CloneExecutionRequest(req)})
 	p.toolRequests = append(p.toolRequests, req)
 	p.receipts = append(p.receipts, result)
 	p.mu.Unlock()
 	return result, nil
 }
-func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), phase string, withTool, unknownHost bool, operation string, cancelBefore bool) {
+func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), phase string, withTool bool, operation string, cancelBefore bool) {
 	t.Helper()
 	backing, reopen := factory(t)
 	fault := errors.New("test-only original settlement transport fault")
 	mode := phase
-	if unknownHost {
-		mode = "unknown"
-	}
 	initialMode := mode
 	if operation == "resume" {
 		initialMode = "setup"
 	}
-	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), mode: initialMode, fault: fault}
+	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), mode: initialMode, fault: fault}
 	rt, err := kernel.New(kernel.Dependencies{Store: wrapped})
 	if err != nil {
 		t.Fatal(err)
 	}
-	physical := &ea1StartSettlementPhysical{rt: rt, tool: withTool, hostUnknown: unknownHost, hostFault: errors.New("original Host send outcome unknown")}
+	physical := &ea1StartSettlementPhysical{rt: rt, tool: withTool}
 	definition := tools.Definition{Key: "effect", Name: "Original Effect", Description: "frozen terminal effect", InputSchema: json.RawMessage(`{"type":"object","properties":{"source":{"type":"string"}},"required":["source"]}`), Terminal: true}
 	catalog, err := tools.NewRegistry([]tools.Registration{{Definition: definition, Handler: tools.HandlerFunc(physical.execute)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var middleware plugin.RunMiddleware = physical
 	otherOperation := "resume"
 	if operation == "resume" {
-		middleware = ea1ResumeSettlementMiddleware{physical}
 		otherOperation = "start"
 	}
 	makeRunner := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog, RunMiddleware: []plugin.RunMiddleware{middleware}, ToolMiddleware: []plugin.ToolMiddleware{physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -244,7 +219,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 			t.Fatalf("setup scope not retired before Resume: %v", err)
 		}
 		physical.mu.Lock()
-		setupDispatched := len(physical.requests) != 0 || len(physical.responses) != 0 || len(physical.toolRequests) != 0 || physical.hostCalls != 0
+		setupDispatched := len(physical.requests) != 0 || len(physical.responses) != 0 || len(physical.toolRequests) != 0
 		physical.mu.Unlock()
 		if setupDispatched {
 			t.Fatal("PrepareRun dispatched physical work")
@@ -261,11 +236,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 		}
 		expectedRevision = created.Run.Revision
 	}
-	if unknownHost {
-		if !errors.Is(startErr, physical.hostFault) || wrapped.markCalls != 0 || wrapped.finishCalls != 0 {
-			t.Fatalf("unknown Host retired after model receipt: %v", startErr)
-		}
-	} else if !errors.Is(startErr, fault) || !errors.Is(startErr, agent.ErrRootOutcomeUnknown) {
+	if !errors.Is(startErr, fault) || !errors.Is(startErr, agent.ErrRootOutcomeUnknown) {
 		t.Fatalf("cutpoint not retained: %v", startErr)
 	}
 	before, err := rt.Load(t.Context(), req.ID)
@@ -293,7 +264,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 		freshRT := ea1StartRuntime(t, freshStore)
 		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
 		fresh := makeRunner(freshRT, "fresh-recovery-owner")
-		if e := fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+		if e := fresh.ReconcilePhysicalExecution(t.Context(), req.ID); e != nil {
 			t.Fatalf("final receipt recovery: %v", e)
 		}
 		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
@@ -309,10 +280,10 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	if grant.ExecutionOwnerID != owner || grant.ExecutionLeaseID == "" || grant.ExecutionEpoch == 0 || grant.AdmissionOperation != operation || len(grant.AdmissionSourceHash) != 64 || grant.ExpectedRevision != expectedRevision {
 		t.Fatal("original owned source binding missing")
 	}
-	if wrapped.markCalls != 0 || wrapped.finishCommits != 0 || (!unknownHost && wrapped.finishCalls != 1) {
+	if wrapped.markCalls != 0 || wrapped.finishCommits != 0 || wrapped.finishCalls != 1 {
 		t.Fatal("wrong precommit Finish boundary")
 	}
-	completion := ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
+	ea1AssertOriginalRootCompletion(t, rt, grant, before, true, true)
 	ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
 	wantCancel := kernel.ErrChildExecutionBusy
 	if before.Run.Status == kernel.RunStatusCompleted {
@@ -347,7 +318,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	for _, mutate := range []func(*kernel.ChildExecutionGrant){func(g *kernel.ChildExecutionGrant) { g.ID += "-foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionEpoch++ }, func(g *kernel.ChildExecutionGrant) { g.AdmissionOperation = otherOperation }, func(g *kernel.ChildExecutionGrant) { g.AdmissionSourceHash = strings.Repeat("0", 64) }} {
 		wrong := grant
 		mutate(&wrong)
-		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = freshStore.(kernel.PhysicalExecutionStore).FinishChildExecution(t.Context(), wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("foreign authority retired original: %v", e)
 		}
 		same, e := freshRT.LookupChildExecution(t.Context(), req.ID)
@@ -357,34 +328,19 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 		assertUnchanged()
 	}
 	if phase == "P3" {
-		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = freshStore.(kernel.PhysicalExecutionStore).FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("receipt alone retired unmarked scope: %v", e)
 		}
 		assertUnchanged()
 	}
-	e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID)
-	if unknownHost {
-		if !errors.Is(e, agent.ErrRootOutcomeUnknown) {
-			t.Fatalf("receipt retired unknown Host: %v", e)
-		}
-		same, e := freshRT.LookupChildExecution(t.Context(), req.ID)
-		if e != nil || same != grant {
-			t.Fatal("unknown Host scope lost")
-		}
-		retained, e := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-		if e != nil || retained != completion {
-			t.Fatal("unknown Host completion changed")
-		}
-		assertUnchanged()
-		return
-	}
+	e = fresh.ReconcilePhysicalExecution(t.Context(), req.ID)
 	if e != nil {
 		t.Fatalf("original settlement could not recover: %v", e)
 	}
 	if _, e = freshRT.LookupChildExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("scope not retired: %v", e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+	if e = fresh.ReconcilePhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("duplicate reconciliation invented work: %v", e)
 	}
 	assertUnchanged()
@@ -396,7 +352,7 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 	t.Helper()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.requests) != 1 || len(p.responses) != 1 || len(p.intents) != 1 || p.hostCalls != 1 || (p.hostUnknown && p.hostSends != 1) {
+	if len(p.requests) != 1 || len(p.responses) != 1 || len(p.intents) != 1 {
 		t.Fatal("physical callback replayed")
 	}
 	inv := p.intents[0]
@@ -418,7 +374,7 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 		t.Fatalf("persisted receipt missing: %v", e)
 	}
 	settled := view.ModelInvocations[0]
-	if settled.ID != inv.ID || settled.SourceRevision != inv.SourceRevision || settled.RequestHash != inv.RequestHash || settled.Provider != inv.Provider || settled.BindingFingerprint != inv.BindingFingerprint || settled.ExecutionAttempt != 1 || settled.DispatchAttempt != 1 || settled.Status != agent.ModelInvocationConsumed || settled.ProviderResponseID != "original-response" || settled.CompletedAt == nil || settled.ConsumedAt == nil || settled.Usage == nil || settled.Usage.InputTokens != 7 || settled.Usage.OutputTokens != 3 {
+	if settled.ID != inv.ID || settled.SourceRevision != inv.SourceRevision || settled.RequestHash != inv.RequestHash || settled.Provider != inv.Provider || settled.BindingFingerprint != inv.BindingFingerprint || settled.ExecutionAttempt != 1 || settled.DispatchAttempt != 1 || settled.Status != agent.ModelInvocationConsumed || settled.ProviderResponseID != "original-response" || settled.CompletedAt == nil || settled.ConsumedAt == nil || settled.Response.Usage == nil || settled.Response.Usage.InputTokens != 7 || settled.Response.Usage.OutputTokens != 3 {
 		t.Fatal("consumed receipt not original physical result")
 	}
 	// Compare the whole provider response, including optional fields and raw JSON,
@@ -441,7 +397,7 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 		want := tools.ExecutionRequest{RunID: req.ID, Call: tools.Call{ID: "original-call", ToolKey: "effect", Arguments: json.RawMessage(`{"source":"original"}`)}}
 		// Agent binds the public Call.Name from the original catalog definition.
 		want.Call.Name = definition.Name
-		if !reflect.DeepEqual(tr, want) || !reflect.DeepEqual(ti.Request, tr) || !reflect.DeepEqual(ti.Definition, definition) || ti.Run.Actor != req.Actor || ti.Run.Thread != req.Thread || ti.Run.ParentRunID != req.ParentRunID || receipt.Receipt.ExecutionID != tr.Call.ID || receipt.Receipt.Disposition != "committed" || string(receipt.Content) != `{"committed":"original"}` || view.Budget.Usage.ToolCalls != 1 {
+		if !reflect.DeepEqual(tr, want) || !reflect.DeepEqual(ti.Request, tr) || !slices.ContainsFunc(actual.Tools, func(d tools.Definition) bool { return ea1RecoveryJSONEqual(d, definition) }) || ti.Run.Actor != req.Actor || ti.Run.Thread != req.Thread || ti.Run.ParentRunID != req.ParentRunID || receipt.Receipt.ExecutionID != tr.Call.ID || receipt.Receipt.Disposition != "committed" || string(receipt.Content) != `{"committed":"original"}` || view.Budget.Usage.ToolCalls != 1 {
 			t.Fatal("full Tool definition/request/receipt source mismatch")
 		}
 	} else if len(p.toolRequests) != 0 || s.Run.Status != kernel.RunStatusRunning || view.Budget.Usage.ToolCalls != 0 {
@@ -473,15 +429,15 @@ func ea1StartSettlementJSONEqual(t *testing.T, label string, actual, expected an
 
 // The new retirement protocol records the actual whole-callback fact before
 // either owner Mark or its recovered retry. Compare the entire immutable fact.
-func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, source kernel.Snapshot, hostCompleted, leaseOwned bool) kernel.OwnedPhysicalCallbackCompletion {
+func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, source kernel.Snapshot, hostCompleted, leaseOwned bool) kernel.PhysicalCallbackCompletion {
 	t.Helper()
-	got, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	got, e := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if e != nil {
 		t.Fatal(e)
 	}
-	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
-	hash := sha256.Sum256(kernel.OwnedPhysicalCallbackReturnPayload(source, outcome))
-	want := kernel.OwnedPhysicalCallbackCompletion{GrantID: grant.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
+	outcome := kernel.PhysicalCallbackOutcome{HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
+	hash := sha256.Sum256(kernel.PhysicalCallbackReturnPayload(source, outcome))
+	want := kernel.PhysicalCallbackCompletion{GrantID: grant.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
 	if !got.ControlCustody.Valid() || got != want {
 		t.Fatalf("original whole callback binding: got=%+v want=%+v err=%v", got, want, e)
 	}

@@ -2,7 +2,6 @@ package kernel
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 )
 
@@ -11,12 +10,19 @@ type OwnedSettlementEvidence struct {
 	Version    uint64
 	Grant      ChildExecutionGrant
 	Snapshot   Snapshot
-	Completion OwnedPhysicalCallbackCompletion
+	Completion PhysicalCallbackCompletion
 }
+type ManagedClosureRef struct {
+	SourceID string
+	Digest   string
+}
+
 type OwnedRetirementReceipt struct {
 	Version  uint64
 	Evidence OwnedSettlementEvidence
-	Closures []ManagedTransfer
+	// Retain the wire key for empty historical ordinary receipts. Managed
+	// retirement binds one digest, not a second full transfer/snapshot.
+	ClosureRefs []ManagedClosureRef `json:"Closures"`
 	// The immutable Finish fact has one integrity digest, no ACK state.
 	Digest string
 }
@@ -34,14 +40,9 @@ func (r *OwnedRetirementReceipt) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-type OwnedRetirementStore interface {
-	LoadOwnedRetirement(context.Context, string) (OwnedRetirementReceipt, error)
-	LookupOwnedRetirementForRun(context.Context, string) (OwnedRetirementReceipt, error)
-}
-
 func (e OwnedSettlementEvidence) Valid() bool {
 	g, s, c := e.Grant, e.Snapshot, e.Completion
-	if e.Version != 1 || !g.IsOwned() || g.ID == "" || !g.MatchesExecution(ExecutionLease{RunID: g.ChildRunID, OwnerID: g.ExecutionOwnerID, LeaseID: g.ExecutionLeaseID, Epoch: g.ExecutionEpoch}) || s.Run.ID != g.ChildRunID || s.Run.Kind != "agent" || s.Run.ParentRunID != "" || s.Run.Revision < g.ExpectedRevision {
+	if e.Version != 1 || !g.IsOwned() || g.ID == "" || !g.MatchesExecution(ExecutionLease{RunID: g.ChildRunID, OwnerID: g.ExecutionOwnerID, LeaseID: g.ExecutionLeaseID, Epoch: g.ExecutionEpoch}) || s.Run.ID != g.ChildRunID || s.Run.Kind != "agent" || s.Run.Revision < g.ExpectedRevision {
 		return false
 	}
 	if c.GrantID == "" {
@@ -50,67 +51,58 @@ func (e OwnedSettlementEvidence) Valid() bool {
 	if c.NotEntered() {
 		return c.MatchesNotEnteredSnapshot(g, s)
 	}
-	return ValidateOwnedPhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision
+	return ValidatePhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision &&
+		(s.Run.ParentRunID == "" || (c.MatchesReturnSnapshot(s) && c.ControlCustody == "" && c.ToolReturns == ""))
 }
 
-// CloseManagedRetirement derives the managed closure only from the exact
-// entered successor and its settled Run. Caller validates the retirement
-// evidence and commits the closure, retirement receipt and Grant deletion
-// together. A managed Grant without its selected current point cannot finish.
-func CloseManagedRetirement(g ChildExecutionGrant, s Snapshot, a ManagedAuthority, t ManagedTransfer) ([]ManagedTransfer, error) {
-	if g.AdmissionOperation != "managed_resume" {
-		return []ManagedTransfer{}, nil
-	}
-	if !t.Valid() || !managedResumeSelectionMatches(t) ||
+// The original selected Transfer is stored once. Its terminal view is
+// reconstructed from the single committed retirement Snapshot; the digest
+// binds every source/selection/lease field to that exact view.
+func closeManagedRetirement(g ChildExecutionGrant, s Snapshot, a ManagedAuthority, t ManagedTransfer) (ManagedTransfer, error) {
+	if s.Run.ParentRunID != "" || g.AdmissionOperation != "managed_resume" || !t.Valid() || !managedResumeSelectionMatches(t) ||
 		t.SafePoint.Host.KernelAuthority != a || t.SafePoint.Host.RunID != g.ChildRunID ||
-		t.SuccessorGrant != g ||
-		t.Revision == 0 || t.Terminal != nil || s.Run.ID != g.ChildRunID {
-		return nil, ErrExecutionConflict
+		t.SuccessorGrant != g || t.Revision == 0 || t.Terminal != nil || s.Run.ID != g.ChildRunID {
+		return ManagedTransfer{}, ErrExecutionConflict
 	}
 	t.Revision = s.Run.Revision
 	terminal := managedClone(s)
 	t.Terminal = &terminal
-	return []ManagedTransfer{t}, nil
+	return t, nil
 }
 
-// MatchesManagedClosure verifies the same committed retirement fact; no
-// separate pre-retirement closure can certify a returned successor.
 func ObserveManagedRetirement(t ManagedTransfer, r OwnedRetirementReceipt) (ManagedTransfer, error) {
-	closures, err := CloseManagedRetirement(t.SuccessorGrant, r.Evidence.Snapshot, t.SafePoint.Host.KernelAuthority, t)
-	if err != nil || len(closures) != 1 || !r.MatchesManagedClosure(closures[0], r.Evidence.Snapshot) {
+	closed, err := closeManagedRetirement(t.SuccessorGrant, r.Evidence.Snapshot, t.SafePoint.Host.KernelAuthority, t)
+	if err != nil || !r.MatchesManagedClosure(closed, r.Evidence.Snapshot) {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
-	return closures[0], nil
+	return closed, nil
 }
 
 func (r OwnedRetirementReceipt) MatchesManagedClosure(t ManagedTransfer, s Snapshot) bool {
-	return r.Valid() && r.Evidence.Grant == t.SuccessorGrant &&
-		len(r.Closures) == 1 && ManagedDigest(r.Closures[0]) == ManagedDigest(t) &&
-		ManagedDigest(r.Evidence.Snapshot) == ManagedDigest(s)
+	return r.Valid() && t.Resolved() && t.Selection.Mode == ManagedResume &&
+		t.SuccessorGrant == r.Evidence.Grant && t.Revision == s.Run.Revision &&
+		len(r.ClosureRefs) == 1 && r.ClosureRefs[0] == (ManagedClosureRef{SourceID: t.SafePoint.ID, Digest: ManagedDigest(t)}) &&
+		ManagedDigest(*t.Terminal) == ManagedDigest(s) && ManagedDigest(r.Evidence.Snapshot) == ManagedDigest(s)
 }
 
 func (r OwnedRetirementReceipt) Identity() string {
 	return ManagedDigest(struct {
 		Version  uint64
 		Evidence OwnedSettlementEvidence
-		Closures []ManagedTransfer
-	}{r.Version, r.Evidence, r.Closures})
+		Closures []ManagedClosureRef
+	}{r.Version, r.Evidence, r.ClosureRefs})
 }
 func (r OwnedRetirementReceipt) Valid() bool {
-	if r.Version != 1 || !r.Evidence.Valid() || r.Evidence.Completion.GrantID == "" || r.Closures == nil || (r.Evidence.Completion.NotEntered() && len(r.Closures) != 0) {
+	if r.Version != 1 || !r.Evidence.Valid() || r.ClosureRefs == nil {
 		return false
 	}
 	if r.Evidence.Grant.AdmissionOperation == "managed_resume" {
-		if len(r.Closures) != 1 || !r.Evidence.Completion.HostCompleted || !r.Evidence.Completion.LeaseOwned {
+		if len(r.ClosureRefs) != 1 || r.ClosureRefs[0].SourceID == "" || !validToolReceiptDigest(r.ClosureRefs[0].Digest) ||
+			r.Evidence.Completion.NotEntered() || !r.Evidence.Completion.HostCompleted || !r.Evidence.Completion.LeaseOwned {
 			return false
 		}
-	} else if len(r.Closures) != 0 {
+	} else if len(r.ClosureRefs) != 0 {
 		return false
-	}
-	for i, t := range r.Closures {
-		if !t.Resolved() || t.Selection.Mode != ManagedResume || t.SuccessorGrant != r.Evidence.Grant || t.Revision == 0 || ManagedDigest(*t.Terminal) != ManagedDigest(r.Evidence.Snapshot) || (i > 0 && r.Closures[i-1].SafePoint.ID >= t.SafePoint.ID) {
-			return false
-		}
 	}
 	return r.Digest != "" && r.Digest == r.Identity()
 }

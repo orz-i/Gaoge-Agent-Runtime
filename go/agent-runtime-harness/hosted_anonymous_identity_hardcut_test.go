@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -38,15 +37,24 @@ func TestAnonymousHostedTerminalDoesNotSettleModelOrReleaseNativeQuota(t *testin
 				MaxHostedToolCalls: 2, MaxToolCalls: 2, MaxLLMCalls: 3,
 			})
 			physical := 0
-			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-				physical++
-				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 2 {
-					t.Fatalf("unexpected original native allowance: %+v", bounded)
+			var fixturePhysical1 model.Request
+			_, err := func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical1, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
 				}
-				return model.Response{Content: "provider output retained without identity", Usage: &model.Usage{
-					InputTokens: 12, OutputTokens: 2,
-				}, HostedToolCalls: tc.calls}, nil
-			})
+				response, callErr := func(bounded model.Request) (model.Response, error) {
+					physical++
+					if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 2 {
+						t.Fatalf("unexpected original native allowance: %+v", bounded)
+					}
+					return model.Response{Content: "provider output retained without identity", Usage: &model.Usage{
+						InputTokens: 12, OutputTokens: 2,
+					}, HostedToolCalls: tc.calls}, nil
+				}(fixturePhysical1)
+				return settleModelLedgerFixture(t.Context(), shared, fixturePhysical1, response, callErr)
+			}()
 			if !errors.Is(err, budget.ErrInvalidUsage) || physical != 1 {
 				t.Fatalf("unverifiable terminal model execution was settled: err=%v physical=%d", err, physical)
 			}
@@ -71,11 +79,11 @@ func TestAnonymousHostedTerminalDoesNotSettleModelOrReleaseNativeQuota(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-				physical++
-				return model.Response{Content: "invalid duplicate physical send"}, nil
-			})
-			if !errors.Is(err, budget.ErrWaiting) || physical != 1 {
+			_, err = func() (model.Response, error) {
+				_, e := admitModelLedgerFixture(t.Context(), restarted, request)
+				return model.Response{}, e
+			}()
+			if !errors.Is(err, budget.ErrLedgerConflict) || physical != 1 {
 				t.Fatalf("same frozen Model request was sent again after unverifiable terminal: err=%v physical=%d", err, physical)
 			}
 			ledger, err = store.LoadBudget(t.Context(), "hosted-budget-turn")
@@ -87,15 +95,23 @@ func TestAnonymousHostedTerminalDoesNotSettleModelOrReleaseNativeQuota(t *testin
 			// all available NEW native execution allowance.
 			finalOnly := model.CloneRequest(request)
 			finalOnly.InvocationID = "final-only-after-unknown"
-			_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), finalOnly, nil,
-				func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+			var fixturePhysical2 model.Request
+			_, err = func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical2, admissionErr = admitModelLedgerFixture(t.Context(), restarted, finalOnly)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
+				}
+				response, callErr := func(bounded model.Request) (model.Response, error) {
 					physical++
 					if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 ||
 						len(bounded.Tools) != 0 {
 						t.Fatalf("unverified native effect created a fresh Tool grant: %+v", bounded)
 					}
 					return model.Response{Content: "final answer without new native effects"}, nil
-				})
+				}(fixturePhysical2)
+				return settleModelLedgerFixture(t.Context(), restarted, fixturePhysical2, response, callErr)
+			}()
 			if err != nil || physical != 2 {
 				t.Fatalf("safe final-only Model call blocked or unexpectedly redelivered: err=%v calls=%d", err, physical)
 			}

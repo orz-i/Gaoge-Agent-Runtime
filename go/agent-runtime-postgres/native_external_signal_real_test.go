@@ -98,7 +98,7 @@ func TestRealPostgresNativeExternalSignalAndVerifiedReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalCompletion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), originalGrant)
+	originalCompletion, err := rt.LookupPhysicalCallbackReturn(t.Context(), originalGrant)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestRealPostgresNativeExternalSignalAndVerifiedReceipt(t *testing.T) {
 	if err != nil || currentGrant != originalGrant {
 		t.Fatal("signal replaced original grant")
 	}
-	completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), originalGrant)
+	completion, err := rt.LookupPhysicalCallbackReturn(t.Context(), originalGrant)
 	if err != nil || completion != originalCompletion || effects != 1 || modelCalls != 1 {
 		t.Fatal("signal changed original callback completion or dispatched")
 	}

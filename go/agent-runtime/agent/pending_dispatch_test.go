@@ -45,8 +45,29 @@ func TestFrozenPendingDispatchReadsOriginalCallWithoutGrantingReplay(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := FrozenPendingDispatch(snapshot); found || !errors.Is(err, ErrToolOutcomeUnknown) {
+	if _, found, err := FrozenPendingDispatch(snapshot); found || !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("unmatched ToolDispatchID lost its no-replay fence: %v %v", found, err)
+	}
+	// The same immutable call is observable through its typed wait only.
+	state.ToolDispatchID = state.PendingCalls[0].ID
+	state.ToolReturns = []returnedTool{{CallID: state.ToolDispatchID, Wait: &PendingTool{PendingExecution: tools.PendingExecution{Kind: tools.PendingChildTerminal, OperationID: "operation", ChildRunID: "child"}, CallID: state.ToolDispatchID, ToolKey: state.PendingCalls[0].ToolKey, Generation: 1}}}
+	snapshot.State, err = encodeState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := FrozenPendingDispatch(snapshot); found || err != nil {
+		t.Fatalf("typed wait was exposed as an undisposed intent: %v %v", found, err)
+	}
+	if observed, wait, found, err := FrozenChildWaitCall(snapshot); err != nil || !found || observed.ID != state.ToolDispatchID || wait.ChildRunID != "child" {
+		t.Fatalf("original child wait lost: %+v %+v %v %v", observed, wait, found, err)
+	}
+	state.ToolDispatchID = ""
+	snapshot.State, err = encodeState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, found, err := FrozenChildWaitCall(snapshot); found || err != nil {
+		t.Fatalf("deferred wait was exposed as the active dispatch: %v %v", found, err)
 	}
 	snapshot.State = json.RawMessage("{\"budget\":")
 	if _, found, err := FrozenPendingDispatch(snapshot); found || err == nil {

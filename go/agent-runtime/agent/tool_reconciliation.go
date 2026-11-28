@@ -27,6 +27,25 @@ func (fn ToolOutcomeVerifierFunc) VerifyCommittedTool(ctx context.Context, reque
 	return fn(ctx, request)
 }
 
+// A provider lookup supplies a terminal committed result for exactly the
+// requested Call. Both recovery and delegated custody use this qualification;
+// the caller still owns the original Run, ledger and approval checks.
+func validCommittedToolResult(result tools.ExecutionResult, callID string) bool {
+	terminal, _ := qualifyToolReturn(result, nil, callID)
+	return terminal && result.Receipt.Disposition == "committed"
+}
+
+func verifyCommittedTool(ctx context.Context, verifier ToolOutcomeVerifier, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+	result, err := verifier.VerifyCommittedTool(ctx, request)
+	if err != nil {
+		return tools.ExecutionResult{}, errors.Join(ErrToolOutcomeUnknown, err)
+	}
+	if !validCommittedToolResult(result, request.Call.ID) {
+		return tools.ExecutionResult{}, ErrToolReceiptMismatch
+	}
+	return result, nil
+}
+
 // ReconcileToolOutcome consumes an original sealed no-send/terminal return
 // or a provider-verified external COMMIT without invoking Executor.Execute.
 // A no-send return reconciles admission only; it never mints a Tool result. The host authenticates the caller and supplies
@@ -53,13 +72,13 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 	if runner.toolOutcomeVerifier == nil {
 		return snapshot, ErrToolVerificationRequired
 	}
-	if snapshot.Run.ParentRunID == "" && state.ToolDispatchID == "" && len(state.DeferredChildren) > 0 && state.DeferredChildren[0].Call.ID == callID {
-		grant, grantErr := runner.runtime.LookupChildExecution(ctx, runID)
-		if grantErr != nil {
-			return snapshot, grantErr
-		}
-		snapshot, state, err = runner.stageRootDeferredReceipt(ctx, snapshot, state, grant)
-		if err != nil {
+	if snapshot.Run.ParentRunID != "" {
+		// Physical children require the exact original returned snapshot.
+		// A verifier-only lease cannot adopt or rewrite their retained grant.
+		return snapshot, ErrToolOutcomeUnknown
+	}
+	if state.ToolDispatchID == "" && state.deferredToolCount() > 0 {
+		if err := state.activateDeferredChild(); err != nil {
 			return snapshot, err
 		}
 	}
@@ -68,54 +87,15 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 		state.ToolDispatchID != callID || call.ID != callID {
 		return snapshot, ErrToolOutcomeUnknown
 	}
-	if snapshot.Run.ParentRunID == "" {
-		grant, lookupErr := runner.runtime.LookupChildExecution(ctx, runID)
-		if lookupErr == nil {
-			if grant.ExecutionLeaseID == "" {
-				return snapshot, ErrRootOutcomeUnknown
-			}
-			return runner.reconcileRootTool(ctx, snapshot, state, grant, callID)
-		}
-		if !errors.Is(lookupErr, kernel.ErrNotFound) {
-			return snapshot, lookupErr
-		}
-	}
-	// Non-owned or legacy recovery has no original native budget-return
-	// proof. Never consume a metered call through a verifier-only path.
-	if err := runner.requireUnmeteredToolRecovery(ctx, runID); err != nil {
+	grant, err := runner.runtime.LookupChildExecution(ctx, runID)
+	if err != nil {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 	}
-	return runner.withRunOwner(ctx, runID, expectedRevision, true,
-		func(nextCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-			fresh, freshState, loadErr := scoped.loadState(nextCtx, runID)
-			if loadErr != nil {
-				return kernel.Snapshot{}, loadErr
-			}
-			if fresh.Run.Revision != expectedRevision {
-				return fresh, kernel.ErrConflict
-			}
-			bound, ok := nextPendingCall(freshState)
-			if !ok || freshState.ToolDispatchID != callID || bound.ID != callID {
-				return fresh, ErrToolOutcomeUnknown
-			}
-			execution, _, prepareErr := scoped.preparePendingToolExecution(fresh)
-			if prepareErr != nil {
-				return fresh, prepareErr
-			}
-			// The trusted callback queries the external system by the stable
-			// identity. A missing/failed lookup keeps the intent unresolved.
-			verified, verifyErr := scoped.toolOutcomeVerifier.VerifyCommittedTool(nextCtx,
-				tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(bound)})
-			if verifyErr != nil {
-				return fresh, errors.Join(ErrToolOutcomeUnknown, verifyErr)
-			}
-			if tools.ValidateExecutionResult(verified) != nil ||
-				verified.Receipt.ExecutionID != callID ||
-				verified.Receipt.Disposition != "committed" || verified.Pending != nil {
-				return fresh, ErrToolReceiptMismatch
-			}
-			persisted, _, applyErr := scoped.persistPendingToolResult(nextCtx, fresh, execution,
-				tools.CloneExecutionResult(verified))
-			return persisted, applyErr
-		})
+	repaired, err := runner.reconcileToolReceipt(ctx, snapshot, state, grant, callID)
+	if err == nil && knownRootPhysicalSettlement(repaired) && runner.catalog != nil {
+		if definition, ok := runner.catalog.Resolve(call.ToolKey); ok && definition.Terminal {
+			return runner.Resume(ctx, runID, repaired.Run.Revision)
+		}
+	}
+	return repaired, err
 }

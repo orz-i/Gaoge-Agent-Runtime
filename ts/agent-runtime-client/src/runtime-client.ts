@@ -1,6 +1,5 @@
 import type {
   CancelRunRequest,
-  CancelRunResponse,
   HarnessTurnFeedEventDTO,
   HarnessTurnSnapshotDTO,
   HarnessTurnStateDTO,
@@ -294,7 +293,7 @@ export class RuntimeClient {
         return this.request<RunEventPageDTO>(`/runs/${pathPart(runID)}/events${query}`, {}, options);
       },
       cancel: (runID: string, payload: CancelRunRequest, request?: RequestOptions) =>
-        this.request<CancelRunResponse>(`/runs/${pathPart(runID)}/cancel`, { method: "POST", body: JSON.stringify(payload) }, request),
+        this.request<RunSnapshotDTO>(`/runs/${pathPart(runID)}/cancel`, { method: "POST", body: JSON.stringify(payload) }, request),
       feed: (runID: string, request?: RunFeedOptions) => this.streamRunFeed(runID, request),
     };
   }
@@ -386,6 +385,7 @@ export class RuntimeClient {
         }
 
         if (response) {
+          if (response.status === 204) return;
           if (!response.ok) {
             if (response.status === 404 && reconnects < maxReconnects) {
               reconnects += 1;

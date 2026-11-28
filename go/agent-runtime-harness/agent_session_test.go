@@ -122,7 +122,7 @@ func TestAgentSessionMatchesExplicitCompositionAndAuthorizesOnlySelectedTools(t 
 					t.Fatal(e)
 				}
 				loop, e := agent.NewRunner(agent.Dependencies{Runtime: options.Runtime, Model: client, Catalog: registry, Executor: registry,
-					PrepareModelRequest: bounded.Prepare, RunMiddleware: []plugin.RunMiddleware{bounded}, ApprovalPolicies: []plugin.ApprovalPolicy{approval}})
+					BoundedContext: bounded, ApprovalPolicies: []plugin.ApprovalPolicy{approval}})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -231,11 +231,8 @@ func TestAgentSessionRejectsUncomposedOrUnselectedConfiguration(t *testing.T) {
 		{"unknown execution mode", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.ExecutionMode = "unknown" }},
 		{"foreign policy", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.Key = "foreign" }},
 		{"skills", func(o *harness.AgentSessionOptions) { o.Session.Config.Skills = []harness.SkillSnapshot{{ID: "skill"}} }},
-		{"shared budget and managed recovery", func(o *harness.AgentSessionOptions) {
-			o.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 1}
-			o.Context.ManagedRecovery = true
-		}},
-		{"delegation", func(o *harness.AgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = 1 }},
+
+		{"invalid delegation depth", func(o *harness.AgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = -1 }},
 		{"override reader", func(o *harness.AgentSessionOptions) {
 			o.LocalTools[0].Registration.Definition.Key = harness.ContextArtifactToolKey
 		}},
@@ -361,28 +358,59 @@ func TestAgentSessionArchiveReaderCompactsAndReadsExactEvidence(t *testing.T) {
 	}
 }
 
-func TestAgentSessionManagedRecoveryRequiresExplicitMatchingStores(t *testing.T) {
-	store := harness.NewMemoryStore()
-	options := agentSessionOptions(t, memory.NewStore(), store, &agentSessionModel{})
-	options.Context.ManagedRecovery = true
-	if _, err := harness.OpenAgentSession(options); !errors.Is(err, harness.ErrInvalidRequest) {
-		t.Fatalf("unbound managed Host accepted: %v", err)
-	}
-	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), ManagedRecoveryHost: store})
+func TestAgentSessionDerivesRecoveryFromExactStores(t *testing.T) {
+	store, runs := harness.NewMemoryStore(), memory.NewStore()
+	options := agentSessionOptions(t, runs, store, &agentSessionModel{})
+	ordinary, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	options.Runtime = runtime
+	ordinaryDone, err := ordinary.Prompt(t.Context(), "ordinary-first", "question")
+	if err != nil || ordinaryDone.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("ordinary execution failed: %v", err)
+	}
+	ordinaryRoot, ok := harness.TopLevelInvocation(ordinaryDone)
+	if !ok {
+		t.Fatal("ordinary root missing")
+	}
+	ordinaryState, err := runs.Load(t.Context(), ordinaryRoot.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := agent.ViewState(ordinaryState)
+	if err != nil || view.ManagedRecovery {
+		t.Fatalf("unregistered Store certified recovery: %v", err)
+	}
+	options.Runtime, err = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
+	if err != nil {
+		t.Fatal(err)
+	}
 	session, err := harness.OpenAgentSession(options)
 	if err != nil {
-		t.Fatalf("matched managed stores rejected: %v", err)
+		t.Fatalf("matched recovery stores rejected: %v", err)
 	}
-	if done, startErr := session.Prompt(t.Context(), "managed-first", "question"); startErr != nil || done.Turn.Status != harness.TurnCompleted {
-		t.Fatalf("explicit managed composition failed: status=%s err=%v", done.Turn.Status, startErr)
+	done, err := session.Prompt(t.Context(), "managed-first", "question")
+	if err != nil || done.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("derived recovery failed: %v", err)
+	}
+	root, ok := harness.TopLevelInvocation(done)
+	if !ok {
+		t.Fatal("root missing")
+	}
+	state, err := runs.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err = agent.ViewState(state)
+	if err != nil || !view.ManagedRecovery {
+		t.Fatalf("matched stores did not derive recovery: %v", err)
+	}
+	if terminal, err := session.Resume(t.Context(), "ordinary-first"); err != nil || terminal.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("terminal observation unnecessarily required an execution mode: %v", err)
 	}
 	options.Store = harness.NewMemoryStore()
 	if _, err = harness.OpenAgentSession(options); !errors.Is(err, harness.ErrInvalidRequest) {
-		t.Fatalf("foreign managed Host accepted: %v", err)
+		t.Fatalf("foreign registered Host accepted: %v", err)
 	}
 }
 
@@ -566,14 +594,14 @@ func TestAgentSessionResumeRejectsOriginalUnsupportedCompositionBeforeGeneration
 				if err != nil {
 					t.Fatal(err)
 				}
-				shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: clock})
+				shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: store, Clock: clock})
 				if err != nil {
 					t.Fatal(err)
 				}
 				loop, err := agent.NewRunner(agent.Dependencies{
 					Runtime: rt, Model: originalModel, Clock: clock, PrepareModelRequest: harness.MaterializeContextWindowRequest,
 					Catalog: registry, Executor: registry,
-					RunMiddleware: []plugin.RunMiddleware{mustBudgetAdapter(t, shared)}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, ToolMiddleware: []plugin.ToolMiddleware{mustBudgetAdapter(t, shared)},
+					BoundedBudget: mustBudgetAdapter(t, shared),
 				})
 				if err != nil {
 					t.Fatal(err)

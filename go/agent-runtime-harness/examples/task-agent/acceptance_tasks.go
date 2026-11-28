@@ -330,7 +330,6 @@ func runAcceptanceTask(ctx context.Context, name string, client model.Client, se
 			PrepareModelRequest: func(ctx context.Context, request model.Request) (model.Request, error) {
 				return acceptanceInputBound(ctx, request, contextTokens, outputTokens)
 			},
-			ModelMiddleware: []plugin.ModelMiddleware{acceptanceOutputCeiling(outputTokens)},
 		}
 		if name == "approval" || name == "approval-denied" {
 			dependencies.Approvals = interactionadapter.New(approvals)
@@ -349,7 +348,7 @@ func runAcceptanceTask(ctx context.Context, name string, client model.Client, se
 	}
 	request := agent.StartRequest{ID: "acceptance-" + name, RequestID: "request-" + name,
 		Actor: kernel.ActorRef{TenantID: "fixture", ActorID: "operator"}, Thread: kernel.ThreadRef{Kind: "acceptance", ID: name},
-		Model: selectedModel, Goal: task.goal, ToolKeys: keys}
+		Model: selectedModel, MaxModelOutputTokens: outputTokens, Goal: task.goal, ToolKeys: keys}
 	if name != "approval-denied" {
 		request.RequiredToolKeys = keys
 	}
@@ -398,7 +397,7 @@ func runAcceptanceTask(ctx context.Context, name string, client model.Client, se
 			completeUsage := len(view.ModelInvocations) > 0
 			tokens := view.Budget.Usage.TotalTokens
 			for _, invocation := range view.ModelInvocations {
-				if invocation.Status != agent.ModelInvocationConsumed || invocation.Usage == nil {
+				if invocation.Status != agent.ModelInvocationConsumed || invocation.Response.Usage == nil {
 					completeUsage = false
 					continue
 				}
@@ -448,16 +447,6 @@ func acceptanceInputBound(ctx context.Context, request model.Request, contextTok
 		return model.Request{}, errors.New("acceptance input byte ceiling exceeded")
 	}
 	return request, nil
-}
-
-type acceptanceOutputCeiling int64
-
-func (acceptanceOutputCeiling) Name() string { return "acceptance.output-ceiling" }
-func (ceiling acceptanceOutputCeiling) Model(ctx context.Context, request model.Request, sink model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	if request.MaxOutputTokens == 0 || request.MaxOutputTokens > int64(ceiling) {
-		request.MaxOutputTokens = int64(ceiling)
-	}
-	return next(ctx, request, sink)
 }
 
 type acceptanceApprovalPolicy struct{}

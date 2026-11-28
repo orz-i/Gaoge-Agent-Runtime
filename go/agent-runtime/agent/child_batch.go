@@ -12,14 +12,9 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-type deferredChildCall struct {
-	Call tools.Call  `json:"call"`
-	Wait PendingTool `json:"wait"`
-}
-
 func independentChildBatch(state runState) bool {
 	for _, call := range state.PendingCalls {
-		if call.ToolKey != state.ToolWait.ToolKey {
+		if call.ToolKey != state.toolWait().ToolKey {
 			return false
 		}
 	}
@@ -27,17 +22,12 @@ func independentChildBatch(state runState) bool {
 }
 
 func (runner *Runner) deferChildCall(ctx context.Context, snapshot kernel.Snapshot, state runState, call tools.Call, ledger *budget.LedgerMutation) (kernel.Snapshot, bool, error) {
-	if state.ToolDispatchID != call.ID || state.ToolWait == nil || state.ToolWait.CallID != call.ID {
+	if state.ToolDispatchID != call.ID || state.toolWait() == nil || state.toolWait().CallID != call.ID {
 		return snapshot, true, ErrToolOutcomeUnknown
 	}
-	// The deferred record is now the durable unresolved effect identity.
-	// Transfer the active dispatch marker atomically with that record so
-	// independent children may start without re-executing earlier handlers.
-	state.DeferredChildren = append(state.DeferredChildren, deferredChildCall{Call: tools.CloneCall(call), Wait: *clonePendingTool(state.ToolWait)})
-	state.clearToolAdmission(call.ID)
-	state.PendingCalls = remainingPendingCalls(state)
-	state.ToolWait = nil
-	state.ToolDispatchID = ""
+	// The returned wait already owns this effect identity. Clearing only the
+	// active marker lets the next unsent sibling dispatch without moving Calls.
+	state.clearToolDispatch(call.ID)
 	return runner.persistChildBatch(ctx, snapshot, state, ledger)
 }
 
@@ -46,7 +36,7 @@ func (runner *Runner) deferChildCall(ctx context.Context, snapshot kernel.Snapsh
 // consumed; they cannot be used to oversubscribe a renewable allowance.
 func toolBatchAllowanceFull(state runState) bool {
 	return state.CallAllowance != nil && state.CallAllowance.ToolCalls > 0 &&
-		len(state.DeferredChildren) >= state.CallAllowance.ToolCalls-state.Budget.Usage.ToolCalls
+		state.deferredToolCount() >= state.CallAllowance.ToolCalls-state.Budget.Usage.ToolCalls
 }
 
 // activateDeferredChild yields to the first physical obligation, leaving
@@ -61,18 +51,16 @@ func (runner *Runner) activateDeferredChild(ctx context.Context, snapshot kernel
 }
 
 func (state *runState) activateDeferredChild() error {
-	if state.ToolDispatchID != "" || state.ToolWait != nil || state.PendingApproval != nil || len(state.DeferredChildren) == 0 {
+	if state.ToolDispatchID != "" || state.PendingApproval != nil {
 		return ErrToolOutcomeUnknown
 	}
-	next := state.DeferredChildren[0]
-	if next.Wait.Kind != tools.PendingChildTerminal || next.Wait.CallID != next.Call.ID {
-		return ErrToolOutcomeUnknown
+	for _, entry := range state.ToolReturns {
+		if entry.Outcome == nil && entry.Wait != nil && entry.Wait.Kind == tools.PendingChildTerminal {
+			state.ToolDispatchID = entry.CallID
+			return nil
+		}
 	}
-	state.DeferredChildren = state.DeferredChildren[1:]
-	state.PendingCalls = append([]tools.Call{tools.CloneCall(next.Call)}, state.PendingCalls...)
-	state.ToolWait = clonePendingTool(&next.Wait)
-	state.ToolDispatchID = next.Call.ID
-	return nil
+	return ErrToolOutcomeUnknown
 }
 
 func (runner *Runner) persistChildBatch(ctx context.Context, snapshot kernel.Snapshot, state runState, ledger *budget.LedgerMutation) (kernel.Snapshot, bool, error) {
@@ -138,19 +126,78 @@ func sameToolTransitionTarget(latest, source kernel.Snapshot, state runState, ch
 		reflect.DeepEqual(latest.Checkpoint, checkpoint) && reflect.DeepEqual(latest.Result, source.Result)
 }
 
-func validDeferredChildren(state runState) bool {
-	// Avoid summing untrusted slice lengths for a map allocation hint.
-	seen := make(map[string]bool)
+func validToolReturns(state runState) bool {
+	calls := make(map[string]tools.Call)
 	for _, call := range state.PendingCalls {
-		seen[call.ID] = true
-	}
-	for _, entry := range state.DeferredChildren {
-		if entry.Call.ID == "" || seen[entry.Call.ID] || entry.Call.ID != entry.Wait.CallID ||
-			entry.Call.ToolKey != entry.Wait.ToolKey || entry.Wait.Generation == 0 ||
-			entry.Wait.Kind != tools.PendingChildTerminal || !tools.ValidPending(&entry.Wait.PendingExecution) {
+		if call.ID == "" || calls[call.ID].ID != "" {
 			return false
 		}
-		seen[entry.Call.ID] = true
+		calls[call.ID] = call
 	}
-	return true
+	seen := make(map[string]bool)
+	for _, entry := range state.ToolReturns {
+		call, found := calls[entry.CallID]
+		if !found || seen[entry.CallID] || (entry.Wait == nil && entry.Outcome == nil) {
+			return false
+		}
+		seen[entry.CallID] = true
+		if wait := entry.Wait; wait != nil {
+			if wait.CallID != call.ID || wait.ToolKey != call.ToolKey || wait.Generation == 0 ||
+				!tools.ValidPending(&wait.PendingExecution) || wait.Kind == tools.PendingScheduled ||
+				(entry.Outcome == nil && ((wait.Kind != tools.PendingChildTerminal && call.ID != state.ToolDispatchID) || entry.ApprovalDigest != "")) {
+				return false
+			}
+		}
+		if entry.Outcome != nil {
+			if _, err := entry.Outcome.terminalError(call.ID); err != nil || call.ID == state.ToolDispatchID || (entry.ApprovalDigest != "" && !validBindingFingerprint(entry.ApprovalDigest)) {
+				return false
+			}
+		}
+	}
+	return state.ToolDispatchID == "" || calls[state.ToolDispatchID].ID != ""
+}
+
+func (s runState) toolReturn(id string) *returnedTool {
+	for i := range s.ToolReturns {
+		if s.ToolReturns[i].CallID == id {
+			return &s.ToolReturns[i]
+		}
+	}
+	return nil
+}
+
+func (s runState) toolWait() *PendingTool {
+	if entry := s.toolReturn(s.ToolDispatchID); entry != nil && entry.Outcome == nil {
+		return entry.Wait
+	}
+	return nil
+}
+
+func (s runState) deferredToolCount() int {
+	count := 0
+	for _, entry := range s.ToolReturns {
+		if entry.Outcome == nil && entry.Wait != nil && entry.CallID != s.ToolDispatchID {
+			count++
+		}
+	}
+	return count
+}
+
+func (s runState) recoveredToolCount() int {
+	count := 0
+	for _, entry := range s.ToolReturns {
+		if entry.Outcome != nil {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *runState) removeToolReturn(id string) {
+	for i, entry := range s.ToolReturns {
+		if entry.CallID == id {
+			s.ToolReturns = append(s.ToolReturns[:i:i], s.ToolReturns[i+1:]...)
+			return
+		}
+	}
 }

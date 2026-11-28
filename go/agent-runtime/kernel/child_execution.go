@@ -42,23 +42,43 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 		snapshot.Run.ID != grant.ChildRunID || snapshot.Run.Revision < grant.ExpectedRevision {
 		return false
 	}
-	var proofKind string
-	var extra any = snapshot.Checkpoint
-	switch snapshot.Run.Kind {
-	case "agent":
-		proofKind = "agent_child_physical_settled"
-	default:
+	if snapshot.Run.Kind != "agent" || !grant.IsOwned() {
 		return false
 	}
-	if grant.IsOwned() {
-		if snapshot.Run.Kind != "agent" || snapshot.Run.ParentRunID != "" {
-			return false
+	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision, "agent_physical_settled", grant.ID, snapshot.State, snapshot)
+}
+
+// ValidatePhysicalExecutionOwners compares the complete persisted physical
+// ancestor index, including self. Logical ownership gates admission separately;
+// it never adds an owner to this index. Retirement may inspect terminal Runs.
+func ValidatePhysicalExecutionOwners(ctx context.Context, child Run, owners []string, load func(context.Context, string) (Snapshot, error)) error {
+	seen := make(map[string]bool, len(owners))
+	for _, id := range owners {
+		if id == "" || seen[id] {
+			return ErrExecutionConflict
 		}
-		proofKind = "agent_owned_physical_settled"
-		extra = snapshot
+		seen[id] = true
 	}
-	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision,
-		proofKind, grant.ID, snapshot.State, extra)
+	for depth := 0; ; depth++ {
+		if depth >= 64 || !ValidRunBudgetBinding(child) || !seen[child.ID] {
+			return ErrExecutionConflict
+		}
+		delete(seen, child.ID)
+		if child.ParentRunID == "" {
+			if len(seen) != 0 {
+				return ErrExecutionConflict
+			}
+			return nil
+		}
+		parent, err := load(ctx, child.ParentRunID)
+		if err != nil {
+			return err
+		}
+		if parent.Run.ID != child.ParentRunID || parent.Run.Actor != child.Actor || parent.Run.Thread != child.Thread || parent.Run.BudgetScopeID != child.BudgetScopeID {
+			return ErrExecutionConflict
+		}
+		child = parent.Run
+	}
 }
 
 // PhysicalApplyPermit is an opaque per-Run write proof for a Root or child
@@ -117,120 +137,16 @@ func (runtime *Runtime) WithoutPhysicalGrant() *Runtime {
 	return &unbound
 }
 
-// WithPhysicalGrant binds a Kernel Runtime to the original Root/child
-// Agent physical Grant. Only the first-party Feature can mint a
-// valid internal source proof, and the Store validates every subsequent per-revision write under
-// its own atomic lock/transaction. It never bypasses terminal control CAS.
-func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) (*Runtime, error) {
-	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 ||
-		runtime.physicalGrant != nil {
-		return nil, ErrInvalidInput
-	}
-	if grant.IsOwned() {
-		lease, ok := runtime.BoundExecutionLease()
-		if !ok || !grant.MatchesExecution(lease) {
-			return nil, ErrExecutionConflict
-		}
-	}
-	stored, err := runtime.LookupChildExecution(ctx, grant.ChildRunID)
-	if err != nil {
-		return nil, err
-	}
-	current, err := runtime.Load(ctx, grant.ChildRunID)
-	if err != nil {
-		return nil, err
-	}
-	if stored != grant || current.Run.Revision != grant.ExpectedRevision ||
-		physicalFeatureProofDomain(current.Run.Kind, "owner") == "" ||
-		!proof.Matches(current.Run.ID, current.Run.Revision,
-			physicalFeatureProofDomain(current.Run.Kind, "owner"),
-			grant.ID, current.State, current.Checkpoint) {
-		return nil, ErrExecutionConflict
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	bound := *runtime
-	bound.physicalGrant = &grant
-	return &bound, nil
-}
-
-// ChildExecutionStore is the authoritative, persistent physical Feature
-// execution port. Each implementation MUST serialize Grant admission with
-// writes/terminal Control on the executing Run ITSELF and every immutable
-// ancestor in the SAME Store transaction; a read-then-check fallback is
-// insufficient.
-// The Mark port records only borrowed parent-bound callback returns.
-// Finish validates the private settlement permit for both grant kinds.
-// Finish may retire a Grant only after the owning Feature has certified the
-// physical execution returned with no unresolved effects. For an owned Grant,
-// the exact sealed settlement and durable original callback return are validated
-// and Finish commits the final retirement receipt, any Managed closure, exact
-// Grant deletion and release of its own Lease in one transaction; a borrowed
-// Lease is preserved. There is no subsequent retirement ACK mutation.
-// ErrChildExecutionBusy
-// from a parent ApplyControl MUST be an atomic, no-mutation rejection; the
-// Kernel can mint a private control no-effect proof only under this contract.
-type ChildExecutionStore interface {
-	BeginChildExecution(context.Context, ChildExecutionGrant) error
-	LookupChildExecution(context.Context, string) (ChildExecutionGrant, error)
-	MarkChildExecutionSettled(context.Context, ChildExecutionGrant, ChildExecutionSettlement) error
-	FinishChildExecution(context.Context, ChildExecutionGrant, ChildExecutionSettlement) error
-}
-
-func (runtime *Runtime) SupportsChildExecution() bool {
-	if runtime == nil {
-		return false
-	}
-	_, ok := runtime.store.(ChildExecutionStore)
-	return ok
-}
-
-// BeginChildExecution is the only physical admission for a parent-bound Run.
-// The Store rechecks the original persisted child.ParentRunID, every live
-// ancestor and existing pending Grants under its transactional authority.
-func (runtime *Runtime) BeginChildExecution(ctx context.Context, childRunID string, expectedRevision uint64) (ChildExecutionGrant, error) {
-	if runtime == nil || ctx == nil || strings.TrimSpace(childRunID) == "" || expectedRevision == 0 {
-		return ChildExecutionGrant{}, ErrInvalidInput
-	}
-	store, ok := runtime.store.(ChildExecutionStore)
-	if !ok {
-		return ChildExecutionGrant{}, ErrExecutionRequired
-	}
-	id, err := runtime.NewID("childgrant")
-	if err != nil {
-		return ChildExecutionGrant{}, err
-	}
-	grant := ChildExecutionGrant{ID: id, ChildRunID: childRunID, ExpectedRevision: expectedRevision}
-	if err := store.BeginChildExecution(ctx, grant); err != nil {
-		return ChildExecutionGrant{}, err
-	}
-	return grant, nil
-}
-
-// MarkChildExecutionSettled is the original returned-callback witness for
-// a parent-bound borrowed Grant only. Owned Grants already have a durable
-// callback-return fact and retire directly with Finish.
-func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	return runtime.settleChildExecution(ctx, grant, proof, true)
-}
-
 // FinishChildExecution releases only its exact original Grant. A timed-out
 // callback, lost ACK, unresolved Model/Tool dispatch or detached process does
 // not authorize Finish; the persisted Grant deliberately blocks terminal
 // parent state until its outcome has been reconciled.
 func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	return runtime.settleChildExecution(ctx, grant, proof, false)
-}
 
-func (runtime *Runtime) settleChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof, markOnly bool) error {
-	if markOnly && grant.IsOwned() {
-		return ErrExecutionConflict
-	}
 	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return ErrInvalidInput
 	}
-	store, ok := runtime.store.(ChildExecutionStore)
+	store, ok := runtime.store.(PhysicalExecutionStore)
 	if !ok {
 		return ErrExecutionRequired
 	}
@@ -242,9 +158,6 @@ func (runtime *Runtime) settleChildExecution(ctx context.Context, grant ChildExe
 	if !permit.Matches(grant, snapshot) {
 		return ErrExecutionConflict
 	}
-	if markOnly {
-		return store.MarkChildExecutionSettled(ctx, grant, permit)
-	}
 	return store.FinishChildExecution(ctx, grant, permit)
 }
 
@@ -255,7 +168,7 @@ func (runtime *Runtime) LookupChildExecution(ctx context.Context, childID string
 	if runtime == nil || ctx == nil || strings.TrimSpace(childID) == "" {
 		return ChildExecutionGrant{}, ErrInvalidInput
 	}
-	store, ok := runtime.store.(ChildExecutionStore)
+	store, ok := runtime.store.(PhysicalExecutionStore)
 	if !ok {
 		return ChildExecutionGrant{}, ErrExecutionRequired
 	}

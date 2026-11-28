@@ -67,20 +67,15 @@ func (s failAfterCommitStore) Create(ctx context.Context, record kernel.Record, 
 	return snap, err
 }
 
-func (s failAfterCommitStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, rev, m)
-	if err != nil {
-		return snap, err
+func (s failAfterCommitStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil || commitAuth.Lease != nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return snap, false, err
+		}
+		return s.afterApply(snap, commitMutation), false, nil
 	}
-	return s.afterApply(snap, m), nil
-}
-
-func (s failAfterCommitStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.ApplyExecution(ctx, lease, rev, m)
-	if err != nil {
-		return snap, err
-	}
-	return s.afterApply(snap, m), nil
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func (s failAfterCommitStore) afterApply(snap kernel.Snapshot, m kernel.StoreMutation) kernel.Snapshot {
@@ -95,14 +90,14 @@ func (s failAfterCommitStore) afterApply(snap kernel.Snapshot, m kernel.StoreMut
 	return snap
 }
 
-func (s failAfterCommitStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	if s.point == "callback_return" {
-		return errors.New("injected pre-Mark failure")
+func (s failAfterCommitStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if !g.IsOwned() {
+		if s.point == "callback_return" {
+			return errors.New("injected pre-return failure")
+		}
+		return s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	}
-	return s.Store.MarkChildExecutionSettled(ctx, g, p)
-}
-func (s failAfterCommitStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := s.Store.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	err := s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	if err == nil && s.point == "callback_return" {
 		os.Exit(78)
 	}
@@ -176,11 +171,11 @@ func TestAgentCrashSubprocess(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			completion, e := runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+			completion, e := runtime.LookupPhysicalCallbackReturn(ctx, grant)
 			if e != nil || !completion.HostCompleted {
 				t.Fatalf("callback return absent: %+v %v", completion, e)
 			}
-			if e = runner.ReconcileRootPhysicalExecution(ctx, current.Run.ID); e != nil {
+			if e = runner.ReconcilePhysicalExecution(ctx, current.Run.ID); e != nil {
 				t.Fatal(e)
 			}
 			after, e := runtime.Load(ctx, current.Run.ID)
@@ -212,7 +207,7 @@ func TestAgentCrashSubprocess(t *testing.T) {
 			if grant != originalGrant {
 				t.Fatal("crash retry replaced original grant")
 			}
-			if _, e = runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant); !errors.Is(e, kernel.ErrNotFound) {
+			if _, e = runtime.LookupPhysicalCallbackReturn(ctx, grant); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatalf("missing return invented: %v", e)
 			}
 			return

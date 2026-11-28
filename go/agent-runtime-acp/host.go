@@ -30,19 +30,23 @@ type Authorize func(context.Context, string, string) error
 type HostDependencies struct {
 	Backend   HostedAgent
 	Authorize Authorize
+	// Implementation is the exposing product's identity, not the SDK identity.
+	Implementation wire.Implementation
 }
 type Host struct {
-	backend    HostedAgent
-	authorize  Authorize
-	mu         sync.Mutex
-	connection *wire.AgentSideConnection
+	backend        HostedAgent
+	authorize      Authorize
+	implementation wire.Implementation
+	mu             sync.Mutex
+	connection     *wire.AgentSideConnection
 }
 
 func NewHost(deps HostDependencies) (*Host, error) {
-	if deps.Backend == nil || deps.Authorize == nil {
+	if deps.Backend == nil || deps.Authorize == nil || strings.TrimSpace(deps.Implementation.Name) == "" ||
+		strings.TrimSpace(deps.Implementation.Version) == "" {
 		return nil, ErrInvalidBinding
 	}
-	return &Host{backend: deps.Backend, authorize: deps.Authorize}, nil
+	return &Host{backend: deps.Backend, authorize: deps.Authorize, implementation: deps.Implementation}, nil
 }
 func (h *Host) NewConnection(peerInput io.Writer, peerOutput io.Reader) (*wire.AgentSideConnection, error) {
 	if h == nil || peerInput == nil || peerOutput == nil {
@@ -68,9 +72,10 @@ func (h *Host) Initialize(ctx context.Context, req wire.InitializeRequest) (wire
 	if _, ok := h.backend.(HostedResumer); ok {
 		capabilities.SessionCapabilities.Resume = &wire.SessionResumeCapabilities{}
 	}
+	implementation := h.implementation
 	return wire.InitializeResponse{
 		ProtocolVersion:   wire.ProtocolVersion(wire.WireProtocolVersion),
-		AgentInfo:         &wire.Implementation{Name: "gaoge-agent-runtime", Version: "1.0.0"},
+		AgentInfo:         &implementation,
 		AgentCapabilities: capabilities, AuthMethods: []wire.AuthMethod{},
 	}, nil
 }

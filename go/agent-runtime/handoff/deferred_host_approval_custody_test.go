@@ -64,7 +64,7 @@ func TestDeferredHostApprovalCallbackNeverGrantsNativeCustody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.NewDeferredAgent(r)
+	c, err := handoff.New(handoff.Config{Local: r, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestDeferredHostApprovalCallbackNeverGrantsNativeCustody(t *testing.T) {
 		t.Fatalf("expected Tool approval waiting: status=%s err=%v", waiting.Run.Status, err)
 	}
 	claim := c.VerifiedLocalDelegationControl(t.Context(), rt, delegation, waiting)
-	if err := rt.VerifyOwnedRootSettlement(t.Context(), waiting); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err := rt.VerifyExecutionCustody(t.Context(), waiting, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("entered Host approval policy obtained scoped execution evidence: %v", err)
 	}
 	strict := r.VerifiedDeferredRootControl(t.Context(), rt, waiting)

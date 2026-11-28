@@ -68,6 +68,11 @@ func TestRealPostgresManagedRecoveryStore(t *testing.T) {
 			Reopen: func() kernel.Store {
 				closeAll()
 				fresh := open()
+
+				if fresh.db.Migrator().HasTable("agent_kernel_managed_transfers") {
+					t.Fatal("retired current table remains")
+				}
+
 				a, e := fresh.ManagedRecoveryAuthority(t.Context())
 				if e != nil || a != authority {
 					t.Fatalf("reopen changed authority: %v", e)
@@ -86,16 +91,16 @@ type managedProjectionStore struct {
 	t *testing.T
 }
 
-func (s *managedProjectionStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *managedProjectionStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	if !p.IsManagedRecovery() {
-		return s.KernelStore.BeginOwnedPhysicalExecution(ctx, p)
+		return s.KernelStore.BeginPhysicalExecution(ctx, p)
 	}
 	id := p.Candidate().Grant.ChildRunID
 	before, e := s.Load(ctx, id)
 	if e != nil {
-		return kernel.OwnedPhysicalAdmissionResult{}, e
+		return kernel.PhysicalAdmissionResult{}, e
 	}
-	out, callErr := s.KernelStore.BeginOwnedPhysicalExecution(ctx, p)
+	out, callErr := s.KernelStore.BeginPhysicalExecution(ctx, p)
 	after, e := s.Load(ctx, id)
 	if e != nil || kernel.ManagedDigest(before) != kernel.ManagedDigest(after) {
 		s.t.Errorf("native admission changed sealed aggregate: %v", e)

@@ -5,51 +5,17 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-const contextRunMiddlewareName = "harness.context_run"
-
 // ContextRunRelationSource resolves durable parent ownership for Runtime child runs.
-// It is intentionally narrower than runrelation.Registry so the middleware can be
-// tested and reused without owning relation persistence.
+// The Context stage reads ancestry without owning relation persistence.
 type ContextRunRelationSource interface {
 	GetByChild(context.Context, string) (runrelation.Relation, error)
 }
 
-// NewContextRunMiddleware rebuilds the execution-scoped Context Window from
-// durable Harness facts whenever an Agent Run is started or resumed without the
-// original process-local context.Context. Exact top-level Agent invocations own
-// the Turn Context head; nested Runtime runs inherit it read-only.
-func NewContextRunMiddleware(store Store, relations ContextRunRelationSource) (plugin.RunMiddleware, error) {
-	if store == nil {
-		return nil, ErrInvalidRequest
-	}
-	return contextRunMiddleware{store: store, relations: relations}, nil
-}
-
-type contextRunMiddleware struct {
-	store     Store
-	relations ContextRunRelationSource
-}
-
-func (contextRunMiddleware) Name() string { return contextRunMiddlewareName }
-
-func (middleware contextRunMiddleware) Run(
-	ctx context.Context,
-	invocation plugin.RunInvocation,
-	next plugin.RunNext,
-) (kernel.Snapshot, error) {
-	hydrated, err := middleware.hydrate(ctx, strings.TrimSpace(invocation.RunID))
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return next(hydrated)
-}
-
-func (middleware contextRunMiddleware) hydrate(ctx context.Context, runID string) (context.Context, error) {
+func (p boundedContextPorts) hydrate(ctx context.Context, runID string) (context.Context, error) {
+	runID = strings.TrimSpace(runID)
 	if contextWindowExcluded(ctx) {
 		// Exclusion is sticky even if an internal caller subsequently rebinds
 		// a process-local checkpoint. Never hand that state to the Agent.
@@ -58,7 +24,7 @@ func (middleware contextRunMiddleware) hydrate(ctx context.Context, runID string
 	// Prove Context owner and Handoff isolation from one durable ancestry
 	// scan. Re-reading a RunRelation after a prior NotFound could admit a
 	// newly visible Specialist parent without rechecking its isolation.
-	turn, access, isolated, err := resolveContextRunAuthority(ctx, middleware.store, middleware.relations, runID)
+	turn, access, isolated, err := resolveContextRunAuthority(ctx, p.store, p.relations, runID)
 	if errors.Is(err, ErrNotFound) {
 		// Independent/unresolved Runs have no proven Harness Context scope.
 		// Do not leak a prior Run's checkpoint even if its binding is absent.
@@ -79,21 +45,21 @@ func (middleware contextRunMiddleware) hydrate(ctx context.Context, runID string
 			access = ContextWindowReadOnly
 		}
 		if binding.Access == access {
-			return middleware.hydrateExistingBinding(ctx, binding)
+			return p.hydrateExistingBinding(ctx, binding)
 		}
 	}
-	return middleware.hydrateTurn(withoutContextCheckpoint(ctx), turn.ID, access)
+	return p.hydrateTurn(withoutContextCheckpoint(ctx), turn.ID, access)
 }
 
-func (middleware contextRunMiddleware) hydrateExistingBinding(
+func (p boundedContextPorts) hydrateExistingBinding(
 	ctx context.Context,
 	binding ContextWindowBinding,
 ) (context.Context, error) {
 	checkpoint, ok := CurrentContextCheckpoint(ctx)
 	if !ok {
-		return middleware.hydrateTurn(ctx, binding.TurnID, binding.Access)
+		return p.hydrateTurn(ctx, binding.TurnID, binding.Access)
 	}
-	turn, err := loadVerifiedTurn(ctx, middleware.store, binding.TurnID)
+	turn, err := loadVerifiedTurn(ctx, p.store, binding.TurnID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +74,7 @@ func (middleware contextRunMiddleware) hydrateExistingBinding(
 		checkpoint.ID == turn.ContextCheckpointID && sameContextCheckpointRef(checkpoint, turn.ContextRef) {
 		return ctx, nil
 	}
-	return middleware.hydrateTurn(ctx, binding.TurnID, binding.Access)
+	return p.hydrateTurn(ctx, binding.TurnID, binding.Access)
 }
 
 // resolveContextRunAuthority proves an execution-scoped Context owner or
@@ -242,12 +208,12 @@ func contextParentRunID(
 	return relation.ParentRunID, true, nil
 }
 
-func (middleware contextRunMiddleware) hydrateTurn(
+func (p boundedContextPorts) hydrateTurn(
 	ctx context.Context,
 	turnID string,
 	access ContextWindowAccess,
 ) (context.Context, error) {
-	turn, err := loadVerifiedTurn(ctx, middleware.store, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, p.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +224,7 @@ func (middleware contextRunMiddleware) hydrateTurn(
 	if checkpointID == "" {
 		return withoutContextCheckpoint(ctx), nil
 	}
-	checkpoint, err := middleware.store.GetContextCheckpoint(ctx, checkpointID)
+	checkpoint, err := p.store.GetContextCheckpoint(ctx, checkpointID)
 	if err != nil {
 		return nil, err
 	}
@@ -271,13 +237,4 @@ func (middleware contextRunMiddleware) hydrateTurn(
 	}
 	ctx = withContextCheckpoint(ctx, checkpoint)
 	return withContextWindowBinding(ctx, turn.ID, access), nil
-}
-
-// HydrateContextRun exposes only the existing read-only authority/hydration
-// sequence. It neither invokes Next nor issues lifecycle completion evidence.
-func HydrateContextRun(ctx context.Context, store Store, relations ContextRunRelationSource, invocation plugin.RunInvocation) (context.Context, error) {
-	if store == nil {
-		return nil, ErrInvalidRequest
-	}
-	return (contextRunMiddleware{store: store, relations: relations}).hydrate(ctx, strings.TrimSpace(invocation.RunID))
 }

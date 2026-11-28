@@ -115,9 +115,9 @@ func TestPR82HandoffCancelRequiresFixedActualChildKernel(t *testing.T) {
 			var coordinator *handoff.Coordinator
 			var err error
 			if scenario == "routed-local" {
-				coordinator, err = handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return childRunner, nil }))
+				coordinator, err = handoff.New(handoff.Config{Opaque: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return childRunner, nil })})
 			} else {
-				coordinator, err = handoff.New(childRunner)
+				coordinator, err = handoff.New(handoff.Config{Local: childRunner})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -220,7 +220,7 @@ func (c pr82NonterminalChildCanceller) Cancel(ctx context.Context, id string, _ 
 func TestPR82NonterminalCancellationReceiptCannotSettleHandoff(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	d := f.delegation()
-	coordinator, err := handoff.New(&pr82BoundKernelChild{runtime: f.runtime})
+	coordinator, err := handoff.New(handoff.Config{Local: &pr82BoundKernelChild{runtime: f.runtime}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestPR82NonterminalCancellationReceiptCannotSettleHandoff(t *testing.T) {
 func TestPR82HandoffCancelRejectsForeignKernelCanceller(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	d := f.delegation()
-	coordinator, err := handoff.New(&pr82BoundKernelChild{runtime: f.runtime})
+	coordinator, err := handoff.New(handoff.Config{Local: &pr82BoundKernelChild{runtime: f.runtime}})
 	if err != nil {
 		t.Fatal(err)
 	}

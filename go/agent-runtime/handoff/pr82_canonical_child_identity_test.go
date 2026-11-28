@@ -31,7 +31,7 @@ func TestAuditHandoffKernelCanonicalInputs(t *testing.T) {
 				t.Fatal(err)
 			}
 			child := &auditKernelChildren{runtime: rt}
-			coordinator, err := handoff.New(child)
+			coordinator, err := handoff.New(handoff.Config{Local: child})
 			if err != nil {
 				t.Fatal(err)
 			}

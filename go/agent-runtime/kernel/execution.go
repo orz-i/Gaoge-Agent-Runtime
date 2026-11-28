@@ -91,7 +91,6 @@ type ExecutionStore interface {
 	AcquireExecution(context.Context, ExecutionAcquireRequest) (ExecutionLease, error)
 	RenewExecution(context.Context, ExecutionRenewRequest) (ExecutionLease, error)
 	ReleaseExecution(context.Context, ExecutionLease) error
-	ApplyExecution(context.Context, ExecutionLease, uint64, StoreMutation) (Snapshot, error)
 	// CheckExecution is a Store-time, pre-dispatch authorization check.
 	// nil token allows only a Run never claimed by execution fencing.
 	// It does not promise physical exactly-once effects after a check.

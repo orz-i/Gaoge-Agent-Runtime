@@ -185,14 +185,20 @@ pre-stable release rather than wrapped for compatibility. See
 ## SubAgent composition
 
 A host may execute a standalone Agent without Harness. For durable specialist
-children, compose `agent.NewRunner` with `handoff.New` or
-`handoff.NewDeferredAgent`, a fixed ChildRunner, and an optional Harness Runner
+children, compose `agent.NewRunner` with `handoff.New(handoff.Config{Local: loop,
+Remote: remoteResolver})` and an optional Harness Runner
 that receives `Handoffs` and `Relations` in its dependencies. The Host chooses and authorizes each Named Agent (including its Model,
 Tools, Skills and Instructions) before delegation. Harness freezes the
 resulting execution request and the original MemberID/MemberRevision route;
 Kernel and Handoff enforce Tool scope, budgets, parent/child identity and
 physical dispatch authority. The Runtime never resolves a Role catalog or
 selects an Agent on behalf of the Host.
+
+The frozen `Delegation.Remote` selection chooses the independent remote route;
+local ownership queries never invoke that resolver. `PrepareLocal: true` lets
+the Host schedule `loop.Resume` after the same Agent's `PrepareRun`, without
+another child execution implementation. Custom opaque resolvers use `Opaque`
+instead of `Local` and cannot confer local Kernel authority.
 
 `harness.Runner.Delegate` and `DelegateByExecutionRefID` create or reload a
 stable SubAgent delegation only after the shared Host-owned
@@ -241,14 +247,14 @@ alone is not a physical-effect receipt.
   Store outcome carrying the original candidate and the exact persisted
   admission commitment. Public Grant identity, a definite refusal or a later
   observer never grants dispatch.
-- After admission acknowledgement, the actual owned RunChain entry still
+- After admission acknowledgement, the actual owned Run stage entry still
   checks the exact original Grant, persisted owner/epoch, source revision and
   operation status against Store time. Runtime accounts for the observation's
   full elapsed time; a due deadline, canceled context or expired lease cannot
   enter new Host work. An expired Resume may narrow its original, explicitly
-  bounded first-party RunChain terminal to one qualified known receipt. It
+  bounded first-party stage to one qualified known receipt. It
   still obeys the frozen budget's admission/cancellation and completion
-  projection; opaque Host layers cannot be entered or skipped to consume it.
+  projection; a receipt-only path cannot initiate new Host work.
   The Run adapter observes the authoritative ledger after Host projection.
   Both normal and receipt-only Model/Tool consumption use the same final
   original-ledger admission decision before their local reducer. A cancellation

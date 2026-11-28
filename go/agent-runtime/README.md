@@ -17,6 +17,12 @@ runtime, err := kernel.New(kernel.Dependencies{Store: store})
 Production hosts normally pair Core with the PostgreSQL Store and either the
 Redis or memory generation stream adapter.
 
+**Agent state wire hard cut:** original state evidence v3 removes the duplicate
+`ModelInvocation.Usage` field (use `Response.Usage`) and omits empty consumed
+requests. The original response and transcript are retained. Existing v2 state
+is not rehashed or resumed by the v3 decoder; drain it using the previous
+writer. SQL schema migration does not convert Agent state.
+
 ## Optional Agent Run execution lease (original Stage 2B)
 
 **Tool retry/disposition contract:** Even an explicit
@@ -65,7 +71,7 @@ retryable error permits resending. A pre-dispatch denial remains distinct from
 an uncertain physical outcome. No background recovery worker is started.
 A completed receipt may be consumed without reissuing the original invocation.
 Root Host errors retain the original scope; TTL cannot manufacture completion.
-`ReconcileRootPhysicalExecution` can retire a durable completion marker or an
+`ReconcilePhysicalExecution` can retire a durable completion marker or an
 original grant-bound callback-returned completion record with all physical intents settled.
 A clean snapshot alone is insufficient. A Run status alone never proves callback completion; the original opaque
 completion record or durable settlement marker is required. This is not production multi-worker certification.
@@ -101,11 +107,11 @@ The native Tool admission state separates authorization evaluation, committed
 restriction, committed authorization, capacity waiting and unsent closure. The policy is
 invoked only after evaluation intent is durable; uncommitted decisions keep
 the original physical Grant fenced. Capacity is reserved against the original
-ledger before entering Tool middleware or writing a dispatch intent. An
+ledger before entering the fixed Tool stage or writing a dispatch intent. An
 unsent wait is not a provider Pending receipt, and a later owner can retry
 admission only with the same Call, committed authorization and bound ledger.
 A local Tool permit is acquired before shared capacity, and the physical
-intent is written immediately before the first ToolChain entry. The no-entry
+intent is written immediately before the fixed Tool stage entry. The no-entry
 witness survives the intent acknowledgement and the final local and original
 ledger admission checks. Before entry, a native no-send disposition distinguishes terminal admission denial
 from resumable interruption. The disposition commits before ledger release
@@ -113,13 +119,12 @@ or park; both operations verify the original undispatched, zero-usage
 reservation at its exact ledger revision. The original returned Root Grant
 can also seal no-entry proof for an uncertain dispatch-intent ACK. That
 proof reconciles the original marker without a provider lookup, and never
-qualifies a Tool result. ToolChain entry alone cannot prove no-send, but
+qualifies a Tool result. Tool stage entry alone cannot prove no-send, but
 the actual native Budget Dispatch CAS can definitively refuse the exact
 original reservation under elected ledger cancellation. If that frame has
-not called Next and every entered Tool layer returns its own trusted receipt
+not entered the Executor and the fixed stage returns its trusted receipt
 and the exact original denial, Runtime consumes the same native no-send
-disposition. A speculative dispatched candidate, arbitrary error or opaque
-entered layer does not qualify. Pending physical effects and their settlement
+disposition. A speculative dispatched candidate or arbitrary error does not qualify. Pending physical effects and their settlement
 continue to use the existing Call-return proof.
 
 Native Run admission uses the same exact-return qualification for all

@@ -39,7 +39,7 @@ func assertProviderUnknownNoReplay(t *testing.T, store *memory.Store, clock *pro
 	// ViewState clones Response: empty ToolCalls, HostedToolCalls and Artifacts
 	// are allocated zero-length slices. Compare the complete canonical zero
 	// response, not a literal with nil slices; no response field is ignored.
-	if pending.Status != agent.ModelInvocationPending || pending.DispatchAttempt == 0 || pending.ID == "" || pending.RequestHash == "" || pending.BindingFingerprint == "" || pending.ProviderResponseID != "" || pending.Usage != nil || pending.RetryAfter != nil || !reflect.DeepEqual(pending.Response, model.CloneResponse(model.Response{})) {
+	if pending.Status != agent.ModelInvocationPending || pending.DispatchAttempt == 0 || pending.ID == "" || pending.RequestHash == "" || pending.BindingFingerprint == "" || pending.ProviderResponseID != "" || pending.Response.Usage != nil || pending.RetryAfter != nil || !reflect.DeepEqual(pending.Response, model.CloneResponse(model.Response{})) {
 		t.Fatalf("unknown has false receipt/retry/source: %+v", pending)
 	}
 	assertProviderPendingSource(t, before.Run.ID, pending)
@@ -85,27 +85,30 @@ type providerUnsentStore struct {
 	rejected agent.ModelInvocation
 }
 
-func (s *providerUnsentStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	for _, e := range m.Events {
-		if s.hits == 0 && m.Record.Run.ID == s.runID && e.Type == "agent.model_invocation.dispatch_intent" {
-			original, err := s.Load(ctx, s.runID)
-			if err != nil {
-				return kernel.Snapshot{}, err
+func (s *providerUnsentStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		for _, e := range commitMutation.Events {
+			if s.hits == 0 && commitMutation.Record.Run.ID == s.runID && e.Type == "agent.model_invocation.dispatch_intent" {
+				original, err := s.Load(commitCtx, s.runID)
+				if err != nil {
+					return kernel.Snapshot{}, false, err
+				}
+				view, err := agent.ViewState(original)
+				if err != nil || len(view.ModelInvocations) != 1 {
+					return kernel.Snapshot{}, false, kernel.ErrInvalidInput
+				}
+				intent := view.ModelInvocations[0]
+				if original.Run.Revision != commitRev || intent.ID != e.Message || intent.RunID != s.runID || intent.Status != agent.ModelInvocationPending || intent.DispatchAttempt != 0 || intent.ExecutionAttempt != 1 {
+					return kernel.Snapshot{}, false, kernel.ErrInvalidInput
+				}
+				s.rejected = intent
+				s.hits++
+				return kernel.Snapshot{}, false, model.NewRetryableError(errors.New("fixture rejected dispatch CAS before commit"))
 			}
-			view, err := agent.ViewState(original)
-			if err != nil || len(view.ModelInvocations) != 1 {
-				return kernel.Snapshot{}, kernel.ErrInvalidInput
-			}
-			intent := view.ModelInvocations[0]
-			if original.Run.Revision != rev || intent.ID != e.Message || intent.RunID != s.runID || intent.Status != agent.ModelInvocationPending || intent.DispatchAttempt != 0 || intent.ExecutionAttempt != 1 {
-				return kernel.Snapshot{}, kernel.ErrInvalidInput
-			}
-			s.rejected = intent
-			s.hits++
-			return kernel.Snapshot{}, model.NewRetryableError(errors.New("fixture rejected dispatch CAS before commit"))
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.ApplyExecution(ctx, l, rev, m)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func assertProviderPendingSource(t *testing.T, runID string, pending agent.ModelInvocation) {

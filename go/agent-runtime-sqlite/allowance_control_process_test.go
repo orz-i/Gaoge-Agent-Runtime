@@ -141,9 +141,9 @@ func TestFencedAllowanceProcessChild(t *testing.T) {
 	}
 	staleRun := granted.Run
 	staleRun.Revision++
-	_, err = store.ApplyExecution(ctx, old, granted.Run.Revision, kernel.StoreMutation{
+	_, _, err = store.Commit(ctx, (old).RunID, granted.Run.Revision, kernel.StoreMutation{
 		Record: kernel.Record{Run: staleRun, State: granted.State},
-	})
+	}, kernel.LeaseCommit(old))
 	if !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("original executor committed after grant: %v", err)
 	}

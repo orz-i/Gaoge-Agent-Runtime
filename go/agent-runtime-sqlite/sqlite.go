@@ -14,8 +14,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Schema v11 includes the native transaction-owned budget ledger. Open never migrates.
-const schemaVersion = 11
+// Schema v14 stores immutable Agent history separately from hot Run state.
+const schemaVersion = 14
 
 var (
 	ErrUnsupportedSchema = profile.ErrUnsupportedSchema
@@ -61,10 +61,6 @@ func initializeNew(ctx context.Context, db *sql.DB) error {
 }
 func validateExisting(ctx context.Context, db *sql.DB) error {
 	return (&Store{db: db}).initialize(ctx, false)
-}
-
-func kernelSetup(method func(*Store, context.Context) error) profile.Setup {
-	return func(ctx context.Context, db *sql.DB) error { return method(&Store{db: db}, ctx) }
 }
 
 func openKernel(ctx context.Context, path string, setup profile.Setup) (*Store, error) {
@@ -168,25 +164,8 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 	return nil
 }
 
-const callbackToolReturnsColumn = "callback_tool_returns TEXT NOT NULL DEFAULT ''"
-
-var schemaDDL = append(schemaV10DDL(), sqlledger.SQLiteDDL, runIdentityDDL)
-
-func schemaV10DDL() []string { return append(schemaV9DDL(), grantIdentityDDL) }
-
-func schemaV9DDL() []string {
-	out := schemaV8DDL()
-	for i, ddl := range out {
-		if strings.HasPrefix(ddl, "CREATE TABLE runtime_child_effect_grants ") {
-			out[i] = strings.Replace(ddl, "settlement_evidence_json BLOB,", "settlement_evidence_json BLOB, "+callbackToolReturnsColumn+",", 1)
-		}
-	}
-	return append(out, relationProgressDDL)
-}
-
-func schemaV8DDL() []string {
-	return append(append([]string{
-		`CREATE TABLE runtime_runs (
+var schemaDDL = append([]string{
+	`CREATE TABLE runtime_runs (
 		run_id TEXT PRIMARY KEY,
 		scope_id TEXT NOT NULL,
 		kind TEXT NOT NULL,
@@ -206,30 +185,44 @@ func schemaV8DDL() []string {
         execution_quarantine_generation INTEGER NOT NULL DEFAULT 0,
         execution_quarantine_code TEXT NOT NULL DEFAULT ''
     , execution_physical_epoch INTEGER NOT NULL DEFAULT 0)`,
-		// A child Grant is persisted against every ancestor. Terminal parent CAS
-		// checks this table in the SAME SQLite writer transaction as its Run CAS.
-		`CREATE TABLE runtime_child_effect_grants (
-		grant_id TEXT NOT NULL,
-		parent_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
-		child_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
-		start_revision INTEGER NOT NULL,
-		settled_revision INTEGER NOT NULL DEFAULT 0,
-		execution_owner_id TEXT NOT NULL DEFAULT '',
-		execution_lease_id TEXT NOT NULL DEFAULT '',
-		execution_epoch INTEGER NOT NULL DEFAULT 0,
-		admission_source_hash TEXT NOT NULL DEFAULT '',
-		admission_operation TEXT NOT NULL DEFAULT '',
-		callback_return_revision INTEGER NOT NULL DEFAULT 0,
-		callback_return_source_hash TEXT NOT NULL DEFAULT '',
-		callback_host_completed INTEGER NOT NULL DEFAULT 0,
-		callback_lease_owned INTEGER NOT NULL DEFAULT 0,
-		callback_control_custody TEXT NOT NULL DEFAULT '',
-		settlement_evidence_json BLOB,
-		PRIMARY KEY(grant_id,parent_run_id)
-	)`,
-		`CREATE INDEX runtime_child_grants_parent ON runtime_child_effect_grants(parent_run_id,grant_id)`,
-		`CREATE INDEX runtime_child_grants_child ON runtime_child_effect_grants(child_run_id)`,
-		`CREATE TABLE runtime_events (
+	// A single stable physical effect owns identity, original live facts and
+	// its optional final receipt. The ancestor table is an index only.
+	// History is not another execution authority. The Run selects a prefix
+	// in the same CAS that commits the original hot state and receipts.
+	`CREATE TABLE runtime_state_history (
+            run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
+            stream INTEGER NOT NULL,
+            generation INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL,
+            payload_json BLOB NOT NULL,
+            PRIMARY KEY(run_id,stream,generation,ordinal)
+        )`,
+	`CREATE TABLE runtime_effects (
+            grant_id TEXT PRIMARY KEY NOT NULL,
+            child_run_id TEXT NOT NULL,
+            start_revision INTEGER NOT NULL DEFAULT 0,
+            execution_owner_id TEXT NOT NULL DEFAULT '',
+            execution_lease_id TEXT NOT NULL DEFAULT '',
+            execution_epoch INTEGER NOT NULL DEFAULT 0,
+            admission_source_hash TEXT NOT NULL DEFAULT '',
+            admission_operation TEXT NOT NULL DEFAULT '',
+            callback_return_revision INTEGER NOT NULL DEFAULT 0,
+            callback_return_source_hash TEXT NOT NULL DEFAULT '',
+            callback_host_completed INTEGER NOT NULL DEFAULT 0,
+            callback_lease_owned INTEGER NOT NULL DEFAULT 0,
+            callback_control_custody TEXT NOT NULL DEFAULT '',
+            callback_tool_returns TEXT NOT NULL DEFAULT '',
+            retirement_json TEXT NOT NULL DEFAULT '',
+            CHECK(start_revision=0 OR retirement_json='')
+        )`,
+	`CREATE INDEX runtime_effects_run ON runtime_effects(child_run_id,start_revision)`,
+	`CREATE TABLE runtime_effect_owners (
+            grant_id TEXT NOT NULL REFERENCES runtime_effects(grant_id),
+            parent_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
+            PRIMARY KEY(grant_id,parent_run_id)
+        )`,
+	`CREATE INDEX runtime_effect_owners_parent ON runtime_effect_owners(parent_run_id,grant_id)`,
+	`CREATE TABLE runtime_events (
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		seq INTEGER NOT NULL,
 		event_type TEXT NOT NULL,
@@ -238,10 +231,10 @@ func schemaV8DDL() []string {
 		created_ns INTEGER NOT NULL,
 		PRIMARY KEY(run_id, seq)
 	)`,
-		`CREATE INDEX runtime_events_type ON runtime_events(event_type, run_id, seq)`,
-		// This is the Kernel transition outbox materialized directly into the
-		// local ready-work ledger. It is NOT an independent job queue.
-		`CREATE TABLE runtime_ready_work (
+	`CREATE INDEX runtime_events_type ON runtime_events(event_type, run_id, seq)`,
+	// This is the Kernel transition outbox materialized directly into the
+	// local ready-work ledger. It is NOT an independent job queue.
+	`CREATE TABLE runtime_ready_work (
 		work_id TEXT PRIMARY KEY,
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		kind TEXT NOT NULL,
@@ -258,17 +251,17 @@ func schemaV8DDL() []string {
         quarantine_code TEXT NOT NULL DEFAULT '',
         quarantined_ns INTEGER NOT NULL DEFAULT 0
     )`,
-		`CREATE INDEX runtime_ready_due ON runtime_ready_work(quarantine_code, available_ns, committed_ns, work_id)`,
-		`CREATE TABLE runtime_commit_proofs (
+	`CREATE INDEX runtime_ready_due ON runtime_ready_work(quarantine_code, available_ns, committed_ns, work_id)`,
+	`CREATE TABLE runtime_commit_proofs (
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		revision INTEGER NOT NULL,
 		fingerprint TEXT NOT NULL,
 		committed_ns INTEGER NOT NULL,
 		PRIMARY KEY(run_id, revision)
 	)`,
-		// Immutable Feature-neutral child ownership; Run records need not exist
-		// in this Store (matching Memory/PostgreSQL runrelation.Store semantics).
-		`CREATE TABLE runtime_run_relations (
+	// Immutable Feature-neutral child ownership; Run records need not exist
+	// in this Store (matching Memory/PostgreSQL runrelation.Store semantics).
+	`CREATE TABLE runtime_run_relations (
 		child_run_id TEXT PRIMARY KEY,
 		parent_run_id TEXT NOT NULL,
 		kind TEXT NOT NULL,
@@ -276,9 +269,11 @@ func schemaV8DDL() []string {
 		created_ns INTEGER NOT NULL,
 		UNIQUE(parent_run_id, kind, owner_node_id)
 	)`,
-		`CREATE INDEX runtime_run_relations_parent_order ON runtime_run_relations(parent_run_id, created_ns, kind, owner_node_id, child_run_id)`,
-	}, managedSchemaDDL...), ownedRetirementSchemaDDL...)
-}
+	`CREATE INDEX runtime_run_relations_parent_order ON runtime_run_relations(parent_run_id, created_ns, kind, owner_node_id, child_run_id)`,
+	`CREATE TABLE runtime_managed_history (suspension_id TEXT PRIMARY KEY, recovery_id TEXT NOT NULL UNIQUE, run_id TEXT NOT NULL REFERENCES runtime_runs(run_id), revision INTEGER NOT NULL, payload_json BLOB NOT NULL)`,
+	`CREATE TABLE runtime_managed_authority (authority_key TEXT PRIMARY KEY, namespace TEXT NOT NULL, generation INTEGER NOT NULL, protocol_version INTEGER NOT NULL)`,
+	`CREATE UNIQUE INDEX runtime_managed_history_run_revision ON runtime_managed_history(run_id,revision)`,
+}, relationProgressDDL, sqlledger.SQLiteDDL, runIdentityDDL)
 
 func errorCode(err error) int {
 	var se *sqlite3.Error

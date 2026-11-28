@@ -15,6 +15,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -31,11 +32,19 @@ func run(ctx context.Context, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+	rawFeed, err := runfeed.New(memory.NewRunFeedStore(), runfeed.Options{})
+	if err != nil {
+		return err
+	}
+	feed, err := harness.NewTurnFeed(rawFeed)
+	if err != nil {
+		return err
+	}
 	// The Host is the only owner of conversation history. This demo keeps it
 	// in memory and runs one user Turn at a time.
 	var history []runtimecontext.Entry
 	session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
-		Runtime: runtime, Store: harness.NewMemoryStore(), Model: fixtureModel{},
+		Runtime: runtime, Store: harness.NewMemoryStore(), Model: fixtureModel{}, TurnFeed: feed,
 		LocalTools: []harness.SessionTool{{
 			Registration: tools.Registration{
 				Definition: tools.Definition{Key: releaseTool, Name: "release_checks",
@@ -73,6 +82,16 @@ func run(ctx context.Context, output io.Writer) error {
 		}
 		if result.Turn.Status != harness.TurnCompleted || result.Output == nil {
 			return fmt.Errorf("%s did not complete: %s", input.ID, result.Turn.Status)
+		}
+		// Subscribe uses the same Host Turn ID and executing Runner. Durable
+		// state above remains authoritative if a live stream closes early.
+		subscription, err := session.Subscribe(ctx, input.ID, 0)
+		if err != nil {
+			return err
+		}
+		subscription.Close()
+		if len(subscription.Replay) == 0 || !subscription.Replay[len(subscription.Replay)-1].Terminal {
+			return fmt.Errorf("%s has no retained completion event", input.ID)
 		}
 		var answer string
 		if err := json.Unmarshal(result.Output.Content, &answer); err != nil {

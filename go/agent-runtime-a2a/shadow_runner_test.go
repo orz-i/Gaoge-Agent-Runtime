@@ -121,7 +121,7 @@ func TestShadowRunnerExistingHandoffCannotAcquireModelOutputCeiling(t *testing.T
 func newShadowCoordinator(t *testing.T, runner *ShadowRunner) *handoff.Coordinator {
 	t.Helper()
 	runner.targetID, runner.revision = "remote-member", "fixture-v1"
-	coordinator, err := handoff.New(runner)
+	coordinator, err := handoff.New(handoff.Config{Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return runner, nil })})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestShadowRunnerCancelProjectsRemoteTaskLocally(t *testing.T) {
 	if err != nil || started.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("started=%#v err=%v", started.Run, err)
 	}
-	canceled, err := runner.CancelRun(t.Context(), started.Run.ID)
+	canceled, err := runner.CancelRemote(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID))
 	if err != nil || canceled.Run.Status != kernel.RunStatusCancelled || !remote.canceled {
 		t.Fatalf("canceled=%#v remote=%#v err=%v", canceled.Run, remote, err)
 	}
@@ -190,7 +190,7 @@ func TestShadowRunnerMapsInputRequiredAndResumesRemoteTask(t *testing.T) {
 		t.Fatalf("started=%#v err=%v", started.Run, err)
 	}
 	remote.task = completedTask()
-	completed, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+	completed, err := runner.ResumeRun(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID), "approved")
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("completed=%#v err=%v", completed.Run, err)
 	}
@@ -259,14 +259,14 @@ func TestShadowRunnerUncertainResumeIsReadOnlyUntilRemoteTerminal(t *testing.T) 
 		t.Fatal(err)
 	}
 	remote.sendErr = errors.New("temporary network failure")
-	pending, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+	pending, err := runner.ResumeRun(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID), "approved")
 	if !errors.Is(err, ErrRemoteOutcomeUnknown) || pending.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("unknown resume was retriable: %+v err=%v", pending.Run, err)
 	}
 	originalMessageID := remote.sent.MessageID
 	remote.sendErr = nil
 	remote.task = completedTask()
-	if _, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) || remote.sent.MessageID != originalMessageID {
+	if _, err := runner.ResumeRun(t.Context(), started.Run.ID, shadowRevision(t, runner, started.Run.ID), "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) || remote.sent.MessageID != originalMessageID {
 		t.Fatalf("unverified resume re-sent the original message: %q err=%v", remote.sent.MessageID, err)
 	}
 	completed, err := runner.LoadRun(t.Context(), started.Run.ID)

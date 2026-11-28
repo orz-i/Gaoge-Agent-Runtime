@@ -22,7 +22,7 @@ func (r *Runner) readManagedPreparationContext(ctx context.Context, b kernel.Man
 	if !r.SupportsManagedRecovery() {
 		return kernel.ManagedPreparationContext{}, ErrInvalidRequest
 	}
-	port, ok := r.nativeContext.ports.(managedPreparationContextPort)
+	port, ok := r.boundedContext.ports.(managedPreparationContextPort)
 	if !ok {
 		return kernel.ManagedPreparationContext{}, ErrInvalidRequest
 	}
@@ -98,7 +98,7 @@ func (r *Runner) qualifyManagedPreparation(ctx context.Context, s kernel.Snapsho
 	}
 	p.Phase = "prepare"
 	p.PreparationContext = &source
-	journal, ok := callbackscope.ManagedPreparationSuspension(ctx, r.nativeContext, r.managedBudgetOwner(),
+	journal, ok := callbackscope.ManagedPreparationSuspension(ctx, r.boundedContext, r.managedBudgetOwner(),
 		strconv.FormatUint(p.SourceRevision, 10), struct {
 			Revision, Cursor uint64
 			Context          kernel.ManagedPreparationContext

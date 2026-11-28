@@ -7,106 +7,70 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// Must share the admission transaction. The unique key, not a preflight
-// COUNT, serializes contenders across different Run row locks.
+const activeEffectScope = "(child_run_id=? OR grant_id IN (SELECT grant_id FROM agent_kernel_effect_owners WHERE parent_run_id=?))"
+
+func pgActiveEffects(tx *gorm.DB) *gorm.DB {
+	return tx.Model(&models.KernelEffectRecord{}).Where("start_revision>0")
+}
+func pgRetiredEffects(tx *gorm.DB) *gorm.DB {
+	return tx.Model(&models.KernelEffectRecord{}).Where("start_revision=0 AND retirement_json<>''")
+}
+func pgEffectChanged(r *gorm.DB) error {
+	if r.Error != nil {
+		return translateKernelApplyError(r.Error)
+	}
+	if r.RowsAffected != 1 {
+		return kernel.ErrExecutionConflict
+	}
+	return nil
+}
 func pgReserveGrantIdentity(tx *gorm.DB, g kernel.ChildExecutionGrant) error {
 	i := g.Identity()
 	if !i.Valid() {
 		return kernel.ErrInvalidInput
 	}
-	r := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models.KernelGrantIdentityRecord{GrantID: i.GrantID, RunID: i.RunID})
-	if r.Error != nil {
-		return translateKernelError(r.Error)
-	}
-	if r.RowsAffected != 1 {
-		return kernel.ErrExecutionConflict
-	}
-	return nil
+	return pgEffectChanged(tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&models.KernelEffectRecord{GrantID: i.GrantID, ChildRunID: i.RunID}))
 }
-
-// Legacy migration records identities without granting new authority. Active
-// and retired rows must be disjoint; ancestor replicas of one active grant
-// legitimately share the same identity.
-func pgBackfillGrantIdentities(tx *gorm.DB) error {
-	var activeRows []struct {
-		GrantID    string
-		ChildRunID string
+func pgActivateEffect(tx *gorm.DB, g kernel.ChildExecutionGrant, owners []string) error {
+	if e := pgEffectChanged(tx.Model(&models.KernelEffectRecord{}).Where("grant_id=? AND child_run_id=? AND start_revision=0 AND retirement_json=''", g.ID, g.ChildRunID).UpdateColumns(map[string]any{"start_revision": g.ExpectedRevision, "execution_owner_id": g.ExecutionOwnerID, "execution_lease_id": g.ExecutionLeaseID, "execution_epoch": g.ExecutionEpoch, "admission_source_hash": g.AdmissionSourceHash, "admission_operation": g.AdmissionOperation})); e != nil {
+		return e
 	}
-	if err := tx.Raw("SELECT DISTINCT grant_id, child_run_id FROM agent_kernel_child_effect_grants").Scan(&activeRows).Error; err != nil {
-		return translateKernelError(err)
+	rows := make([]models.KernelEffectOwnerRecord, 0, len(owners))
+	for _, id := range owners {
+		rows = append(rows, models.KernelEffectOwnerRecord{GrantID: g.ID, ParentRunID: id})
 	}
-	active := make([]kernel.GrantIdentity, 0, len(activeRows))
-	for _, r := range activeRows {
-		active = append(active, kernel.GrantIdentity{GrantID: r.GrantID, RunID: r.ChildRunID})
-	}
-	var retiredRows []struct {
-		GrantID string
-		RunID   string
-	}
-	if err := tx.Raw("SELECT grant_id, run_id FROM agent_kernel_owned_retirements").Scan(&retiredRows).Error; err != nil {
-		return translateKernelError(err)
-	}
-	retired := make([]kernel.GrantIdentity, 0, len(retiredRows))
-	for _, r := range retiredRows {
-		retired = append(retired, kernel.GrantIdentity{GrantID: r.GrantID, RunID: r.RunID})
-	}
-	var managed []kernel.GrantIdentity
-	var histories []models.KernelManagedHistoryRecord
-	if err := tx.Find(&histories).Error; err != nil {
-		return translateKernelError(err)
-	}
-	for _, h := range histories {
-		ids, err := kernel.ManagedGrantIdentities([]byte(h.Payload), h.RunID)
-		if err != nil {
-			return err
-		}
-		managed = append(managed, ids...)
-	}
-	var transfers []models.KernelManagedTransferRecord
-	if err := tx.Find(&transfers).Error; err != nil {
-		return translateKernelError(err)
-	}
-	for _, tr := range transfers {
-		ids, err := kernel.ManagedGrantIdentities([]byte(tr.Payload), tr.RunID)
-		if err != nil {
-			return err
-		}
-		managed = append(managed, ids...)
-	}
-	ids, err := kernel.MergeGrantIdentities(active, retired, managed)
-	if err != nil {
-		return err
-	}
-	for _, i := range ids {
-		row := models.KernelGrantIdentityRecord{GrantID: i.GrantID, RunID: i.RunID}
-		if err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
-			return translateKernelError(err)
-		}
-		var existing models.KernelGrantIdentityRecord
-		if err = tx.Where("grant_id = ?", i.GrantID).First(&existing).Error; err != nil {
-			return translateKernelError(err)
-		}
-		if existing.RunID != i.RunID {
-			return kernel.ErrExecutionConflict
-		}
-	}
-	return nil
+	return translateKernelApplyError(tx.Create(&rows).Error)
 }
-
-// Consume exactly one original self-scoped managed grant. Never delete by
-// global ID alone, even if the identity reservation normally prevents a
-// collision. A malformed or missing fence rolls the entire transfer back.
-func pgConsumeManagedGrant(tx *gorm.DB, g kernel.ChildExecutionGrant) error {
-	row, err := pgLoadOwnedPhysicalGrant(tx, g)
-	if err != nil || row.SettledRevision != 0 || pgCallbackCompletion(row) != (kernel.OwnedPhysicalCallbackCompletion{}) {
-		return kernel.ErrExecutionConflict
+func pgEffectOwners(tx *gorm.DB, g kernel.ChildExecutionGrant) (int64, error) {
+	var owners []string
+	if e := tx.Model(&models.KernelEffectOwnerRecord{}).Where("grant_id=?", g.ID).Pluck("parent_run_id", &owners).Error; e != nil {
+		return 0, translateKernelError(e)
 	}
-	r := tx.Where("grant_id = ? AND parent_run_id = ? AND child_run_id = ? AND start_revision = ? AND execution_owner_id = ? AND execution_lease_id = ? AND execution_epoch = ? AND admission_source_hash = ? AND admission_operation = ? AND settled_revision = 0 AND callback_return_revision = 0",
-		g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation).Delete(&models.KernelChildEffectGrantRecord{})
+	store := &KernelStore{db: tx}
+	ctx := tx.Statement.Context
+	current, e := store.Load(ctx, g.ChildRunID)
+	if e != nil {
+		return 0, e
+	}
+	if e = kernel.ValidatePhysicalExecutionOwners(ctx, current.Run, owners, store.Load); e != nil {
+		return 0, e
+	}
+	return int64(len(owners)), nil
+}
+func pgConsumePhysicalGrant(tx *gorm.DB, g kernel.ChildExecutionGrant, receipt string) error {
+	count, e := pgEffectOwners(tx, g)
+	if e != nil {
+		return e
+	}
+	r := pgActiveEffects(tx).Where("grant_id=? AND child_run_id=? AND start_revision=? AND execution_owner_id=? AND execution_lease_id=? AND execution_epoch=? AND admission_source_hash=? AND admission_operation=? AND retirement_json=''", g.ID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation).UpdateColumns(map[string]any{"start_revision": 0, "execution_owner_id": "", "execution_lease_id": "", "execution_epoch": 0, "admission_source_hash": "", "admission_operation": "", "callback_return_revision": 0, "callback_return_source_hash": "", "callback_host_completed": false, "callback_lease_owned": false, "callback_control_custody": "", "callback_tool_returns": "", "retirement_json": receipt})
+	if e = pgEffectChanged(r); e != nil {
+		return e
+	}
+	r = tx.Where("grant_id=?", g.ID).Delete(&models.KernelEffectOwnerRecord{})
 	if r.Error != nil {
-		return translateKernelError(r.Error)
+		return translateKernelApplyError(r.Error)
 	}
-	if r.RowsAffected != 1 {
+	if r.RowsAffected != count {
 		return kernel.ErrExecutionConflict
 	}
 	return nil

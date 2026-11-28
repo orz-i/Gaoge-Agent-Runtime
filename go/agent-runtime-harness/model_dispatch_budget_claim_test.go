@@ -3,7 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
-	"reflect"
+
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,7 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type budgetClaimClock struct{ nanos atomic.Int64 }
@@ -27,23 +26,6 @@ func newBudgetClaimClock() *budgetClaimClock {
 func (clock *budgetClaimClock) Now() time.Time          { return time.Unix(0, clock.nanos.Load()).UTC() }
 func (clock *budgetClaimClock) Advance(d time.Duration) { clock.nanos.Add(d.Nanoseconds()) }
 
-type heldBudgetModelMiddleware struct {
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (*heldBudgetModelMiddleware) Name() string { return "test.wait-before-physical-model" }
-func (middleware *heldBudgetModelMiddleware) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	middleware.once.Do(func() { close(middleware.entered) })
-	select {
-	case <-middleware.release:
-	case <-ctx.Done():
-		return model.Response{}, ctx.Err()
-	}
-	return next(ctx, request, emit)
-}
-
 type countedBudgetModel struct {
 	calls         atomic.Int64
 	outputCeiling atomic.Int64
@@ -55,40 +37,33 @@ func (client *countedBudgetModel) Generate(_ context.Context, request model.Requ
 	return model.Response{Content: "successful recovery"}, nil
 }
 
-// Shared Budget persists its dispatched marker BEFORE calling the next
-// Middleware. If Agent's final Claim gate then proves the Provider was never
-// invoked, the budget must not leave an unknown charge that permanently
-// prevents a valid later Resume with the same durable invocation identity.
+// The admission barrier precedes the atomic native dispatch. The final
+// claim gate must not leave any reservation or unknown charge if no physical
+// request was admitted; the exact durable invocation may later resume.
 func TestSharedBudgetReleasesProvenUnsentModelClaimAndAllowsRecovery(t *testing.T) {
-	testSharedBudgetUnsentClaim(t, true, 0)
+	testSharedBudgetUnsentClaim(t, 0)
 }
 func TestSharedBudgetPreservesFrozenOutputLimitOnProvenUnsentRecovery(t *testing.T) {
-	testSharedBudgetUnsentClaim(t, true, 128)
+	testSharedBudgetUnsentClaim(t, 128)
 }
-func TestSharedBudgetOpaqueHeldCallbackRemainsUnknown(t *testing.T) {
-	testSharedBudgetUnsentClaim(t, false, 0)
-}
-func testSharedBudgetUnsentClaim(t *testing.T, bounded bool, outputCeiling int64) {
-	store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2, MaxConcurrentRuns: 1})
+func testSharedBudgetUnsentClaim(t *testing.T, outputCeiling int64) {
+	_, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2, MaxConcurrentRuns: 1})
 	clock := newBudgetClaimClock()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
-	held := &heldBudgetModelMiddleware{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	shared = bindHostedBudgetAuthority(t, runtime, shared)
+	entered, release := make(chan struct{}, 1), make(chan struct{})
 	var once sync.Once
-	unblock := func() { once.Do(func() { close(held.release) }) }
+	unblock := func() { once.Do(func() { close(release) }) }
 	t.Cleanup(unblock)
 	provider := &countedBudgetModel{}
 	boundedBudget, err := shared.Adapter()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var gate plugin.ModelMiddleware = held
-	if bounded {
-		gate = agent.NewModelAdmissionBarrier(held.entered, held.release)
-	}
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Clock: clock, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{boundedBudget, gate}})
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Clock: clock, Model: provider, BoundedBudget: boundedBudget, ModelAdmissionBarrier: agent.NewModelAdmissionBarrier(entered, release)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,16 +81,16 @@ func testSharedBudgetUnsentClaim(t *testing.T, bounded bool, outputCeiling int64
 		outcomes <- runResult{snapshot, e}
 	}()
 	select {
-	case <-held.entered:
+	case <-entered:
 	case <-time.After(4 * time.Second):
 		t.Fatal("shared Budget did not enter Model middleware")
 	}
-	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ledger.View("").UnknownUsage || provider.calls.Load() != 0 {
-		t.Fatalf("fixture did not persist preflight dispatch marker: %+v calls=%d", ledger.View(""), provider.calls.Load())
+	if ledger.View("").UnknownUsage || len(ledger.Reservations) != 0 || provider.calls.Load() != 0 {
+		t.Fatalf("pre-entry barrier admitted a physical effect: %+v calls=%d", ledger.View(""), provider.calls.Load())
 	}
 	clock.Advance(3 * time.Minute)
 	unblock()
@@ -129,29 +104,12 @@ func testSharedBudgetUnsentClaim(t *testing.T, bounded bool, outputCeiling int64
 	case <-time.After(4 * time.Second):
 		t.Fatal("expired worker did not finish")
 	}
-	ledger, err = store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err = runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 || provider.calls.Load() != 0 {
 		t.Fatalf("proven unsent dispatch retained uncertain quota: %+v calls=%d", ledger.View(""), provider.calls.Load())
-	}
-	if !bounded {
-		grant, grantErr := runtime.LookupChildExecution(t.Context(), pending.Run.ID)
-		if grantErr != nil {
-			t.Fatal(grantErr)
-		}
-		_, resumeErr := runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-		if !errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || provider.calls.Load() != 0 {
-			t.Fatalf("opaque layer borrowed bounded Budget authority: %v calls=%d", resumeErr, provider.calls.Load())
-		}
-		actual, loadErr := runtime.Load(t.Context(), pending.Run.ID)
-		retained, lookupErr := runtime.LookupChildExecution(t.Context(), pending.Run.ID)
-		afterLedger, ledgerErr := store.LoadBudget(t.Context(), "hosted-budget-turn")
-		if loadErr != nil || lookupErr != nil || ledgerErr != nil || !reflect.DeepEqual(pending, actual) || grant != retained || !reflect.DeepEqual(ledger, afterLedger) {
-			t.Fatalf("opaque callback recovery changed durable authority: %v %v %v", loadErr, lookupErr, ledgerErr)
-		}
-		return
 	}
 	recovered, err := runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || recovered.Run.Status != kernel.RunStatusCompleted || provider.calls.Load() != 1 {
@@ -160,7 +118,7 @@ func testSharedBudgetUnsentClaim(t *testing.T, bounded bool, outputCeiling int64
 	if provider.outputCeiling.Load() != outputCeiling {
 		t.Fatalf("budget recovery changed the frozen output ceiling: got=%d want=%d", provider.outputCeiling.Load(), outputCeiling)
 	}
-	ledger, err = store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err = runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,9 +131,18 @@ func TestSharedBudgetCannotTreatProviderErrorAsUnsentProof(t *testing.T) {
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
 	// A remote Provider error may happen to be identical to an Agent claim
 	// rejection. Only the Agent's private terminal-boundary proof can refund.
-	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		return model.Response{}, agent.ErrModelInvocationBusy
-	})
+	var fixturePhysical1 model.Request
+	_, err := func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical1, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
+		}
+		response, callErr := func(q model.Request) (model.Response, error) {
+			return model.Response{}, agent.ErrModelInvocationBusy
+		}(fixturePhysical1)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical1, response, callErr)
+	}()
 	if !errors.Is(err, agent.ErrModelInvocationBusy) || agent.IsModelPreDispatchDenied(err) {
 		t.Fatalf("ordinary Provider error was misclassified as no-send: %v", err)
 	}
@@ -183,11 +150,11 @@ func TestSharedBudgetCannotTreatProviderErrorAsUnsentProof(t *testing.T) {
 	if err != nil || !ledger.View("").UnknownUsage || !ledger.Reservations["model:"+request.InvocationID].Dispatched {
 		t.Fatalf("uncertain physical Provider result was refunded: ledger=%+v, err=%v", ledger, err)
 	}
-	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		t.Fatal("unknown Provider result was sent again")
-		return model.Response{}, nil
-	})
-	if !errors.Is(err, budget.ErrWaiting) {
+	_, err = func() (model.Response, error) {
+		_, e := admitModelLedgerFixture(t.Context(), shared, request)
+		return model.Response{}, e
+	}()
+	if !errors.Is(err, budget.ErrLedgerConflict) {
 		t.Fatalf("unknown request regained dispatch permission: %v", err)
 	}
 }
@@ -203,9 +170,10 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nativeShared := bindHostedBudgetAuthority(t, rt, shared)
 	provider := &countedBudgetModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: rt, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)},
+		Runtime: rt, Model: provider, BoundedBudget: mustBudgetAdapter(t, nativeShared),
 		PrepareModelRequest: func(context.Context, model.Request) (model.Request, error) {
 			return model.Request{}, errors.New("pre-intent context admission rejected")
 		},
@@ -220,7 +188,7 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("pre-intent rejection was not observed")
 	}
-	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil && !errors.Is(err, budget.ErrLedgerNotFound) {
 		t.Fatal(err)
 	}
@@ -231,14 +199,23 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	// A separate pre-approved model step may consume the still-available
 	// hosted Tool allowance in exactly one budget receipt.
 	parent.InvocationID = "parent-uses-unsent-budget"
-	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), parent, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
-			t.Fatalf("preparation failure reserved the hosted budget: %+v", bounded)
+	var fixturePhysical2 model.Request
+	_, err = func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical2, admissionErr = admitModelLedgerFixture(t.Context(), shared, parent)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
 		}
-		return model.Response{Content: "parent result", HostedToolCalls: []model.HostedToolCall{{
-			ID: "native-parent-1", ToolKey: "native.search", Status: "completed",
-		}}}, nil
-	})
+		response, callErr := func(bounded model.Request) (model.Response, error) {
+			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+				t.Fatalf("preparation failure reserved the hosted budget: %+v", bounded)
+			}
+			return model.Response{Content: "parent result", HostedToolCalls: []model.HostedToolCall{{
+				ID: "native-parent-1", ToolKey: "native.search", Status: "completed",
+			}}}, nil
+		}(fixturePhysical2)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical2, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,52 +225,6 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	}
 	if view := ledger.View(""); view.Usage.LLMCalls != 1 || view.Usage.HostedToolCalls != 1 || view.UnknownUsage {
 		t.Fatalf("parent budget was not available after pre-intent error: %+v", view)
-	}
-}
-
-type corruptFrozenModelRequest struct{}
-
-func (corruptFrozenModelRequest) Name() string { return "test.invalid-frozen-model" }
-func (corruptFrozenModelRequest) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	request.Model = "unauthorized-model"
-	return next(ctx, request, emit)
-}
-
-func TestPermanentModelDispatchViolationTerminatesAndReleasesUnsentBudget(t *testing.T) {
-	store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2})
-	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := &countedBudgetModel{}
-	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: provider,
-		ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared), corruptFrozenModelRequest{}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	failed, err := runner.StartRun(t.Context(), agent.StartRequest{
-		ID: "hosted-run", Actor: kernel.ActorRef{TenantID: "audit", ActorID: "actor"},
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: "invalid-dispatch"},
-		Goal:   "should never be dispatched", Model: "original-model",
-	})
-	if !errors.Is(err, agent.ErrInvalidRequest) || failed.Run.Status != kernel.RunStatusFailed ||
-		failed.Run.ErrorCode != "agent.model_dispatch_invalid" || provider.calls.Load() != 0 {
-		t.Fatalf("invalid model dispatch did not terminate safely: status=%s code=%q err=%v calls=%d",
-			failed.Run.Status, failed.Run.ErrorCode, err, provider.calls.Load())
-	}
-	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-	if err != nil {
-		t.Fatal(err)
-	}
-	reservation := ledger.Reservations["model:"+agentInvocationID(t, failed)]
-	if reservation.Dispatched || ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 {
-		t.Fatalf("permanently invalid no-send leaked shared-budget quota: %+v view=%+v", reservation, ledger.View(""))
-	}
-	_, err = runner.Resume(t.Context(), failed.Run.ID, failed.Run.Revision)
-	if !errors.Is(err, agent.ErrRunTerminal) || provider.calls.Load() != 0 {
-		t.Fatalf("permanent middleware mutation was reissued: err=%v calls=%d", err, provider.calls.Load())
 	}
 }
 

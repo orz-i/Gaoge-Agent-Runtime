@@ -53,7 +53,7 @@ func testDeferredBoundedAgentCancellation(t *testing.T, withHostApprovalPolicy b
 		if e != nil {
 			return nil, nil, e
 		}
-		shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
+		shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
 		if e != nil {
 			return nil, nil, e
 		}
@@ -76,12 +76,11 @@ func testDeferredBoundedAgentCancellation(t *testing.T, withHostApprovalPolicy b
 		original, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry,
 			Approvals: interactionadapter.New(approvals), ApprovalPolicies: policyLayers,
 			ToolOutcomeVerifier: d,
-			RunMiddleware:       []plugin.RunMiddleware{bounded}, ModelMiddleware: []plugin.ModelMiddleware{bounded},
-			ToolMiddleware: []plugin.ToolMiddleware{bounded}})
+			BoundedBudget:       bounded})
 		if e != nil {
 			return nil, nil, e
 		}
-		c, e := handoff.NewDeferredAgent(original)
+		c, e := handoff.New(handoff.Config{Local: original, PrepareLocal: true})
 		if e != nil {
 			return nil, nil, e
 		}
@@ -137,7 +136,7 @@ func testDeferredBoundedAgentCancellation(t *testing.T, withHostApprovalPolicy b
 	if err != nil {
 		t.Fatal(err)
 	}
-	if childBefore.Run.Status != kernel.RunStatusRunning || rt.VerifyPreparedRootSettlement(t.Context(), childBefore) != nil {
+	if childBefore.Run.Status != kernel.RunStatusRunning || rt.VerifyExecutionCustody(t.Context(), childBefore, kernel.CustodyPrepared) != nil {
 		t.Fatalf("unexpected prior child status: %s", childBefore.Run.Status)
 	}
 	cancelled, err := second.CancelSubtask(t.Context(), started.Turn.ID, task.ID, "bounded original cancellation")

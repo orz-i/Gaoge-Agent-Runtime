@@ -74,6 +74,12 @@ type RunLoader interface {
 	Load(stdcontext.Context, string) (kernel.Snapshot, error)
 }
 
+// RunCanceller is the existing owner control contract. The Host selects the
+// original executor; a shared remote Run kind is not a protocol routing key.
+type RunCanceller interface {
+	Cancel(stdcontext.Context, string, uint64, string) (kernel.Snapshot, error)
+}
+
 // RunAuthorizer is the host-owned object authorization seam. Implementations
 // may consult request-scoped RBAC/tenant claims from ctx; Kernel remains policy-free.
 type RunAuthorizer interface {
@@ -143,27 +149,24 @@ func (shared *Shared) RequestID(context *gin.Context) string {
 
 // Dependencies are the feature-neutral Runtime capabilities mounted by the core HTTP adapter.
 type Dependencies struct {
-	Runtime              *kernel.Runtime
-	Feed                 *runfeed.Feed
-	Cancellations        *CancellationRouter
-	Shared               *Shared
-	PendingToolProjector PendingToolProjector
+	Runtime   *kernel.Runtime
+	Feed      *runfeed.Feed
+	Canceller RunCanceller
+	Shared    *Shared
 }
 
 type Handler struct {
-	runtime              *kernel.Runtime
-	feed                 *runfeed.Feed
-	cancellations        *CancellationRouter
-	shared               *Shared
-	pendingToolProjector PendingToolProjector
+	runtime   *kernel.Runtime
+	feed      *runfeed.Feed
+	canceller RunCanceller
+	shared    *Shared
 }
 
 func NewHandler(dependencies Dependencies) *Handler {
 	return &Handler{
 		runtime: dependencies.Runtime,
-		feed:    dependencies.Feed, cancellations: dependencies.Cancellations,
-		shared:               dependencies.Shared,
-		pendingToolProjector: dependencies.PendingToolProjector,
+		feed:    dependencies.Feed, canceller: dependencies.Canceller,
+		shared: dependencies.Shared,
 	}
 }
 

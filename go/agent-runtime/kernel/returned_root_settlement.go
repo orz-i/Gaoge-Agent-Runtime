@@ -1,33 +1,10 @@
 package kernel
 
-import "context"
-
-// ReturnedRootSettlementStore proves that the current owned callback has
-// returned under its original custody, while its physical grant is retained
-// for receipt recovery/retirement, or the exact current retirement has committed.
-// This is NOT a terminal/descendant settlement vote or a
-// capability to finish the grant. A subsequent Cancel must still arbitrate
-// the native CAS and independently verify/clean up every child effect.
-type ReturnedRootSettlementStore interface {
-	VerifyReturnedRootSettlement(context.Context, Snapshot) error
-}
-
-func (r *Runtime) VerifyReturnedRootSettlement(ctx context.Context, expected Snapshot) error {
-	if r == nil || ctx == nil || expected.Run.ID == "" {
-		return ErrInvalidInput
-	}
-	store, ok := r.store.(ReturnedRootSettlementStore)
-	if !ok {
-		return ErrExecutionRequired
-	}
-	return store.VerifyReturnedRootSettlement(ctx, expected)
-}
-
-// VerifyReturnedRootSettlementFacts is shared by all native Stores under the
+// verifyReturnedRootSettlementFacts is shared by all native Stores under the
 // original Run lock. Expiry, a callback-shaped public snapshot, or a newer safe
 // callback cannot replace the actual current return and complete safe history.
-func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	grant ChildExecutionGrant, completion OwnedPhysicalCallbackCompletion, receipts []OwnedRetirementReceipt, hasGrants bool,
+func verifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
+	grant ChildExecutionGrant, completion PhysicalCallbackCompletion, receipts []OwnedRetirementReceipt, hasGrants bool,
 ) error {
 	if current.Run.ID == "" || current.Run.ID != expected.Run.ID || current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
 		(current.Run.Status != RunStatusRunning && current.Run.Status != RunStatusWaitingInput && current.Run.Status != RunStatusPausedBudget) ||
@@ -36,7 +13,7 @@ func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 	}
 	var pending OwnedRetirementReceipt
 	if grant == (ChildExecutionGrant{}) {
-		if completion != (OwnedPhysicalCallbackCompletion{}) {
+		if completion != (PhysicalCallbackCompletion{}) {
 			return ErrExecutionConflict
 		}
 		// Finish already committed and released the owned lease. Observe
@@ -49,7 +26,7 @@ func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 		grant, completion = pending.Evidence.Grant, pending.Evidence.Completion
 	}
 	if grant.ID == "" || grant.ExpectedRevision == 0 || grant.ChildRunID != current.Run.ID || !grant.IsOwned() || (pending.Version == 0 && !grant.MatchesExecution(lease)) ||
-		grant.ExecutionEpoch != epoch || epoch != physicalEpoch || ValidateOwnedPhysicalCompletion(grant, completion) != nil ||
+		grant.ExecutionEpoch != epoch || epoch != physicalEpoch || ValidatePhysicalCompletion(grant, completion) != nil ||
 		!completion.HostCompleted || !completion.LeaseOwned || completion.ControlCustody != OwnedCustodyScoped ||
 		completion.ReturnRevision > current.Run.Revision {
 		return ErrExecutionConflict

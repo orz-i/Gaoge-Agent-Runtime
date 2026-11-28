@@ -29,7 +29,7 @@ func TestOwnedPhysicalEntryOperationAndAuthority(t *testing.T) {
 					transfer = ManagedTransfer{SuccessorGrant: a, SuccessorLease: lease, SafePoint: point, Selection: selection, Revision: 3}
 				}
 				epoch := a.ExecutionEpoch - 1
-				w, e := ValidateOwnedPhysicalEntry(a, s, s, lease, lease, now, false, epoch, 0, OwnedPhysicalCallbackCompletion{}, transfer)
+				w, e := ValidateOwnedPhysicalEntry(a, s, s, lease, lease, now, false, epoch, 0, PhysicalCallbackCompletion{}, transfer)
 				want := ((op == "start" || op == "prepare" || op == "resume" || op == "managed_resume") && status == RunStatusRunning) || (op == "approval" && status == RunStatusWaitingInput)
 				if (e == nil) != want || (want && w.LeaseRemaining != time.Minute) {
 					t.Fatalf("entry status mismatch: %+v %v", w, e)
@@ -39,39 +39,39 @@ func TestOwnedPhysicalEntryOperationAndAuthority(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name  string
-		alter func(*Snapshot, *Snapshot, *ExecutionLease, *uint64, *uint64, *OwnedPhysicalCallbackCompletion, *ManagedTransfer, *bool)
+		alter func(*Snapshot, *Snapshot, *ExecutionLease, *uint64, *uint64, *PhysicalCallbackCompletion, *ManagedTransfer, *bool)
 		want  error
 	}{
-		{"expired persisted lease", func(_, _ *Snapshot, l *ExecutionLease, _, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+		{"expired persisted lease", func(_, _ *Snapshot, l *ExecutionLease, _, _ *uint64, _ *PhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			l.ExpiresAt = now
 		}, ErrExecutionConflict},
-		{"foreign epoch", func(_, _ *Snapshot, l *ExecutionLease, _, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+		{"foreign epoch", func(_, _ *Snapshot, l *ExecutionLease, _, _ *uint64, _ *PhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			l.Epoch++
 		}, ErrExecutionConflict},
-		{"foreign owner", func(_, _ *Snapshot, l *ExecutionLease, _, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+		{"foreign owner", func(_, _ *Snapshot, l *ExecutionLease, _, _ *uint64, _ *PhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			l.OwnerID = "foreign"
 		}, ErrExecutionConflict},
-		{"already entered", func(_, _ *Snapshot, _ *ExecutionLease, p, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+		{"already entered", func(_, _ *Snapshot, _ *ExecutionLease, p, _ *uint64, _ *PhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			*p = g.ExecutionEpoch
 		}, ErrExecutionConflict},
-		{"physical epoch changed", func(_, _ *Snapshot, _ *ExecutionLease, p, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+		{"physical epoch changed", func(_, _ *Snapshot, _ *ExecutionLease, p, _ *uint64, _ *PhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			*p = 3
 		}, ErrExecutionConflict},
-		{"settled", func(_, _ *Snapshot, _ *ExecutionLease, _, m *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+		{"settled", func(_, _ *Snapshot, _ *ExecutionLease, _, m *uint64, _ *PhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			*m = 3
 		}, ErrExecutionConflict},
-		{"return exists", func(_, _ *Snapshot, _ *ExecutionLease, _, _ *uint64, c *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+		{"return exists", func(_, _ *Snapshot, _ *ExecutionLease, _, _ *uint64, c *PhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			c.GrantID = g.ID
 		}, ErrExecutionConflict},
-		{"quarantined", func(_, _ *Snapshot, _ *ExecutionLease, _, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, q *bool) {
+		{"quarantined", func(_, _ *Snapshot, _ *ExecutionLease, _, _ *uint64, _ *PhysicalCallbackCompletion, _ *ManagedTransfer, q *bool) {
 			*q = true
 		}, ErrExecutionQuarantined},
-		{"source event head", func(a, _ *Snapshot, _ *ExecutionLease, _, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+		{"source event head", func(a, _ *Snapshot, _ *ExecutionLease, _, _ *uint64, _ *PhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			a.EventHead++
 		}, ErrExecutionConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a, b, l, p, m, c, transfer, q := base, base, lease, g.ExecutionEpoch-1, uint64(0), OwnedPhysicalCallbackCompletion{}, ManagedTransfer{}, false
+			a, b, l, p, m, c, transfer, q := base, base, lease, g.ExecutionEpoch-1, uint64(0), PhysicalCallbackCompletion{}, ManagedTransfer{}, false
 			tc.alter(&a, &b, &l, &p, &m, &c, &transfer, &q)
 			if w, e := ValidateOwnedPhysicalEntry(g, a, b, lease, l, now, q, p, m, c, transfer); !errors.Is(e, tc.want) || w != (OwnedPhysicalEntryWindow{}) {
 				t.Fatalf("invalid entry: %+v %v", w, e)
@@ -82,7 +82,7 @@ func TestOwnedPhysicalEntryOperationAndAuthority(t *testing.T) {
 	// first-party receipt-only path may use this distinction.
 	due := now.Add(-time.Second)
 	base.Run.DeadlineAt = &due
-	window, err := ValidateOwnedPhysicalEntry(g, base, base, lease, lease, now, false, g.ExecutionEpoch-1, 0, OwnedPhysicalCallbackCompletion{}, ManagedTransfer{})
+	window, err := ValidateOwnedPhysicalEntry(g, base, base, lease, lease, now, false, g.ExecutionEpoch-1, 0, PhysicalCallbackCompletion{}, ManagedTransfer{})
 	if err != nil || window.DeadlineRemaining != -time.Second || window.LeaseRemaining != time.Minute {
 		t.Fatalf("deadline observation: %+v %v", window, err)
 	}
@@ -92,12 +92,12 @@ func TestOwnedPhysicalEntryOperationAndAuthority(t *testing.T) {
 func TestOwnedNoEntryEvidenceCannotBecomeActualReturn(t *testing.T) {
 	_, source, lease, g, _, _ := managedReducerFixture()
 	g.ExpectedRevision = source.Run.Revision
-	outcome := OwnedPhysicalCallbackOutcome{LeaseOwned: true, ControlCustody: OwnedCustodyNotEntered}
-	payload := OwnedPhysicalCallbackReturnPayload(source, outcome)
-	seal := func(domain string) OwnedPhysicalCallbackReturn {
-		return OwnedPhysicalCallbackReturn{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, domain, g.ID, payload, nil)}
+	outcome := PhysicalCallbackOutcome{LeaseOwned: true, ControlCustody: OwnedCustodyNotEntered}
+	payload := PhysicalCallbackReturnPayload(source, outcome)
+	seal := func(domain string) PhysicalCallbackReturn {
+		return PhysicalCallbackReturn{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, domain, g.ID, payload, nil)}
 	}
-	if seal("agent_owned_callback_return").Matches(g, source, outcome) {
+	if seal("agent_physical_callback_return").Matches(g, source, outcome) {
 		t.Fatal("actual return domain forged no-entry proof")
 	}
 	p := seal("agent_owned_callback_not_entered")
@@ -115,15 +115,15 @@ func TestOwnedNoEntryEvidenceCannotBecomeActualReturn(t *testing.T) {
 	if c.MatchesNotEnteredSnapshot(g, changed) {
 		t.Fatal("changed source inherited no-entry")
 	}
-	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_settled", g.ID, source.State, source)}
-	receipt, e := BuildOwnedRetirementReceipt(g, source, lease, c, permit, []ManagedTransfer{})
+	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_physical_settled", g.ID, source.State, source)}
+	receipt, e := BuildOwnedRetirementReceipt(g, source, lease, c, permit, ManagedAuthority{}, ManagedTransfer{})
 	if e != nil || !receipt.Valid() || !receipt.Evidence.Completion.NotEntered() {
 		t.Fatalf("exact no-entry could not retire: %v", e)
 	}
-	if _, e = BuildOwnedRetirementReceipt(g, changed, lease, c, permit, []ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
+	if _, e = BuildOwnedRetirementReceipt(g, changed, lease, c, permit, ManagedAuthority{}, ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatal("changed source borrowed no-entry")
 	}
-	if _, e = BuildOwnedRetirementReceipt(g, source, lease, c, permit, []ManagedTransfer{{}}); !errors.Is(e, ErrExecutionConflict) {
+	if _, e = BuildOwnedRetirementReceipt(g, source, lease, c, permit, ManagedAuthority{Namespace: "foreign"}, ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatal("no-entry retirement borrowed managed closure")
 	}
 	if e = ValidateOwnedPhysicalRecovery(g, source, lease, source.Run.Revision, StoreMutation{}, OwnedPhysicalRecovery{modelEvidence: true}, c, 0); !errors.Is(e, ErrExecutionConflict) {

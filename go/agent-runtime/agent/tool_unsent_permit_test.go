@@ -26,6 +26,19 @@ func (m *permitUnsentModel) Generate(context.Context, model.Request) (model.Resp
 	return model.Response{Content: "done"}, nil
 }
 
+type permitBudgetPorts struct {
+	toolAccountingPorts
+	parented bool
+}
+
+func (p permitBudgetPorts) ResolveScope(ctx context.Context, id string) (BoundedBudgetScope, error) {
+	scope, e := p.toolAccountingPorts.ResolveScope(ctx, id)
+	if p.parented {
+		scope.Runs[0].Binding.ParentRunID = "permit-parent"
+	}
+	return scope, e
+}
+
 // Occupy the actual shared Runner semaphore, not a simulated Budget error.
 // Waiting for that permit must not create a shared reservation or dispatch
 // intent, and the exact original child/root segment can relinquish ownership.
@@ -37,12 +50,13 @@ func TestNativeToolPermitPrecedesSharedCapacity(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
-			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			native := memory.NewStore()
+			rt, err := kernel.New(kernel.Dependencies{Store: native})
 			if err != nil {
 				t.Fatal(err)
 			}
-			ledger := budget.NewMemoryLedgerStore()
-			adapter, err := NewBoundedBudgetAdapter(ledger, toolAccountingPorts{})
+			ledger := budget.LedgerStore(native)
+			adapter, err := NewBoundedBudgetAdapter(ledger, permitBudgetPorts{parented: parented})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -62,7 +76,7 @@ func TestNativeToolPermitPrecedesSharedCapacity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{policy}, ToolMiddleware: []plugin.ToolMiddleware{adapter},
+			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{policy}, BoundedBudget: adapter, StartControlPreflight: func(context.Context, StartRequest) error { return nil },
 				Execution: ExecutionPolicy{Tool: CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}}})
 			if err != nil {
 				t.Fatal(err)
@@ -71,7 +85,7 @@ func TestNativeToolPermitPrecedesSharedCapacity(t *testing.T) {
 			thread := kernel.ThreadRef{Kind: "test", ID: "thread"}
 			req := StartRequest{ID: "permit-root", Actor: actor, Thread: thread, Goal: "read", ToolKeys: []string{"read"}}
 			if parented {
-				parent, err := rt.Create(ctx, kernel.CreateRequest{ID: "permit-parent", Kind: "workflow", Actor: actor, Thread: thread, Goal: "parent", State: json.RawMessage("{}")})
+				parent, err := rt.Create(ctx, kernel.CreateRequest{ID: "permit-parent", Kind: "workflow", Actor: actor, Thread: thread, Goal: "parent", State: json.RawMessage("{}"), Budget: &budget.RunEnrollment{ScopeID: "turn", Limits: budget.Limits{MaxToolCalls: 2}}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -114,8 +128,12 @@ func TestNativeToolPermitPrecedesSharedCapacity(t *testing.T) {
 					}
 				}
 			}
-			if _, err = ledger.LoadBudget(ctx, "turn"); !errors.Is(err, budget.ErrLedgerNotFound) {
-				t.Fatal("local queue acquired shared capacity", err)
+			admitted, err := ledger.LoadBudget(ctx, "turn")
+			if err != nil || admitted.View("").Usage.LLMCalls != 1 || admitted.View("").Reserved.ToolCalls != 0 {
+				t.Fatal("local queue changed the original model-only accounting", err, admitted.View(""))
+			}
+			if _, exists := admitted.Reservations["tool:"+req.ID+":permit-call"]; exists {
+				t.Fatal("local queue acquired shared Tool capacity")
 			}
 			cancel()
 			select {

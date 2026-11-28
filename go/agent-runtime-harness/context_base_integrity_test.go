@@ -39,12 +39,12 @@ func TestContextBaseAgentOnlyNilSeedAdmissionAndConfigGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The AgentSpec hard cut deliberately changes the private Config hash,
-	// but original Turn/Invocation admission identity remains unchanged.
+	// The unified allowance wire removes the independent AutoAllowance field.
+	// New admission and Config identities are exact; ContextSeed is unchanged.
 	const oldSeedJSON = `{"sourcePath":["source-1"],"instructions":"history instructions","entries":[{"id":"entry-1","turnID":"source-turn","sourceID":"source-1","required":true,"message":{"role":"user","content":[{"kind":"text","text":"hello"}]}}]}`
-	if string(seedJSON) != oldSeedJSON || sealed.AdmissionHash != "a7c7328824eb2ed3fe7cc9243f6464560db74da600595c875fb7aa426be6368c" ||
-		sealed.ContentHash != "2c13df1482a95bde1565fa901559177d2e534e8de0b4ebfacc4c5a41a80570f5" || sealed.ID != "hcfg_2c13df1482a95bde1565fa90" {
-		t.Fatalf("legacy nil fields changed admission or Config identity: seed=%s admission=%s config=%s id=%s", seedJSON, sealed.AdmissionHash, sealed.ContentHash, sealed.ID)
+	if string(seedJSON) != oldSeedJSON || sealed.AdmissionHash != "030a3f6006f4b99a48bcc646a402c78d1fbafad87647f6a6631992da9d0e2564" ||
+		sealed.ContentHash != "c2983347b575a679074c304379aba4fdbfe178c752c070f3588ee78b11090e67" || sealed.ID != "hcfg_c2983347b575a679074c3043" {
+		t.Fatalf("unified allowance admission or Config identity drifted: seed=%s admission=%s config=%s id=%s", seedJSON, sealed.AdmissionHash, sealed.ContentHash, sealed.ID)
 	}
 	raw, err := json.Marshal(sealed)
 	if err != nil {

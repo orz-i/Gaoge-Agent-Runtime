@@ -22,11 +22,12 @@ func TestNativeRunAdmissionDenialAtStartPrepareAndApproval(t *testing.T) {
 	for _, op := range []string{"start", "prepare", "approval"} {
 		t.Run(op, func(t *testing.T) {
 			ctx := t.Context()
-			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			native := memory.NewStore()
+			rt, err := kernel.New(kernel.Dependencies{Store: native})
 			if err != nil {
 				t.Fatal(err)
 			}
-			ledger := budget.NewMemoryLedgerStore()
+			ledger := budget.LedgerStore(native)
 			adapter, err := NewBoundedBudgetAdapter(ledger, toolAccountingPorts{})
 			if err != nil {
 				t.Fatal(err)
@@ -50,7 +51,7 @@ func TestNativeRunAdmissionDenialAtStartPrepareAndApproval(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(gate), ApprovalPolicies: []plugin.ApprovalPolicy{policy}, RunMiddleware: []plugin.RunMiddleware{adapter}, ToolMiddleware: []plugin.ToolMiddleware{adapter}})
+			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(gate), ApprovalPolicies: []plugin.ApprovalPolicy{policy}, BoundedBudget: adapter})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,6 +89,15 @@ func TestNativeRunAdmissionDenialAtStartPrepareAndApproval(t *testing.T) {
 					return r.ResolveApproval(c, req.ID, before.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
 				}
 			})
+			if op != "approval" {
+				if !errors.Is(err, budget.ErrExhausted) || obs.Kind() == PhysicalCallSettled || got.Run.ID != "" || physical != 0 || m.calls.Load() != 0 {
+					t.Fatal("creation denial escaped native enrollment", err, got.Run, obs.Kind())
+				}
+				if _, e := rt.Load(ctx, req.ID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatal("denied creation published Run", e)
+				}
+				return
+			}
 			if !errors.Is(err, budget.ErrExhausted) || errors.Is(err, ErrRootOutcomeUnknown) || got.Run.ID != req.ID || obs.Kind() != PhysicalCallSettled || physical != 0 {
 				t.Fatal("native denied operation not settled", err, got.Run, obs.Kind(), physical)
 			}

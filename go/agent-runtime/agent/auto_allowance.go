@@ -13,9 +13,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-// AutoAllowancePolicy opts one Agent Run into bounded renewal at the
-// P1 safe dispatch boundary. It never raises the frozen hard Budget limits.
-// Omit the policy to preserve the exact P1 manual continuation behavior.
+// AutoAllowancePolicy is the optional renewal of a CallAllowance. It never
+// raises the frozen hard Run limits; nil retains manual continuation.
 type AutoAllowancePolicy struct {
 	ModelStep           int `json:"modelStep,omitempty"`
 	ToolStep            int `json:"toolStep,omitempty"`
@@ -24,8 +23,8 @@ type AutoAllowancePolicy struct {
 	MaxNoProgressWindow int `json:"maxNoProgressWindow"`
 }
 
-func autoAllowanceProgress(state *autoAllowanceState) *AutoAllowanceProgress {
-	if state == nil {
+func autoAllowanceProgress(state *callAllowanceState) *AutoAllowanceProgress {
+	if state == nil || state.Renewal == nil {
 		return nil
 	}
 	progress := state.AutoAllowanceProgress
@@ -40,25 +39,8 @@ type AutoAllowanceProgress struct {
 	ToolStalls    int `json:"toolStalls"`
 }
 
-type autoAllowanceState struct {
-	Policy AutoAllowancePolicy `json:"policy"`
-	AutoAllowanceProgress
-	ModelFingerprint string `json:"modelFingerprint,omitempty"`
-	ToolFingerprint  string `json:"toolFingerprint,omitempty"`
-}
-
 const maxAutomaticRenewalsPerDimension = 16
 const maxAutoNoProgressWindow = 4
-
-func initialAutoAllowance(request *AutoAllowancePolicy, allowance *CallAllowance, hard Limits) (*autoAllowanceState, error) {
-	if request == nil {
-		return nil, nil
-	}
-	if !validAutoAllowancePolicy(*request, allowance, hard) {
-		return nil, ErrInvalidCallAllowance
-	}
-	return &autoAllowanceState{Policy: *request}, nil
-}
 
 func validAutoAllowancePolicy(policy AutoAllowancePolicy, allowance *CallAllowance, hard Limits) bool {
 	if allowance == nil || policy.MaxNoProgressWindow < 1 || policy.MaxNoProgressWindow > maxAutoNoProgressWindow {
@@ -83,17 +65,17 @@ func validAutoAllowancePolicy(policy AutoAllowancePolicy, allowance *CallAllowan
 	return true
 }
 
-func validAutoAllowanceState(state *autoAllowanceState, allowance *CallAllowance, hard Limits) bool {
-	if state == nil {
-		return true
+func validRenewalState(state *callAllowanceState, hard Limits) bool {
+	if state.Renewal == nil {
+		return state.AutoAllowanceProgress == (AutoAllowanceProgress{}) && state.ModelFingerprint == "" && state.ToolFingerprint == ""
 	}
-	if !validAutoAllowancePolicy(state.Policy, allowance, hard) {
+	if !validAutoAllowancePolicy(*state.Renewal, &state.CallAllowance, hard) {
 		return false
 	}
-	if state.ModelRenewals < 0 || state.ModelRenewals > state.Policy.MaxModelRenewals ||
-		state.ToolRenewals < 0 || state.ToolRenewals > state.Policy.MaxToolRenewals ||
-		state.ModelStalls < 0 || state.ModelStalls > state.Policy.MaxNoProgressWindow ||
-		state.ToolStalls < 0 || state.ToolStalls > state.Policy.MaxNoProgressWindow {
+	if state.ModelRenewals < 0 || state.ModelRenewals > state.Renewal.MaxModelRenewals ||
+		state.ToolRenewals < 0 || state.ToolRenewals > state.Renewal.MaxToolRenewals ||
+		state.ModelStalls < 0 || state.ModelStalls > state.Renewal.MaxNoProgressWindow ||
+		state.ToolStalls < 0 || state.ToolStalls > state.Renewal.MaxNoProgressWindow {
 		return false
 	}
 	for _, hash := range []string{state.ModelFingerprint, state.ToolFingerprint} {
@@ -129,8 +111,8 @@ func (runner *Runner) advanceCallAllowance(
 func (runner *Runner) autoRenewCallAllowance(
 	ctx context.Context, snapshot kernel.Snapshot, state runState, dimension string,
 ) (kernel.Snapshot, bool, error) {
-	auto := state.AutoAllowance
-	if auto == nil || state.CallAllowance == nil {
+	auto := state.CallAllowance
+	if auto == nil || auto.Renewal == nil {
 		return kernel.Snapshot{}, false, nil
 	}
 	if ctx.Err() != nil {
@@ -147,11 +129,11 @@ func (runner *Runner) autoRenewCallAllowance(
 	var priorStalls int
 	switch dimension {
 	case "model":
-		step, maxRenewals, usedRenewals = auto.Policy.ModelStep, auto.Policy.MaxModelRenewals, auto.ModelRenewals
+		step, maxRenewals, usedRenewals = auto.Renewal.ModelStep, auto.Renewal.MaxModelRenewals, auto.ModelRenewals
 		available = state.Budget.Limits.MaxLLMCalls - state.CallAllowance.LLMCalls
 		previousHash, priorStalls = auto.ModelFingerprint, auto.ModelStalls
 	case "tool":
-		step, maxRenewals, usedRenewals = auto.Policy.ToolStep, auto.Policy.MaxToolRenewals, auto.ToolRenewals
+		step, maxRenewals, usedRenewals = auto.Renewal.ToolStep, auto.Renewal.MaxToolRenewals, auto.ToolRenewals
 		available = state.Budget.Limits.MaxToolCalls - state.CallAllowance.ToolCalls
 		previousHash, priorStalls = auto.ToolFingerprint, auto.ToolStalls
 	default:
@@ -167,27 +149,27 @@ func (runner *Runner) autoRenewCallAllowance(
 	}
 	// Comparing identical *settled* outcomes is conservative; an ambiguous
 	// write is never auto retried and a stall falls back to manual approval.
-	if stalls >= auto.Policy.MaxNoProgressWindow {
+	if stalls >= auto.Renewal.MaxNoProgressWindow {
 		return kernel.Snapshot{}, false, nil
 	}
 	if step > available {
 		step = available
 	}
-	updated := *auto
-	next := *state.CallAllowance
+	increment := CallAllowance{ToolCalls: step}
 	if dimension == "model" {
-		next.LLMCalls += step
-		updated.ModelRenewals++
-		updated.ModelStalls = stalls
-		updated.ModelFingerprint = fingerprint
-	} else {
-		next.ToolCalls += step
-		updated.ToolRenewals++
-		updated.ToolStalls = stalls
-		updated.ToolFingerprint = fingerprint
+		increment = CallAllowance{LLMCalls: step}
 	}
-	state.CallAllowance = &next
-	state.AutoAllowance = &updated
+	if err := state.extendCallAllowance(increment); err != nil {
+		return snapshot, false, err
+	}
+	updated := state.CallAllowance
+	if dimension == "model" {
+		updated.ModelRenewals++
+		updated.ModelStalls, updated.ModelFingerprint = stalls, fingerprint
+	} else {
+		updated.ToolRenewals++
+		updated.ToolStalls, updated.ToolFingerprint = stalls, fingerprint
+	}
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, false, err
@@ -288,11 +270,11 @@ func canonicalToolArguments(arguments json.RawMessage) string {
 // automaticAllowanceHint only guides model output. It cannot alter Tool
 // authorization, Runtime hard limits, actual usage or context ownership.
 func automaticAllowanceHint(state runState) string {
-	if state.AutoAllowance == nil || state.CallAllowance == nil {
+	if state.CallAllowance == nil || state.CallAllowance.Renewal == nil {
 		return ""
 	}
 	modelLeft := state.CallAllowance.LLMCalls - state.Budget.Usage.LLMCalls
-	if modelLeft < 0 || modelLeft > 1 || state.AutoAllowance.Policy.ModelStep <= 0 {
+	if modelLeft < 0 || modelLeft > 1 || state.CallAllowance.Renewal.ModelStep <= 0 {
 		return ""
 	}
 	return fmt.Sprintf(

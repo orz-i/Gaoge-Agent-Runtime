@@ -22,17 +22,10 @@ func (m *deferredModel) Generate(context.Context, model.Request) (model.Response
 	return model.Response{Content: "done"}, nil
 }
 
-type deferredHost struct {
-	calls int
-	after error
-}
+type deferredHost struct{ calls int }
 
-func (*deferredHost) Name() string { return "deferred-test-host" }
-func (h *deferredHost) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	h.calls++
-	s, e := next(ctx)
-	return s, errors.Join(e, h.after)
-}
+func (*deferredHost) Name() string                            { return "deferred-test-observer" }
+func (h *deferredHost) Observe(context.Context, plugin.Event) { h.calls++ }
 func deferredFixture(t *testing.T, host *deferredHost) (*kernel.Runtime, *agent.Runner, *deferredModel) {
 	t.Helper()
 	rt, e := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
@@ -42,7 +35,7 @@ func deferredFixture(t *testing.T, host *deferredHost) (*kernel.Runtime, *agent.
 	m := &deferredModel{}
 	deps := agent.Dependencies{Runtime: rt, Model: m}
 	if host != nil {
-		deps.RunMiddleware = []plugin.RunMiddleware{host}
+		deps.Observers = []plugin.Observer{host}
 	}
 	r, e := agent.NewRunner(deps)
 	if e != nil {
@@ -53,7 +46,7 @@ func deferredFixture(t *testing.T, host *deferredHost) (*kernel.Runtime, *agent.
 func TestDeferredAgentPreparesAndOriginalRunnerContinues(t *testing.T) {
 	host := &deferredHost{}
 	rt, r, m := deferredFixture(t, host)
-	c, e := handoff.NewDeferredAgent(r)
+	c, e := handoff.New(handoff.Config{Local: r, PrepareLocal: true})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -64,7 +57,7 @@ func TestDeferredAgentPreparesAndOriginalRunnerContinues(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	got, e := c.StartOrLoad(ctx, parent, d)
 	cancel()
-	if !errors.Is(e, handoff.ErrChildPending) || got.Status != handoff.StatusRunning || m.calls != 0 || host.calls != 1 {
+	if !errors.Is(e, handoff.ErrChildPending) || got.Status != handoff.StatusRunning || m.calls != 0 || host.calls != 0 {
 		t.Fatalf("prepare=%+v err=%v model=%d host=%d", got, e, m.calls, host.calls)
 	}
 	before, e := rt.Load(t.Context(), d.ChildRunID)
@@ -75,11 +68,11 @@ func TestDeferredAgentPreparesAndOriginalRunnerContinues(t *testing.T) {
 	if !r.VerifyFrozenStartRequest(before, request) || !handoff.VerifiedChildRun(d, parent.Run, before) {
 		t.Fatal("original frozen request changed")
 	}
-	if !c.ObservesLocalKernelRunner(rt) || !c.UsesLocalAgentRunner(rt, r) || c.OwnsLocalKernelRunner(rt) {
+	if !c.ObservesLocalDelegation(rt, d) || c.LocalAgent(rt) != r || r.OwnsKernelRuntime(rt) {
 		t.Fatal("observation/continuation incorrectly merged with cancellation")
 	}
 	_, e = c.StartOrLoad(t.Context(), parent, d)
-	if !errors.Is(e, handoff.ErrChildPending) || host.calls != 1 || m.calls != 0 {
+	if !errors.Is(e, handoff.ErrChildPending) || host.calls != 0 || m.calls != 0 {
 		t.Fatalf("duplicate prepared again: %v", e)
 	}
 	after, e := rt.Load(t.Context(), d.ChildRunID)
@@ -87,11 +80,12 @@ func TestDeferredAgentPreparesAndOriginalRunnerContinues(t *testing.T) {
 		t.Fatal("duplicate changed snapshot", e)
 	}
 	done, e := r.Resume(t.Context(), before.Run.ID, before.Run.Revision)
-	if e != nil || done.Run.Status != kernel.RunStatusCompleted || m.calls != 1 {
+	if e != nil || done.Run.Status != kernel.RunStatusCompleted || m.calls != 1 || host.calls == 0 {
 		t.Fatalf("worker=%+v err=%v model=%d", done.Run, e, m.calls)
 	}
+	observations := host.calls
 	final, e := c.Refresh(t.Context(), parent, d)
-	if e != nil || final.Status != handoff.StatusCompleted || m.calls != 1 {
+	if e != nil || final.Status != handoff.StatusCompleted || m.calls != 1 || host.calls != observations {
 		t.Fatalf("refresh=%+v err=%v", final, e)
 	}
 	foreign := parent
@@ -102,7 +96,7 @@ func TestDeferredAgentPreparesAndOriginalRunnerContinues(t *testing.T) {
 }
 func TestDeferredAgentProofsRejectReplacementAndRoutedIdentity(t *testing.T) {
 	rt, r, _ := deferredFixture(t, nil)
-	c, e := handoff.NewDeferredAgent(r)
+	c, e := handoff.New(handoff.Config{Local: r, PrepareLocal: true})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -111,65 +105,20 @@ func TestDeferredAgentProofsRejectReplacementAndRoutedIdentity(t *testing.T) {
 		t.Fatal(e)
 	}
 	foreign, _, _ := deferredFixture(t, nil)
-	if c.UsesLocalAgentRunner(rt, other) || c.UsesLocalAgentRunner(foreign, r) || c.ObservesLocalKernelRunner(foreign) || c.OwnsLocalKernelRunner(foreign) {
+	if c.LocalAgent(rt) == other || c.LocalAgent(foreign) != nil || c.ObservesLocalKernelRunner(foreign) {
 		t.Fatal("replacement authority accepted")
 	}
-	if !c.OwnsLocalKernelRunner(rt) {
+	if !c.LocalAgent(rt).OwnsKernelRuntime(rt) {
 		t.Fatal("bare Agent original ownership lost")
 	}
-	routed, e := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return r, nil }))
+	routed, e := handoff.New(handoff.Config{Opaque: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return r, nil })})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if routed.UsesLocalAgentRunner(rt, r) || routed.ObservesLocalKernelRunner(rt) || routed.OwnsLocalKernelRunner(rt) {
+	if routed.LocalAgent(rt) != nil || routed.ObservesLocalKernelRunner(rt) {
 		t.Fatal("routed identity promoted to static")
 	}
-	if _, e = handoff.NewDeferredAgent(nil); !errors.Is(e, handoff.ErrInvalidDelegation) {
+	if _, e = handoff.New(handoff.Config{PrepareLocal: true}); !errors.Is(e, handoff.ErrInvalidDelegation) {
 		t.Fatal("nil accepted", e)
-	}
-}
-func TestDeferredAgentPreservesWholeCallbackUnknown(t *testing.T) {
-	sentinel := errors.New("host tail outcome unknown")
-	rt, r, m := deferredFixture(t, &deferredHost{after: sentinel})
-	c, e := handoff.NewDeferredAgent(r)
-	if e != nil {
-		t.Fatal(e)
-	}
-	parent := verifiedHandoffParent()
-	d := handoff.Delegation{ID: "unknown", MemberID: "local", ChildRunID: "unknown-child", Goal: "finish", Model: "test", Status: handoff.StatusQueued}
-	_, e = c.StartOrLoad(t.Context(), parent, d)
-	if !errors.Is(e, sentinel) || !errors.Is(e, agent.ErrRootOutcomeUnknown) || m.calls != 0 {
-		t.Fatalf("unknown lost: %v model=%d", e, m.calls)
-	}
-	before, e := rt.Load(t.Context(), d.ChildRunID)
-	if e != nil {
-		t.Fatal(e)
-	}
-	grant, e := rt.LookupChildExecution(t.Context(), before.Run.ID)
-	if e != nil {
-		t.Fatal(e)
-	}
-	completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-	if e != nil || completion.HostCompleted {
-		t.Fatalf("unknown completion=%+v err=%v", completion, e)
-	}
-	if _, e = rt.LookupOwnedRetirementForRun(t.Context(), before.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
-		t.Fatalf("unknown retired: %v", e)
-	}
-	_, e = r.Resume(t.Context(), before.Run.ID, before.Run.Revision)
-	if !errors.Is(e, agent.ErrRootOutcomeUnknown) || m.calls != 0 {
-		t.Fatalf("unknown replayed: %v model=%d", e, m.calls)
-	}
-	after, e := rt.Load(t.Context(), d.ChildRunID)
-	if e != nil || !reflect.DeepEqual(before, after) {
-		t.Fatal("unknown mutated", e)
-	}
-	retained, e := rt.LookupChildExecution(t.Context(), before.Run.ID)
-	if e != nil || !reflect.DeepEqual(grant, retained) {
-		t.Fatal("unknown grant changed", e)
-	}
-	retainedCompletion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-	if e != nil || !reflect.DeepEqual(completion, retainedCompletion) {
-		t.Fatal("unknown completion changed", e)
 	}
 }

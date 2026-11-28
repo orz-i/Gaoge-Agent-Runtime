@@ -28,9 +28,7 @@ func (runner *Runner) verifyLocalApprovalRun(ctx context.Context, candidate kern
 	if frozen.ID != "" {
 		original, ok := runner.agent.(*agent.Runner)
 		coordinator, bound := runner.handoffs.(*handoff.Coordinator)
-		if !ok || !bound ||
-			(!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) ||
-			!coordinator.UsesLocalAgentForDelegation(runner.runtime, original, frozen) {
+		if !ok || !bound || frozen.Remote || coordinator.LocalAgent(runner.runtime) != original {
 			return ErrRuntimeCancellationUnverified
 		}
 	}

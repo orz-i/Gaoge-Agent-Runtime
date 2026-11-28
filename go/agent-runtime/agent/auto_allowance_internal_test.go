@@ -12,8 +12,7 @@ import (
 
 func TestAutomaticAllowanceHintKeepsSoftBoundaryDistinctFromHardLimits(t *testing.T) {
 	state := runState{
-		CallAllowance: &CallAllowance{LLMCalls: 16},
-		AutoAllowance: &autoAllowanceState{Policy: AutoAllowancePolicy{ModelStep: 8}},
+		CallAllowance: &callAllowanceState{CallAllowance: CallAllowance{LLMCalls: 16, Renewal: &AutoAllowancePolicy{ModelStep: 8}}},
 		Budget:        budget.Snapshot{Usage: budget.Usage{LLMCalls: 15}},
 	}
 	hint := automaticAllowanceHint(state)
@@ -35,7 +34,7 @@ func TestAutomaticAllowanceHintKeepsSoftBoundaryDistinctFromHardLimits(t *testin
 		t.Fatalf("early segment hint = %q", hint)
 	}
 	state.Budget.Usage.LLMCalls = 15
-	state.AutoAllowance = nil
+	state.CallAllowance.Renewal = nil
 	if hint := automaticAllowanceHint(state); hint != "" {
 		t.Fatalf("manual-only runs must not imply automatic renewal: %q", hint)
 	}

@@ -78,7 +78,7 @@ func TestRealPostgresAgentRecoveryAcrossProcessCrash(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = runtime.LookupOwnedPhysicalCallbackReturn(t.Context(), grant); !errors.Is(err, kernel.ErrNotFound) {
+			if _, err = runtime.LookupPhysicalCallbackReturn(t.Context(), grant); !errors.Is(err, kernel.ErrNotFound) {
 				t.Fatalf("crash invented callback return: %v", err)
 			}
 			_, err = runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
@@ -238,46 +238,35 @@ type agentCrashStore struct {
 	afterCommit bool
 }
 
-func (store *agentCrashStore) Apply(ctx context.Context, runID string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	crash := false
-	for _, event := range mutation.Events {
-		crash = crash || event.Type == store.event
+func (store *agentCrashStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil || commitAuth.Lease != nil {
+		crash := false
+		for _, event := range commitMutation.Events {
+			crash = crash || event.Type == store.event
+		}
+		if crash && !store.afterCommit {
+			os.Exit(agentCrashExitCode)
+		}
+		snapshot, _, err := store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if crash && store.afterCommit && err == nil {
+			os.Exit(agentCrashExitCode)
+		}
+		return snapshot, false, err
 	}
-	if crash && !store.afterCommit {
-		os.Exit(agentCrashExitCode)
-	}
-	snapshot, err := store.KernelStore.Apply(ctx, runID, revision, mutation)
-	if crash && store.afterCommit && err == nil {
-		os.Exit(agentCrashExitCode)
-	}
-	return snapshot, err
+	return store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 // Inject the identical original event cutpoint on the actual native CAS port;
 // interface forwarding alone would silently stop exercising crash recovery.
-func (store *agentCrashStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	crash := false
-	for _, event := range mutation.Events {
-		crash = crash || event.Type == store.event
-	}
-	if crash && !store.afterCommit {
-		os.Exit(agentCrashExitCode)
-	}
-	snapshot, err := store.KernelStore.ApplyExecution(ctx, lease, revision, mutation)
-	if crash && store.afterCommit && err == nil {
-		os.Exit(agentCrashExitCode)
-	}
-	return snapshot, err
-}
 
-func (store *agentCrashStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	if store.event == "callback_return" {
-		return errors.New("injected pre-Mark failure")
+func (store *agentCrashStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if !g.IsOwned() {
+		if store.event == "callback_return" {
+			return errors.New("injected pre-return failure")
+		}
+		return store.KernelStore.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	}
-	return store.KernelStore.MarkChildExecutionSettled(ctx, g, p)
-}
-func (store *agentCrashStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := store.KernelStore.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	err := store.KernelStore.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	if err == nil && store.event == "callback_return" {
 		os.Exit(agentCrashExitCode)
 	}
@@ -299,11 +288,11 @@ func TestRealPostgresRecordedCallbackSurvivesProcessCrash(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	completion, e := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if e != nil || !completion.HostCompleted {
 		t.Fatalf("actual callback return absent: %+v %v", completion, e)
 	}
-	if e = runner.ReconcileRootPhysicalExecution(t.Context(), agentCrashRunID); e != nil {
+	if e = runner.ReconcilePhysicalExecution(t.Context(), agentCrashRunID); e != nil {
 		t.Fatal(e)
 	}
 	view := recoveryAgentView(t, snapshot)

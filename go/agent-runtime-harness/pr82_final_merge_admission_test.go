@@ -107,7 +107,7 @@ func TestPR82RefreshHandoffRejectsForeignLocalSnapshot(t *testing.T) {
 // this hard cut must not disable the route-owned read path.
 func TestPR82RefreshHandoffAllowsVerifiedFixedLocalChild(t *testing.T) {
 	f := newPR82HandoffFixture(t)
-	coordinator, err := handoff.New(&pr82BoundKernelChild{runtime: f.runtime})
+	coordinator, err := handoff.New(handoff.Config{Local: &pr82BoundKernelChild{runtime: f.runtime}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,13 +38,12 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			rt := ea1StartRuntime(t, wrapped)
 			observer := ea1StartRuntime(t, peer)
 			m := &ea1AdmissionModel{}
-			mw := &ea1AdmissionMiddleware{}
-			runner := ea1AdmissionConfiguredRunner(t, rt, m, mw, true)
+			runner := ea1AdmissionConfiguredRunner(t, rt, m, nil, true)
 			req := ea1AdmissionRequest()
 			req.ID = ""
 			var createdID string
 			wrapped.afterCreate = func(_ context.Context, s kernel.Snapshot) error { createdID = s.Run.ID; return nil }
-			mw.before = func(ctx context.Context) error {
+			wrapped.afterOwned = func(ctx context.Context, _ kernel.ChildExecutionGrant) error {
 				g, e := observer.LookupChildExecution(ctx, createdID)
 				if e != nil || g.ChildRunID != createdID || g.ExecutionLeaseID != wrapped.acquired.LeaseID {
 					t.Fatalf("automatic ID was not durably admitted: %v", e)
@@ -52,7 +51,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 				return nil
 			}
 			result, e := runner.StartRun(t.Context(), req)
-			if e != nil || result.Run.ID == "" || result.Run.ID != createdID || result.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 || mw.calls.Load() != 1 {
+			if e != nil || result.Run.ID == "" || result.Run.ID != createdID || result.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 {
 				t.Fatalf("default automatic ID path: %v", e)
 			}
 			req.ID = createdID
@@ -69,8 +68,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		rt := ea1StartRuntime(t, wrapped)
 		observer := ea1StartRuntime(t, peer)
 		m := &ea1AdmissionModel{}
-		middleware := &ea1AdmissionMiddleware{}
-		runner := ea1AdmissionConfiguredRunner(t, rt, m, middleware, automatic)
+		runner := ea1AdmissionConfiguredRunner(t, rt, m, nil, automatic)
 		req := ea1AdmissionRequest()
 		for _, vector := range []string{"missing-id", "empty-goal", "child-origin-on-root"} {
 			if automatic && vector == "missing-id" {
@@ -93,7 +91,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			if bad.ID != "" {
 				ea1StartAbsent(t, rt, bad.ID)
 			}
-			if m.calls.Load() != 0 || middleware.calls.Load() != 0 {
+			if m.calls.Load() != 0 {
 				t.Fatal("preflight entered arbitrary callback")
 			}
 		}
@@ -107,9 +105,6 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if !errors.Is(e, kernel.ErrExecutionConflict) || created.Run.ID != req.ID || m.calls.Load() != 0 {
 			t.Fatalf("claim conflict concealed created Root or dispatched: %v %+v", e, created.Run)
 		}
-		if middleware.calls.Load() != 0 {
-			t.Errorf("EA01/P0: failed original owner admission entered effect-capable Host middleware %d times", middleware.calls.Load())
-		}
 		persisted, e := observer.Load(t.Context(), req.ID)
 		if e != nil || !runner.VerifyFrozenStartRequest(persisted, req) {
 			t.Fatalf("original immutable source missing: %v", e)
@@ -117,7 +112,6 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if e = peer.(kernel.ExecutionStore).CheckExecution(t.Context(), req.ID, &competitor); e != nil {
 			t.Fatalf("failed Start revoked independent owner: %v", e)
 		}
-		beforeMiddleware := middleware.calls.Load()
 		changes := []struct {
 			name   string
 			change func(*agent.StartRequest)
@@ -143,7 +137,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			if c.name != "same" && runner.VerifyFrozenStartRequest(persisted, duplicate) {
 				t.Fatalf("forged %s accepted as original source", c.name)
 			}
-			if m.calls.Load() != 0 || middleware.calls.Load() != beforeMiddleware {
+			if m.calls.Load() != 0 {
 				t.Fatal("duplicate entered callbacks")
 			}
 			if e = peer.(kernel.ExecutionStore).CheckExecution(t.Context(), req.ID, &competitor); e != nil {
@@ -168,8 +162,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		rt := ea1StartRuntime(t, wrapped)
 		observer := ea1StartRuntime(t, peer)
 		m := &ea1AdmissionModel{}
-		mw := &ea1AdmissionMiddleware{}
-		runner := ea1AdmissionConfiguredRunner(t, rt, m, mw, automatic)
+		runner := ea1AdmissionConfiguredRunner(t, rt, m, nil, automatic)
 		req := ea1AdmissionRequest()
 		var winner kernel.Snapshot
 		wrapped.beforeOwned = func(ctx context.Context, grant kernel.ChildExecutionGrant) error {
@@ -181,7 +174,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			return e
 		}
 		_, e := runner.StartRun(t.Context(), req)
-		if e == nil || winner.Run.Status != kernel.RunStatusCancelled || m.calls.Load() != 0 || mw.calls.Load() != 0 || wrapped.acquireCalls != 0 {
+		if e == nil || winner.Run.Status != kernel.RunStatusCancelled || m.calls.Load() != 0 || wrapped.acquireCalls != 0 {
 			t.Fatalf("pre-admission control did not win without callback: %v", e)
 		}
 		ea1CompBarrierUnchanged(t, observer, winner)
@@ -219,16 +212,19 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if e != nil {
 			t.Fatal(e)
 		}
-		mw := &ea1AdmissionMiddleware{before: func(ctx context.Context) error {
+		wrapped.afterOwned = func(ctx context.Context, _ kernel.ChildExecutionGrant) error {
 			grant, err := observer.LookupChildExecution(ctx, req.ID)
 			if err != nil || grant.ExecutionOwnerID != original.OwnerID || grant.ExecutionLeaseID != original.LeaseID || grant.ExecutionEpoch != original.Epoch || grant.AdmissionOperation != string(plugin.RunResume) {
 				t.Fatalf("external original owner not bound: %v", err)
 			}
-			return peer.(kernel.ExecutionStore).CheckExecution(ctx, req.ID, &original)
-		}}
-		owner := ea1AdmissionConfiguredRunner(t, externalRT, m, mw, automatic)
+			if e := peer.(kernel.ExecutionStore).CheckExecution(ctx, req.ID, &original); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+				return fmt.Errorf("original owned Grant failed to fence generic entry: %w", e)
+			}
+			return nil
+		}
+		owner := ea1AdmissionConfiguredRunner(t, externalRT, m, nil, automatic)
 		final, e := owner.Resume(t.Context(), req.ID, prepared.Run.Revision)
-		if e != nil || final.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 || mw.calls.Load() != 1 {
+		if e != nil || final.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 {
 			t.Fatalf("original external owner continuation: %v", e)
 		}
 		if wrapped.acquireCalls != 0 || wrapped.acquired.RunID != "" || wrapped.releaseCalls != 0 || wrapped.renewCalls != 0 {
@@ -267,8 +263,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		a, b := ea1AgentAdmissionWrap(t, backing), ea1AgentAdmissionWrap(t, peer)
 		gate := make(chan struct{})
 		release := make(chan struct{})
-		hostEntered := make(chan struct{})
-		var enterOnce sync.Once
+		modelEntered := make(chan struct{}, 1)
 		var ready atomic.Int32
 		before := func(ctx context.Context, _ kernel.ChildExecutionGrant) error {
 			if ready.Add(1) == 2 {
@@ -283,15 +278,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		}
 		a.beforeOwned = before
 		b.beforeOwned = before
-		mw := &ea1AdmissionMiddleware{before: func(ctx context.Context) error {
-			enterOnce.Do(func() { close(hostEntered) })
-			select {
-			case <-release:
-				return nil
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}}
+		barrier := agent.NewModelAdmissionBarrier(modelEntered, release)
 		type outcome struct {
 			s kernel.Snapshot
 			e error
@@ -302,7 +289,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			if err != nil {
 				t.Fatal(err)
 			}
-			owner := ea1AdmissionConfiguredRunner(t, bound, m, mw, automatic)
+			owner := ea1AdmissionConfiguredRunner(t, bound, m, barrier, automatic)
 			go func() { s, err := owner.Resume(t.Context(), req.ID, prepared.Run.Revision); done <- outcome{s, err} }()
 		}
 		results := []outcome{}
@@ -316,12 +303,12 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			t.Error("same-lease callers failed to elect one scope; possibly both entered Host")
 		}
 		select {
-		case <-hostEntered:
+		case <-modelEntered:
 		case <-time.After(5 * time.Second):
 			t.Error("elected owner did not enter Host")
 		}
-		if mw.calls.Load() != 1 || m.calls.Load() != 0 {
-			t.Errorf("before winner release Host=%d Model=%d", mw.calls.Load(), m.calls.Load())
+		if m.calls.Load() != 0 {
+			t.Errorf("before winner release Model=%d", m.calls.Load())
 		}
 		close(release)
 		for len(results) < 2 {
@@ -342,8 +329,8 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 				ea1CompBarrierUnchanged(t, observer, r.s)
 			}
 		}
-		if wins != 1 || mw.calls.Load() != 1 || m.calls.Load() != 1 {
-			t.Fatalf("same-lease duplicated original callback: wins=%d Host=%d Model=%d", wins, mw.calls.Load(), m.calls.Load())
+		if wins != 1 || m.calls.Load() != 1 {
+			t.Fatalf("same-lease duplicated original dispatch: wins=%d Model=%d", wins, m.calls.Load())
 		}
 		if a.acquireCalls+b.acquireCalls+a.releaseCalls+b.releaseCalls+a.renewCalls+b.renewCalls != 0 {
 			t.Fatal("same-lease callers changed external ownership")
@@ -353,7 +340,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		}
 	})
 
-	for _, phase := range []string{"middleware-before-physical", "owned-admission-before-model"} {
+	for _, phase := range []string{"model-admission-barrier", "owned-admission-before-model"} {
 		t.Run("P1/"+phase, func(t *testing.T) {
 			backing, peer := factory(t)
 			wrapped := ea1AgentAdmissionWrap(t, backing)
@@ -361,12 +348,11 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			observer := ea1StartRuntime(t, peer)
 			req := ea1AdmissionRequest()
 			m := &ea1AdmissionModel{}
-			middleware := &ea1AdmissionMiddleware{}
-			runner := ea1AdmissionConfiguredRunner(t, rt, m, middleware, automatic)
-			stop := errors.New("test-only stop after authoritative P1 observation")
+			enteredModel, release := make(chan struct{}, 1), make(chan struct{})
+			runner := ea1AdmissionConfiguredRunner(t, rt, m, agent.NewModelAdmissionBarrier(enteredModel, release), automatic)
 			observed := false
 			check := func(ctx context.Context) error {
-				entered := phase == "middleware-before-physical"
+				entered := phase == "model-admission-barrier"
 				observed = true
 				before, e := observer.Load(ctx, req.ID)
 				if e != nil {
@@ -387,7 +373,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 					return errors.Is(err, kernel.ErrExecutionConflict) && errors.Is(err, kernel.ErrChildExecutionBusy)
 				}
 				grant, grantErr := observer.LookupChildExecution(ctx, req.ID)
-				grantOK := grantErr == nil && grant.ChildRunID == req.ID && grant.ExpectedRevision == before.Run.Revision && grant.ExecutionOwnerID == lease.OwnerID && grant.ExecutionLeaseID == lease.LeaseID && grant.ExecutionEpoch == lease.Epoch && grant.AdmissionSourceHash != "" && grant.AdmissionOperation == string(plugin.RunStart)
+				grantOK := grantErr == nil && grant.ChildRunID == req.ID && grant.ExpectedRevision <= before.Run.Revision && grant.ExecutionOwnerID == lease.OwnerID && grant.ExecutionLeaseID == lease.LeaseID && grant.ExecutionEpoch == lease.Epoch && grant.AdmissionSourceHash != "" && grant.AdmissionOperation == string(plugin.RunStart)
 				if !leaseOK || !grantOK || !checkEntry() {
 					t.Errorf("EA03/G01: arbitrary Root callback reached before authoritative owner: lease=%+v grantErr=%v", lease, grantErr)
 				}
@@ -435,27 +421,33 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 						t.Error("competing Cancel changed original physical grant")
 					}
 				}
-				return stop
+				return nil
 			}
-			if phase == "middleware-before-physical" {
-				middleware.before = check
-			} else {
+			if phase == "owned-admission-before-model" {
 				wrapped.afterOwned = func(ctx context.Context, _ kernel.ChildExecutionGrant) error {
-					if e := check(ctx); !errors.Is(e, stop) {
-						return e
-					}
-					return nil
+					return check(ctx)
 				}
-				// Do not synthesize an admission ACK loss at the P1 boundary.
-				// The actual first Host callback stops before Model dispatch.
-				middleware.before = func(context.Context) error { return stop }
 			}
-			_, e := runner.StartRun(t.Context(), req)
-			if !observed || !errors.Is(e, stop) {
-				t.Fatalf("actual Start did not reach exact P1 cutpoint: observed=%t err=%v", observed, e)
+			done := make(chan error, 1)
+			go func() { _, e := runner.StartRun(t.Context(), req); done <- e }()
+			select {
+			case <-enteredModel:
+			case e := <-done:
+				t.Fatalf("Start did not reach model admission: %v", e)
+			case <-time.After(5 * time.Second):
+				t.Fatal("Start model admission timed out")
+			}
+			if phase == "model-admission-barrier" {
+				if e := check(t.Context()); e != nil {
+					t.Error(e)
+				}
 			}
 			if m.calls.Load() != 0 {
 				t.Fatal("P1 denial unexpectedly dispatched Model")
+			}
+			close(release)
+			if e := <-done; e != nil || !observed || m.calls.Load() != 1 {
+				t.Fatalf("original owner did not finish after P1 checks: observed=%t err=%v", observed, e)
 			}
 		})
 	}
@@ -464,13 +456,13 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 func ea1AdmissionRequest() agent.StartRequest {
 	return agent.StartRequest{ID: "native-original", RequestID: "original-effect", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}, Goal: "original bounded task", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 }
-func ea1AdmissionConfiguredRunner(t *testing.T, rt *kernel.Runtime, m model.Client, mw plugin.RunMiddleware, automatic bool) *agent.Runner {
+func ea1AdmissionConfiguredRunner(t *testing.T, rt *kernel.Runtime, m model.Client, barrier *agent.ModelAdmissionBarrier, automatic bool) *agent.Runner {
 	t.Helper()
 	var execution *agent.RunExecution
 	if !automatic {
 		execution = &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}
 	}
-	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, RunExecution: execution, RunMiddleware: []plugin.RunMiddleware{mw}})
+	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, RunExecution: execution, ModelAdmissionBarrier: barrier})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -484,37 +476,23 @@ func (m *ea1AdmissionModel) Generate(context.Context, model.Request) (model.Resp
 	return model.Response{Content: "done", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
 }
 
-type ea1AdmissionMiddleware struct {
-	calls  atomic.Int32
-	before func(context.Context) error
-}
-
-func (m *ea1AdmissionMiddleware) Name() string { return "ea1.original.root.admission" }
-func (m *ea1AdmissionMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	m.calls.Add(1)
-	if m.before != nil {
-		if e := m.before(ctx); e != nil {
-			return kernel.Snapshot{}, e
-		}
-	}
-	return next(ctx)
-}
-
 type ea1AgentAdmissionStore struct {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
-	kernel.ChildExecutionStore
+
 	kernel.ExecutionQuarantineStore
-	kernel.OwnedPhysicalExecutionStore
-	acquired     kernel.ExecutionLease
-	renewals     ea1LeaseRenewals
-	releaseCalls int
-	renewCalls   int
-	acquireCalls int
-	afterCreate  func(context.Context, kernel.Snapshot) error
-	afterOwned   func(context.Context, kernel.ChildExecutionGrant) error
-	beforeOwned  func(context.Context, kernel.ChildExecutionGrant) error
+	kernel.PhysicalExecutionStore
+	acquired       kernel.ExecutionLease
+	renewals       ea1LeaseRenewals
+	releaseCalls   int
+	renewCalls     int
+	acquireCalls   int
+	afterCreate    func(context.Context, kernel.Snapshot) error
+	afterOwned     func(context.Context, kernel.ChildExecutionGrant) error
+	beforeOwned    func(context.Context, kernel.ChildExecutionGrant) error
+	afterEntry     func(context.Context) error
+	afterAdmission func(context.Context)
+	atomicClaims   int
 }
 
 func ea1AgentAdmissionWrap(t *testing.T, s kernel.Store) *ea1AgentAdmissionStore {
@@ -523,23 +501,16 @@ func ea1AgentAdmissionWrap(t *testing.T, s kernel.Store) *ea1AgentAdmissionStore
 	if !ok {
 		t.Fatal("missing authoritative ExecutionStore")
 	}
-	control, ok := s.(kernel.ControlStore)
-	if !ok {
-		t.Fatal("missing actual ControlStore")
-	}
-	physical, ok := s.(kernel.ChildExecutionStore)
-	if !ok {
-		t.Fatal("missing physical Store observation")
-	}
+
 	quarantine, ok := s.(kernel.ExecutionQuarantineStore)
 	if !ok {
 		t.Fatal("missing quarantine Store")
 	}
-	owned, ok := s.(kernel.OwnedPhysicalExecutionStore)
+	owned, ok := s.(kernel.PhysicalExecutionStore)
 	if !ok {
 		t.Fatal("missing owned physical Store")
 	}
-	return &ea1AgentAdmissionStore{OwnedPhysicalExecutionStore: owned, Store: s, ExecutionStore: execution, ControlStore: control, ChildExecutionStore: physical, ExecutionQuarantineStore: quarantine}
+	return &ea1AgentAdmissionStore{PhysicalExecutionStore: owned, Store: s, ExecutionStore: execution, ExecutionQuarantineStore: quarantine}
 }
 func (s *ea1AgentAdmissionStore) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
 	v, e := s.Store.Create(ctx, r, events)
@@ -555,21 +526,35 @@ func (s *ea1AgentAdmissionStore) AcquireExecution(ctx context.Context, r kernel.
 		return l, e
 	}
 	s.acquired = l
-
 	return l, e
 }
 
-func (s *ea1AgentAdmissionStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *ea1AgentAdmissionStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	window, err := s.PhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
+	if err == nil && s.afterEntry != nil {
+		err = s.afterEntry(ctx)
+	}
+	return window, err
+}
+
+func (s *ea1AgentAdmissionStore) BeginPhysicalExecution(ctx context.Context, a kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	g := a.Candidate().Grant
+	if !g.IsOwned() {
+		return s.PhysicalExecutionStore.BeginPhysicalExecution(ctx, a)
+	}
 	if s.beforeOwned != nil {
 		if e := s.beforeOwned(ctx, g); e != nil {
-			return kernel.OwnedPhysicalAdmissionResult{}, e
+			return kernel.PhysicalAdmissionResult{}, e
 		}
 	}
-	v, e := s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, a)
+	v, e := s.PhysicalExecutionStore.BeginPhysicalExecution(ctx, a)
 	if e == nil {
 		if a.AcquiresLease() {
 			s.acquired = v.Lease
+			s.atomicClaims++
+			if s.afterAdmission != nil {
+				s.afterAdmission(ctx)
+			}
 		}
 		if s.afterOwned != nil {
 			e = s.afterOwned(ctx, v.Grant)

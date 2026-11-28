@@ -44,8 +44,8 @@ func (s *retirementAgentDeathStore) LookupOwnedRetirementForRun(ctx context.Cont
 	return s.managedStorePorts.LookupOwnedRetirementForRun(ctx, id)
 }
 
-func (s *retirementAgentDeathStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	v, e := s.managedStorePorts.BeginOwnedPhysicalExecution(ctx, a)
+func (s *retirementAgentDeathStore) BeginPhysicalExecution(ctx context.Context, a kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	v, e := s.managedStorePorts.BeginPhysicalExecution(ctx, a)
 	if e == nil && a.AcquiresLease() {
 		s.acquired = v.Lease
 	}
@@ -101,7 +101,7 @@ func runRetirementActualAgentRecovery(t *testing.T, factory func(*testing.T) Man
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+	if e = fresh.ReconcilePhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("public fresh runID recovery: %v", e)
 	}
 	after, e := freshRT.Load(t.Context(), req.ID)
@@ -112,7 +112,7 @@ func runRetirementActualAgentRecovery(t *testing.T, factory func(*testing.T) Man
 	if e != nil || !acknowledged.Valid() || acknowledged.Identity() != retired.Identity() {
 		t.Fatalf("original receipt not acknowledged: %v", e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+	if e = fresh.ReconcilePhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("public runID selected historical ACK: %v", e)
 	}
 }
@@ -168,7 +168,7 @@ func runRetirementTwoGenerations(t *testing.T, factory func(*testing.T) ManagedR
 	secondRequest, secondResponse := model.CloneRequest(physical.request), model.CloneResponse(physical.response)
 	freshStore := b.Reopen()
 	fresh := makeRunner(freshStore, "recovery-owner")
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+	if e = fresh.ReconcilePhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("unique current retirement blocked by historical retired row: %v", e)
 	}
 	freshRT := retirementRuntime(t, freshStore)
@@ -184,7 +184,7 @@ func runRetirementTwoGenerations(t *testing.T, factory func(*testing.T) ManagedR
 	if e != nil || !ack.Valid() || ack.Identity() != r2.Identity() {
 		t.Fatalf("current r2 not exclusively ACKed: %v", e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+	if e = fresh.ReconcilePhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("historical r1 selected after r2 ACK: %v", e)
 	}
 }

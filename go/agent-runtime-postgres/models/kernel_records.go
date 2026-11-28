@@ -36,14 +36,27 @@ type KernelRunRecord struct {
 	DeadlineAt                    *time.Time `gorm:"index:idx_agent_kernel_runs_deadline"`
 	EndedAt                       *time.Time `gorm:"index:idx_agent_kernel_runs_ended"`
 	StateJSON                     string     `gorm:"type:text;not null"`
-	CheckpointJSON                string     `gorm:"type:text;not null;default:''"`
-	ResultJSON                    string     `gorm:"type:text;not null;default:''"`
-	LastEventSeq                  int64      `gorm:"not null;default:0"`
-	CreatedAt                     time.Time  `gorm:"not null"`
-	UpdatedAt                     time.Time  `gorm:"not null"`
+
+	CheckpointJSON string    `gorm:"type:text;not null;default:''"`
+	ResultJSON     string    `gorm:"type:text;not null;default:''"`
+	LastEventSeq   int64     `gorm:"not null;default:0"`
+	CreatedAt      time.Time `gorm:"not null"`
+	UpdatedAt      time.Time `gorm:"not null"`
 }
 
 func (KernelRunRecord) TableName() string { return "agent_kernel_runs" }
+
+// KernelStateHistoryRecord is an immutable piece of the selected Agent
+// history. Run history metadata determines the exact prefix to read.
+type KernelStateHistoryRecord struct {
+	RunID       string `gorm:"size:64;primaryKey"`
+	Stream      int    `gorm:"primaryKey;autoIncrement:false"`
+	Generation  uint64 `gorm:"primaryKey;autoIncrement:false"`
+	Ordinal     int    `gorm:"primaryKey;autoIncrement:false"`
+	PayloadJSON string `gorm:"type:text;not null"`
+}
+
+func (KernelStateHistoryRecord) TableName() string { return "agent_kernel_state_history" }
 
 // KernelEventRecord stores the monotonic event stream for one Kernel Run.
 type KernelEventRecord struct {
@@ -96,28 +109,35 @@ type RunRelationRecord struct {
 
 func (RunRelationRecord) TableName() string { return "agent_run_relations" }
 
-// KernelChildEffectGrantRecord holds one durable per-ancestor physical Grant.
-// Unknown work cannot be deleted by a parent terminal-CAS or TTL timeout.
-type KernelChildEffectGrantRecord struct {
-	SettlementEvidence       string `gorm:"type:text;not null;default:''"`
+// KernelEffectRecord is the permanent operation identity and sole native
+// physical effect fact. A zero start revision is consumed; any retirement
+// receipt carries its original complete identity and snapshot.
+type KernelEffectRecord struct {
+	GrantID                  string `gorm:"size:128;primaryKey"`
+	ChildRunID               string `gorm:"size:64;not null;index:idx_kernel_effect_run,priority:1"`
+	StartRevision            uint64 `gorm:"not null;default:0;index:idx_kernel_effect_run,priority:2"`
+	ExecutionOwnerID         string `gorm:"size:128;not null;default:''"`
+	ExecutionLeaseID         string `gorm:"size:128;not null;default:''"`
+	ExecutionEpoch           uint64 `gorm:"not null;default:0"`
+	AdmissionSourceHash      string `gorm:"size:64;not null;default:''"`
+	AdmissionOperation       string `gorm:"size:64;not null;default:''"`
 	CallbackReturnRevision   uint64 `gorm:"not null;default:0"`
 	CallbackReturnSourceHash string `gorm:"not null;default:''"`
 	CallbackHostCompleted    bool   `gorm:"not null;default:false"`
 	CallbackLeaseOwned       bool   `gorm:"not null;default:false"`
 	CallbackControlCustody   string `gorm:"size:32;not null;default:''"`
 	CallbackToolReturns      string `gorm:"type:text;not null;default:''"`
-
-	GrantID         string `gorm:"size:128;primaryKey"`
-	ParentRunID     string `gorm:"size:64;primaryKey;index:idx_agent_kernel_child_grants_parent"`
-	ChildRunID      string `gorm:"size:64;not null;index:idx_agent_kernel_child_grants_child"`
-	StartRevision   uint64 `gorm:"not null;default:0"`
-	SettledRevision uint64 `gorm:"not null;default:0"`
-	// An empty binding is not a license to fabricate a physical execution lease.
-	ExecutionOwnerID    string `gorm:"size:128;not null;default:''"`
-	ExecutionLeaseID    string `gorm:"size:128;not null;default:''"`
-	ExecutionEpoch      uint64 `gorm:"not null;default:0"`
-	AdmissionSourceHash string `gorm:"size:64;not null;default:''"`
-	AdmissionOperation  string `gorm:"size:64;not null;default:''"`
+	RetirementJSON           string `gorm:"type:text;not null;default:'';check:effect_retired_only,start_revision=0 OR retirement_json=''"`
 }
 
-func (KernelChildEffectGrantRecord) TableName() string { return "agent_kernel_child_effect_grants" }
+func (KernelEffectRecord) TableName() string { return "agent_kernel_effects" }
+
+// KernelEffectOwnerRecord is only an index of the active effect's immutable
+// ancestor membership, not a second record of the operation.
+type KernelEffectOwnerRecord struct {
+	GrantID     string              `gorm:"size:128;primaryKey"`
+	ParentRunID string              `gorm:"size:64;primaryKey;index:idx_kernel_effect_owner,priority:1"`
+	Effect      *KernelEffectRecord `gorm:"belongsTo:Effect;foreignKey:GrantID;references:GrantID"`
+}
+
+func (KernelEffectOwnerRecord) TableName() string { return "agent_kernel_effect_owners" }

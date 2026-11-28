@@ -101,10 +101,6 @@ func TestEA1ChildAgentStartPhasesNativeSQLite(t *testing.T) {
 	conformance.RunEA1ChildAgentStartPhases(t, sqliteEA1PeerReopen)
 }
 
-func TestEA1MiddlewareNextLifetimeNativeSQLite(t *testing.T) {
-	conformance.RunEA1MiddlewareNextLifetime(t, sqliteEA1PeerReopen)
-}
-
 func TestEA1OwnedCallbackReturnSQLite(t *testing.T) {
 	conformance.RunEA1OwnedCallbackReturn(t, sqliteEA1Pair)
 }

@@ -7,67 +7,32 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
-func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing.T) {
-	request := model.Request{RunID: "run", InvocationID: "invocation", Model: "original"}
-	scope := &modelDenialScope{marker: 1}
-	ctx := callbackscope.BindModelCall(t.Context(), &modelCallScope{denial: scope})
-	denied := modelPreDispatchDenied{cause: ErrInvalidRequest, scope: scope, original: model.CloneRequest(request), candidate: model.CloneRequest(request)}
-	if !modelDeniedForRequest(ctx, request, denied) {
-		t.Fatal("original private denial rejected")
+// No-send classification does not grant ledger mutation authority. The
+// original request and commit proof are checked at the native Store boundary.
+func TestNativeModelDenialIsNotProviderError(t *testing.T) {
+	denied := modelPreDispatchDenied{cause: ErrInvalidRequest}
+	if !IsModelPreDispatchDenied(denied) || !errors.Is(denied, ErrInvalidRequest) {
+		t.Fatal("original admission denial lost")
 	}
-	normalized := model.CloneRequest(request)
-	if !modelDeniedForRequest(ctx, normalized, denied) {
-		t.Fatal("nil/empty normalized request rejected")
-	}
-	// A Host middleware may alter the final candidate without ever reaching a
-	// Provider. Only the Agent terminal's private proof of the ORIGINAL frozen
-	// request can restore its reservation, not the altered candidate by itself.
-	mutated := denied
-	mutated.candidate = model.CloneRequest(request)
-	mutated.candidate.Model = "unapproved-model"
-	if !modelDeniedForRequest(ctx, request, mutated) || modelDeniedForRequest(ctx, mutated.candidate, mutated) {
-		t.Fatal("candidate drift was mistaken for original dispatch authority")
-	}
-	for _, field := range []string{"run", "invocation", "model"} {
-		candidate := model.CloneRequest(request)
-		switch field {
-		case "run":
-			candidate.RunID = "other"
-		case "invocation":
-			candidate.InvocationID = "other"
-		case "model":
-			candidate.Model = "other"
-		}
-		if modelDeniedForRequest(ctx, candidate, denied) {
-			t.Fatalf("foreign %s accepted", field)
-		}
-	}
-	if modelDeniedForRequest(callbackscope.BindModelCall(ctx, &modelCallScope{denial: &modelDenialScope{marker: 1}}), request, denied) {
-		t.Fatal("old call nonce replayed")
-	}
-	if modelDeniedForRequest(ctx, request, errors.New(denied.Error())) {
-		t.Fatal("public error string forged authority")
+	if IsModelPreDispatchDenied(errors.New(denied.Error())) {
+		t.Fatal("provider error forged admission denial")
 	}
 }
-func TestAdmissionBarrierOwnsOnlyChannelWaitAndReturnedNext(t *testing.T) {
+func TestAdmissionBarrierOwnsOnlyChannelWaitAndReturnedProvider(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 	close(release)
 	barrier := NewModelAdmissionBarrier(entered, release)
 	scope := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "grant", Operation: "resume"}, []any{barrier})
-	chain, err := plugin.NewModelChain(barrier)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := &Runner{modelAdmissionBarrier: barrier}
 	denied := errors.New("downstream admission denied")
 	calls := 0
-	_, err = chain.Invoke(callbackscope.Bind(t.Context(), scope), model.Request{RunID: "run", InvocationID: "original"}, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	_, err := runner.invokeAdmittedModel(callbackscope.Bind(t.Context(), scope), model.Request{RunID: "run", InvocationID: "original"}, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		calls++
 		if scope.Complete() {
-			t.Fatal("live Next completed")
+			t.Fatal("live Provider completed")
 		}
 		return model.Response{}, denied
 	})

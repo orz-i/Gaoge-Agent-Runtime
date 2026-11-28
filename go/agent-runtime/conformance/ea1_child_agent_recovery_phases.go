@@ -12,11 +12,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// Only AC-Q P1/P3/P5. ReconcileChildPhysicalGrant consumes an ORIGINAL
+// Only AC-Q P1/P3/P5. ReconcilePhysicalExecution consumes an ORIGINAL
 // post-callback marker; it cannot Mark from clean state or send new effects.
 // Memory reopening means retained state/new runner, not process persistence.
 func RunEA1ChildAgentRecoveryPhases(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), contention ...func(error) bool) {
@@ -24,7 +23,7 @@ func RunEA1ChildAgentRecoveryPhases(t *testing.T, factory func(*testing.T) (kern
 	if len(contention) == 1 {
 		retryableContention = contention[0]
 	}
-	t.Run("P1/active-callback-before-and-after-Next", func(t *testing.T) { ea1ChildRecoveryPhase(t, factory, "P1", false, false) })
+	t.Run("P1/active-grant-before-dispatch-and-mark", func(t *testing.T) { ea1ChildRecoveryPhase(t, factory, "P1", false, false) })
 	for _, tool := range []bool{false, true} {
 		name := map[bool]string{false: "model-yield", true: "terminal-tool"}[tool]
 		t.Run("P3/unmarked-"+name, func(t *testing.T) { ea1ChildRecoveryPhase(t, factory, "unmarked", tool, false) })
@@ -36,18 +35,30 @@ func RunEA1ChildAgentRecoveryPhases(t *testing.T, factory func(*testing.T) (kern
 
 type ea1ChildRecoveryPhaseStore struct {
 	*ea1AgentAdmissionStore
-	mode            string
-	fault           error
-	marks, finishes int
-	beforeFinish    func()
-	lastFinish      func() error
+	mode                   string
+	fault                  error
+	marks, finishes        int
+	beforeFinish           func()
+	lastFinish             func() error
+	afterBegin, beforeMark func()
 }
 
-func (s *ea1ChildRecoveryPhaseStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *ea1ChildRecoveryPhaseStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	result, err := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
+	if err == nil && s.afterBegin != nil {
+		s.afterBegin()
+	}
+	return result, err
+}
+
+func (s *ea1ChildRecoveryPhaseStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if s.beforeMark != nil {
+		s.beforeMark()
+	}
 	if s.mode == "unmarked" {
 		return s.fault
 	}
-	e := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	e := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 	}
@@ -60,7 +71,7 @@ func (s *ea1ChildRecoveryPhaseStore) FinishChildExecution(ctx context.Context, g
 	if s.mode == "marked" || s.mode == "P5" {
 		return s.fault
 	}
-	s.lastFinish = func() error { return s.ChildExecutionStore.FinishChildExecution(ctx, g, p) }
+	s.lastFinish = func() error { return s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p) }
 	e := s.lastFinish()
 	if e == nil {
 		s.finishes++
@@ -80,30 +91,6 @@ func (m *ea1ChildRecoveryPhaseModel) Generate(ctx context.Context, r model.Reque
 	return m.ea1StartSettlementPhysical.Generate(ctx, r)
 }
 
-type ea1ChildRecoveryPhaseHost struct {
-	t             *testing.T
-	request       agent.StartRequest
-	physical      *ea1StartSettlementPhysical
-	before, after func()
-}
-
-func (*ea1ChildRecoveryPhaseHost) Name() string { return "ea1.actual.child.recovery.callback" }
-func (h *ea1ChildRecoveryPhaseHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if i.Operation != plugin.RunStart || i.RunID != h.request.ID || i.ParentRunID != h.request.ParentRunID || i.Actor != h.request.Actor || i.Thread != h.request.Thread || i.Goal != h.request.Goal {
-		h.t.Fatal("original child callback source changed")
-	}
-	h.physical.mu.Lock()
-	h.physical.hostCalls++
-	h.physical.mu.Unlock()
-	if h.before != nil {
-		h.before()
-	}
-	out, e := next(ctx)
-	if h.after != nil {
-		h.after()
-	}
-	return out, e
-}
 func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), phase string, withTool, deadline bool, contention ...func(error) bool) {
 	backing, reopen := factory(t)
 	admission := ea1AgentAdmissionWrap(t, backing)
@@ -136,10 +123,9 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e != nil {
 		t.Fatal(e)
 	}
-	host := &ea1ChildRecoveryPhaseHost{t: t, request: request, physical: physical}
 	preflightCalls := 0
 	makeRunner := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physicalModel, Catalog: registry, Executor: registry, RunMiddleware: []plugin.RunMiddleware{host}, StartControlPreflight: func(ctx context.Context, actual agent.StartRequest) error {
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physicalModel, Catalog: registry, Executor: registry, StartControlPreflight: func(ctx context.Context, actual agent.StartRequest) error {
 			preflightCalls++
 			if !reflect.DeepEqual(actual, request) {
 				return agent.ErrInvalidRequest
@@ -154,7 +140,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 				}
 			}
 			return nil
-		}, ToolMiddleware: []plugin.ToolMiddleware{physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
+		}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -169,7 +155,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 		return nil
 	}
-	// Before native acquisition and after Next has returned, the outer callback
+	// After the actual grant and before its actual Mark, the native call
 	// still has not returned. Neither a clean state nor a durable Model receipt
 	// permits this public recovery entry to invent its settlement marker.
 	cuts := 0
@@ -184,7 +170,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if e != nil {
 			t.Fatal(e)
 		}
-		if e = first.ReconcileChildPhysicalGrant(t.Context(), request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = first.ReconcilePhysicalExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatal("active clean callback was retired", e)
 		}
 		ea1ChildRecoveryPhaseUnchanged(t, rt, current, parent, grandparent, g)
@@ -198,8 +184,8 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 	}
 	if phase == "P1" {
-		host.before = activeCheck
-		host.after = activeCheck
+		store.afterBegin = activeCheck
+		store.beforeMark = activeCheck
 		physicalModel.before = func() {
 			modelCuts++
 			current, e := rt.Load(t.Context(), request.ID)
@@ -210,7 +196,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			if e != nil {
 				t.Fatal(e)
 			}
-			if e = first.ReconcileChildPhysicalGrant(t.Context(), request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) || errors.Is(e, kernel.ErrExecutionConflict) {
+			if e = first.ReconcilePhysicalExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) || errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatal("pending native model should stop at knownSettlement, not Finish", e)
 			}
 			ea1ChildRecoveryPhaseControls(t, rt, current, parent, grandparent, g)
@@ -238,7 +224,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		ea1AssertStartSettlementReceipt(t, physical, request, definition, out, withTool)
 		ea1CompBarrierUnchanged(t, rt, parent)
 		ea1CompBarrierUnchanged(t, rt, grandparent)
-		if e = first.ReconcileChildPhysicalGrant(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		if e = first.ReconcilePhysicalExecution(t.Context(), request.ID); e != nil {
 			t.Fatal("retired callback replay", e)
 		}
 		return
@@ -251,8 +237,8 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		t.Fatal(e)
 	}
 	g, e := rt.LookupChildExecution(t.Context(), request.ID)
-	if e != nil || g.ChildRunID != request.ID || g.ExpectedRevision != created.Run.Revision || g.IsOwned() {
-		t.Fatal("original child grant replaced by Root authority", e)
+	if e != nil || g.ChildRunID != request.ID || g.ExpectedRevision != created.Run.Revision || !g.IsOwned() || !g.MatchesExecution(admission.acquired) || admission.acquireCalls+admission.releaseCalls != 0 {
+		t.Fatal("original child grant lost atomic lease authority", e)
 	}
 	ea1AssertStartSettlementReceipt(t, physical, request, definition, before, withTool)
 	if phase == "unmarked" && store.marks != 0 {
@@ -274,7 +260,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	}()
 	if phase == "unmarked" {
 		for _, r := range []*agent.Runner{ra, rb} {
-			e = r.ReconcileChildPhysicalGrant(t.Context(), request.ID)
+			e = r.ReconcilePhysicalExecution(t.Context(), request.ID)
 			if !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatal("receipt without original marker retired", e)
 			}
@@ -318,7 +304,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			s := []*ea1ChildRecoveryPhaseStore{sa, sb}[i]
 			go func(r *agent.Runner, s *ea1ChildRecoveryPhaseStore) {
 				defer wg.Done()
-				results <- result{r.ReconcileChildPhysicalGrant(t.Context(), request.ID), s}
+				results <- result{r.ReconcilePhysicalExecution(t.Context(), request.ID), s}
 			}(r, s)
 		}
 		for range 2 {
@@ -367,10 +353,10 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			}
 			losers++
 		}
-		if wins != 1 || losers != 1 || sa.finishes+sb.finishes != 1 || sa.acquireCalls+sb.acquireCalls+sa.renewCalls+sb.renewCalls+sa.releaseCalls+sb.releaseCalls != 0 {
+		if wins+losers != 2 || wins == 0 || sa.finishes+sb.finishes != 1 || sa.acquireCalls+sb.acquireCalls+sa.renewCalls+sb.renewCalls+sa.releaseCalls+sb.releaseCalls != 0 {
 			t.Fatal("two recovery owners did not elect one original Finish")
 		}
-	} else if e = ra.ReconcileChildPhysicalGrant(t.Context(), request.ID); e != nil {
+	} else if e = ra.ReconcilePhysicalExecution(t.Context(), request.ID); e != nil {
 		t.Fatal("original marked receipt could not retire", e)
 	}
 	ea1CompBarrierUnchanged(t, ar, before)
@@ -379,7 +365,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	ea1AssertStartSettlementReceipt(t, physical, request, definition, before, withTool)
 	// Use an unwrapped runner after the concurrent barrier; never reuse a closed
 	// callback gate to accidentally turn sequential retry into claimed concurrency.
-	if e = makeRunner(ar, "inspection").ReconcileChildPhysicalGrant(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
+	if e = makeRunner(ar, "inspection").ReconcilePhysicalExecution(t.Context(), request.ID); e != nil {
 		t.Fatal("retired original grant replay", e)
 	}
 	if deadline {

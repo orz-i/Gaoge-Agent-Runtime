@@ -28,8 +28,8 @@ existing components directly:
    A single root Agent needs no child-relation resolver.
 3. A ConfigSnapshot that explicitly authorizes the selected Tool keys, including
    `harness.read_context_artifact`, and freezes their policy snapshots.
-4. `NewManagedContextPreparer` as the final Model request projection before the durable commit, plus
-   `NewContextRunMiddleware` to rehydrate persisted Context on a fresh runner.
+4. `NewBoundedContextAdapter` configured through `Dependencies.BoundedContext`
+   for durable hydration and pre-intent Context preparation.
 5. A host-supplied resolver for the exact model's context capacity and output
    reservation. Unknown capacities fail closed.
 

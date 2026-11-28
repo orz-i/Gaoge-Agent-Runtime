@@ -10,6 +10,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	runtimeconformance "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -31,8 +32,106 @@ type nativeAuthorityKernelPorts interface {
 
 func NativeAuthorityCutover(t *testing.T, factory func(*testing.T) NativeAuthorityFixture) {
 	t.Run("retry", func(t *testing.T) { nativeAuthorityRetrySelectionACK(t, factory) })
+	t.Run("negative-projection", func(t *testing.T) { nativeNegativeProjection(t, factory) })
 	t.Run("child", func(t *testing.T) { nativeAuthorityNamedChildTwoTools(t, factory) })
 	t.Run("child-enrollment", func(t *testing.T) { nativeChildEnrollment(t, factory) })
+}
+
+type negativeProjectionCut struct {
+	harness.Store
+	budget.LedgerStore
+	phase, runID string
+	armed        bool
+}
+
+func (s *negativeProjectionCut) UpdateInvocation(ctx context.Context, inv harness.Invocation, revision uint64) (harness.Invocation, error) {
+	if inv.Status == harness.InvocationCancelled {
+		s.runID = inv.ExecutionRefID
+		if s.armed && s.phase == "invocation-before" {
+			s.armed = false
+			return harness.Invocation{}, errRootRetryCancelAckLost
+		}
+	}
+	out, err := s.Store.UpdateInvocation(ctx, inv, revision)
+	if err == nil && inv.Status == harness.InvocationCancelled && s.armed && s.phase == "invocation-after" {
+		s.armed = false
+		return harness.Invocation{}, errRootRetryCancelAckLost
+	}
+	return out, err
+}
+
+func (s *negativeProjectionCut) UpdateTurn(ctx context.Context, turn harness.Turn, revision uint64) (harness.Turn, error) {
+	if turn.Status == harness.TurnCancelled && s.armed && s.phase == "turn-before" {
+		s.armed = false
+		return harness.Turn{}, errRootRetryCancelAckLost
+	}
+	out, err := s.Store.UpdateTurn(ctx, turn, revision)
+	if err == nil && turn.Status == harness.TurnCancelled && s.armed && s.phase == "turn-after" {
+		s.armed = false
+		return harness.Turn{}, errRootRetryCancelAckLost
+	}
+	return out, err
+}
+
+func nativeNegativeProjection(t *testing.T, factory func(*testing.T) NativeAuthorityFixture) {
+	for _, phase := range []string{"invocation-before", "invocation-after", "turn-before", "turn-after"} {
+		t.Run(phase, func(t *testing.T) {
+			ctx := t.Context()
+			f := factory(t)
+			runs := f.Kernel.(nativeAuthorityKernelPorts)
+			host := &negativeProjectionCut{Store: f.Host, LedgerStore: f.Host.(budget.LedgerStore), phase: phase}
+			client := &nativeAuthorityModel{generate: func(model.Request) (model.Response, error) {
+				t.Fatal("negative creation decision dispatched a Model")
+				return model.Response{}, nil
+			}}
+			options := nativeAuthorityOptions(t, &nativeFirstCreateCut{nativeAuthorityKernelPorts: runs, cut: true}, host, client)
+			session, err := harness.OpenAgentSession(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = session.Prompt(ctx, "projection", "original"); !errors.Is(err, errFirstCreateCut) {
+				t.Fatalf("Create cut: %v", err)
+			}
+			host.armed = true
+			if _, err = session.Cancel(ctx, "projection", "original stop"); !errors.Is(err, errRootRetryCancelAckLost) {
+				t.Fatalf("projection cut %s: %v", phase, err)
+			}
+			decision, err := runs.LoadCreationDecision(ctx, host.runID)
+			if err != nil || decision.Status != kernel.RunStatusCancelled || decision.Reason != "original stop" {
+				t.Fatalf("projection failure changed Runtime decision: %+v %v", decision, err)
+			}
+			if f.Reopen != nil {
+				k, h, _ := f.Reopen()
+				runs = k.(nativeAuthorityKernelPorts)
+				host.Store, host.LedgerStore = h, h.(budget.LedgerStore)
+			}
+			options.Runtime, err = kernel.New(kernel.Dependencies{Store: runs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			options.Session.Transcript = nil
+			session, err = harness.OpenAgentSession(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := session.Cancel(ctx, "projection", "must not replace original reason")
+			if err != nil || out.Turn.Status != harness.TurnCancelled || out.Turn.ErrorDetail != decision.Reason {
+				t.Fatalf("projection recovery: %+v %v", out.Turn, err)
+			}
+			root, ok := harness.TopLevelInvocation(out)
+			if !ok || root.ExecutionRefID != decision.RunID || root.Attempt != 1 || len(client.requests) != 0 {
+				t.Fatal("projection recovery replaced original execution selection")
+			}
+			if _, err = runs.Load(ctx, root.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
+				t.Fatalf("negative identity manufactured a Run: %v", err)
+			}
+			for _, item := range out.Items {
+				if item.ParentItemID == harness.ExecutionDispatchParentItemID || item.ParentItemID == harness.CancellationFenceParentItemID {
+					t.Fatal("native projection elected Host execution/cancellation authority")
+				}
+			}
+		})
+	}
 }
 
 func nativeAuthorityRetrySelectionACK(t *testing.T, factory func(*testing.T) NativeAuthorityFixture) {
@@ -285,7 +384,7 @@ func nativeAuthorityNamedChildTwoTools(t *testing.T, factory func(*testing.T) Na
 				if _, e = c.Reserve(ctx, pending.Turn.ID, q, true); e != nil {
 					t.Fatal(e)
 				}
-				if _, e = c.DispatchTool(ctx, pending.Turn.ID, q); e != nil {
+				if e = runtimeconformance.DispatchToolFixture(ctx, c, pending.Turn.ID, q); e != nil {
 					t.Fatal(e)
 				}
 				before, e := runs.LoadBudget(ctx, pending.Turn.ID)
@@ -455,13 +554,13 @@ type nativeRetryLostACKStore struct {
 	cancelAckOnce bool
 }
 
-func (s *nativeRetryLostACKStore) SettleUncreatedRoot(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
-	updated, terminal, err := s.Store.SettleUncreatedRoot(ctx, inv, turn)
-	if err == nil && s.cancelAckOnce {
+func (s *nativeRetryLostACKStore) UpdateTurn(ctx context.Context, turn harness.Turn, revision uint64) (harness.Turn, error) {
+	updated, err := s.Store.UpdateTurn(ctx, turn, revision)
+	if err == nil && turn.Status == harness.TurnCancelled && s.cancelAckOnce {
 		s.cancelAckOnce = false
-		return harness.Invocation{}, harness.Turn{}, errRootRetryCancelAckLost
+		return harness.Turn{}, errRootRetryCancelAckLost
 	}
-	return updated, terminal, err
+	return updated, err
 }
 
 func (s *nativeRetryLostACKStore) RetryInvocation(
@@ -478,8 +577,8 @@ func (s *nativeRetryLostACKStore) RetryInvocation(
 type nativeChildReturnInterrupted struct{}
 type nativeChildReturnCut struct{ nativeAuthorityKernelPorts }
 
-func (s *nativeChildReturnCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := s.nativeAuthorityKernelPorts.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+func (s *nativeChildReturnCut) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	err := s.nativeAuthorityKernelPorts.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	if err == nil && g.AdmissionOperation == "approval" && o.HostCompleted {
 		panic(nativeChildReturnInterrupted{})
 	}

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"os"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ type auditBeginChildResult struct {
 	err   error
 }
 
-// Force BeginChildExecution's first (unlocked) child.Run.Status observation,
+// Force BeginPhysicalExecution's first (unlocked) child.Run.Status observation,
 // then block it on the parent row lock. While it waits, the other connection
 // commits child Cancel, without modifying the parent. The Begin contract must
 // recheck child liveness after acquiring the authoritative lock.
@@ -55,7 +56,7 @@ func TestAuditIssue107RealPostgresBeginOnAlreadyCancelledChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	child, err := original.Create(t.Context(), kernel.CreateRequest{
-		ID: "child", Kind: "agent", ParentRunID: parent.Run.ID, Actor: actor, Thread: thread,
+		ID: "child", Kind: "agent", ExecutionRequired: true, ParentRunID: parent.Run.ID, Actor: actor, Thread: thread,
 		Goal: "child already cancelling", State: []byte(`{}`),
 	})
 	if err != nil {
@@ -74,11 +75,13 @@ func TestAuditIssue107RealPostgresBeginOnAlreadyCancelledChild(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	done := make(chan auditBeginChildResult, 1)
+	peer, e := kernel.New(kernel.Dependencies{Store: NewKernelStore(otherDB)})
+	if e != nil {
+		t.Fatal(e)
+	}
 	go func() {
-		beginErr := NewKernelStore(otherDB).BeginChildExecution(ctx, kernel.ChildExecutionGrant{
-			ID: "known-original-grant", ChildRunID: child.Run.ID, ExpectedRevision: child.Run.Revision,
-		})
-		done <- auditBeginChildResult{grant: kernel.ChildExecutionGrant{ID: "known-original-grant", ChildRunID: child.Run.ID, ExpectedRevision: child.Run.Revision}, err: beginErr}
+		grant, beginErr := conformance.AdmitChildFixture(ctx, peer, child.Run.ID, child.Run.Revision)
+		done <- auditBeginChildResult{grant: grant, err: beginErr}
 	}()
 	// Confirm the child Begin has already read child state and is blocked
 	// waiting on the locked parent row, rather than relying on a timed sleep.

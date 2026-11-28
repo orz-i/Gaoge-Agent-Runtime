@@ -77,7 +77,7 @@ func assertTestDiscovery(t *testing.T, discovery Discovery) {
 		t.Fatalf("unexpected discovery: %#v", discovery)
 	}
 	tool := discovery.Tools[0]
-	if tool.Name != testLookupTool || tool.Definition.Key != testLookupTool || !strings.Contains(string(tool.InputSchema), "id") {
+	if tool.Definition.Name != testLookupTool || tool.Definition.Key != testLookupTool || !strings.Contains(string(tool.Definition.InputSchema), "id") {
 		t.Fatalf("unexpected Tool projection: %#v", tool)
 	}
 }

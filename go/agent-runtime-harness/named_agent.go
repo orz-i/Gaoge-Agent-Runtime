@@ -10,12 +10,15 @@ import (
 // The explicit names are the entire allowlist; a model may submit only the
 // member ID and task Goal. Authorization and exact version are frozen first.
 func selectNamedAgents(options *AgentSessionOptions) error {
+	// Frozen snapshots are output, not a second Host selection API.
+	if len(options.Session.Config.DelegationPolicy.NamedAgents) != 0 {
+		return ErrInvalidRequest
+	}
 	if len(options.NamedAgents) == 0 {
 		return nil
 	}
 	cfg := &options.Session.Config
-	if options.DelegationPolicy != nil || options.Handoffs != nil || len(cfg.DelegationPolicy.NamedAgents) != 0 ||
-		options.Relations == nil || cfg.DelegationPolicy.MaxDepth <= 0 {
+	if options.DelegationPolicy != nil || options.Handoffs != nil || options.Relations == nil {
 		return ErrInvalidRequest
 	}
 	names := make([]NamedAgentSnapshot, 0, len(options.NamedAgents))
@@ -24,9 +27,6 @@ func selectNamedAgents(options *AgentSessionOptions) error {
 		for _, t := range n.Tools {
 			key := t.Registration.Definition.Key
 			keys = append(keys, key)
-			if t.Policy.ExecutionMode == "" {
-				t.Policy.ExecutionMode = "local_dispatch"
-			}
 			options.MemberTools = append(options.MemberTools, t)
 		}
 		spec := cloneAgentSpec(n.AgentSpec)

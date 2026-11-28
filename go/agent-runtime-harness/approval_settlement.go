@@ -180,7 +180,7 @@ func (r *Runner) readNativeApprovalProjection(ctx context.Context, turn Turn, in
 }
 
 func (r *Runner) recordNativeApprovalDecisions(ctx context.Context, turn Turn, inv Invocation, snapshot kernel.Snapshot) error {
-	if snapshot.Run.Kind != "agent" || !r.runtime.SupportsOwnedPhysicalExecution() {
+	if snapshot.Run.Kind != "agent" || !r.runtime.SupportsPhysicalExecution() {
 		return nil
 	}
 	if inv.ParentItemID == "" {
@@ -228,7 +228,7 @@ func (r *Runner) prepareApprovalDispatch(ctx context.Context, turn Turn, inv Inv
 	if err := r.recordApprovalRequestItem(ctx, turn, inv, source); err != nil {
 		return ctx, false, err
 	}
-	return context.WithValue(ctx, originalApprovalDispatchKey{}, a), true, nil
+	return ctx, true, nil
 }
 
 func (r *Runner) approvalCallback(source kernel.Snapshot, decision plugin.ApprovalDecision, comment string) func(context.Context) (kernel.Snapshot, error) {

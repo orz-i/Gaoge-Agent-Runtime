@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
@@ -91,17 +91,6 @@ func NewBoundedContextAdapter(manager *runtimecontext.Manager, ports BoundedCont
 	}
 	return &BoundedContextAdapter{manager: manager, ports: ports}, nil
 }
-func (*BoundedContextAdapter) Name() string { return "runtime.bounded_context.v1" }
-func (a *BoundedContextAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	hydrated, source, err := a.hydrate(ctx, inv)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	snapshot, nextErr := next(hydrated)
-	a.finishHydration(ctx, source)
-	return snapshot, nextErr
-}
-
 func (a *BoundedContextAdapter) hydrate(ctx context.Context, inv plugin.RunInvocation) (context.Context, BoundedContextHydration, error) {
 	hydrated, source, err := a.ports.Hydrate(ctx, inv)
 	if err != nil {
@@ -120,23 +109,16 @@ func (a *BoundedContextAdapter) finishHydration(ctx context.Context, source Boun
 	callbackscope.Record(ctx, a, "context.hydrate.returned", source)
 }
 
-func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
+func (a *BoundedContextAdapter) prepareManaged(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
 	callbackscope.ManagedPrepareEntered(ctx, a)
 	defer func() { callbackscope.ManagedPrepareReturned(ctx, a, prepared, prepareErr) }()
-	return a.prepare(ctx, incoming, nil, true)
-}
-
-// PrepareRequest is the ordinary Host request-preparer composition. It uses
-// the same candidate selection and Context writes but cannot record a native
-// managed recovery receipt on the surrounding Host callback ticket.
-func (a *BoundedContextAdapter) PrepareRequest(ctx context.Context, incoming model.Request) (model.Request, error) {
-	return a.prepare(ctx, incoming, nil, false)
+	return a.prepare(ctx, incoming, nil)
 }
 
 // prepare owns the only Context preparation algorithm. Only a rejection
 // computed by this concrete adapter can set rejected, never an error supplied
 // by a Host port. Managed transfer and ordinary owned execution share it.
-func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *candidateRejection, journal bool) (model.Request, error) {
+func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *candidateRejection) (model.Request, error) {
 	plan, err := a.ports.Plan(ctx, model.CloneRequest(incoming))
 	if err != nil {
 		return model.Request{}, err
@@ -190,7 +172,7 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 	if err != nil {
 		return model.Request{}, err
 	}
-	if !sameFrozenModelMessages(choice.request.Messages, model.CloneMessages(runtimecontext.Materialize(next.Window))) {
+	if !reflect.DeepEqual(choice.request.Messages, model.CloneMessages(runtimecontext.Materialize(next.Window))) {
 		return model.Request{}, ErrInvalidRequest
 	}
 	request, err = choice.selectForIntent(ctx)
@@ -216,15 +198,13 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 	if err = a.ports.BindCheckpoint(ctx, plan.Checkpoint.ID, saved); err != nil {
 		return model.Request{}, err
 	}
-	if journal {
-		callbackscope.Operation(ctx, a, "context.checkpoint:"+saved.ID, struct {
-			RunID, TurnID       string
-			TurnRevision        uint64
-			Source              json.RawMessage
-			Previous, Committed runtimecontext.Checkpoint
-			Artifacts           []runtimecontext.Artifact
-		}{incoming.RunID, plan.TurnID, plan.TurnRevision, plan.SourceBinding, *plan.Checkpoint, saved, choice.artifacts})
-	}
+	callbackscope.Operation(ctx, a, "context.checkpoint:"+saved.ID, struct {
+		RunID, TurnID       string
+		TurnRevision        uint64
+		Source              json.RawMessage
+		Previous, Committed runtimecontext.Checkpoint
+		Artifacts           []runtimecontext.Artifact
+	}{incoming.RunID, plan.TurnID, plan.TurnRevision, plan.SourceBinding, *plan.Checkpoint, saved, choice.artifacts})
 	return request, nil
 }
 func sameBoundedValue(a, b any) bool {

@@ -34,5 +34,5 @@ func (runner *Runner) nativeRootCancellationReady(ctx context.Context, turn Turn
 	// first-party typed receipt-recovery eligibility may re-enter the native
 	// Cancel/cleanup CAS. It may still reject an unsettled child below.
 	scope, err := owner.RootDeferredCleanupEligibility(ctx, runID, current.Run.Revision)
-	return err == nil && scope.Valid() && runner.runtime.VerifyReturnedRootSettlement(ctx, current) == nil
+	return err == nil && scope.Valid() && runner.runtime.VerifyExecutionCustody(ctx, current, kernel.CustodyReturned) == nil
 }

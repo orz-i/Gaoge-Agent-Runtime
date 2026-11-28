@@ -216,6 +216,11 @@ func delegationNoInvocationSource(root Invocation, runID string, byID, byRun map
 			cancelled.Execution.Error != "" || cancelled.Execution.ErrorCode != "" {
 			return selected, Item{}, false
 		}
+		if selected.Execution.NativeLocal {
+			// Native no-Run projection is admitted only from the committed
+			// creation decision; its immutable Item replaces the old election.
+			return selected, source, true
+		}
 		original, valid := delegationOriginalParentRoot(root, source.InvocationID, selected.ParentRunID, byID, items, ledger)
 		if !valid {
 			return selected, Item{}, false

@@ -35,6 +35,8 @@
     "LICENSE"
   ],
   "scripts": {
+    "generate": "go run ../../go/agent-runtime-http/internal/contractgen",
+    "contract:check": "go run ../../go/agent-runtime-http/internal/contractgen -check",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

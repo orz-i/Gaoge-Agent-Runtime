@@ -51,7 +51,7 @@ func (store *KernelStore) ListRuns(ctx context.Context, q RunQuery) ([]kernel.Sn
 	}
 	result := make([]kernel.Snapshot, 0, len(rows))
 	for _, row := range rows {
-		value, err := kernelSnapshotFrom(row)
+		value, err := kernelSnapshotFrom(store.db.WithContext(ctx), row)
 		if err != nil {
 			return nil, err
 		}

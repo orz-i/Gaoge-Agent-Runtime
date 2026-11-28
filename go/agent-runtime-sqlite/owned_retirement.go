@@ -9,91 +9,68 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-var _ kernel.OwnedRetirementStore = (*Store)(nil)
-
-func sqliteOwnedCompletion(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
-	c, e := loadOwnedCallbackReturn(ctx, q, g)
+func sqliteOwnedCompletion(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
+	c, e := loadPhysicalCallbackReturn(ctx, q, g)
 	if errors.Is(e, kernel.ErrNotFound) {
-		return kernel.OwnedPhysicalCallbackCompletion{}, nil
+		return kernel.PhysicalCallbackCompletion{}, nil
 	}
 	return c, e
 }
-func sqliteOwnedRetirementClosures(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, s kernel.Snapshot) ([]kernel.ManagedTransfer, error) {
+func sqliteRetirementSource(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant) (kernel.ManagedAuthority, kernel.ManagedTransfer, error) {
 	if g.AdmissionOperation != "managed_resume" {
-		return []kernel.ManagedTransfer{}, nil
+		return kernel.ManagedAuthority{}, kernel.ManagedTransfer{}, nil
 	}
 	t, e := sqliteLoadManaged(ctx, tx, g.ChildRunID)
 	if e != nil {
-		return nil, e
+		return kernel.ManagedAuthority{}, kernel.ManagedTransfer{}, e
 	}
-	h, e := sqliteLoadManagedByID(ctx, tx, t.SafePoint.ID)
-	if e != nil {
-		return nil, e
-	}
-	if kernel.ManagedDigest(h) != kernel.ManagedDigest(t) {
-		return nil, kernel.ErrExecutionConflict
-	}
+
 	a, e := sqliteManagedAuthority(ctx, tx)
 	if e != nil {
-		return nil, e
+		return kernel.ManagedAuthority{}, kernel.ManagedTransfer{}, e
 	}
-	return kernel.CloseManagedRetirement(g, s, a, t)
+	return a, t, nil
 }
-func sqlitePersistOwnedRetirement(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease, permit kernel.ChildExecutionSettlement) error {
-	var legacy []byte
-	if e := tx.QueryRowContext(ctx, `SELECT settlement_evidence_json FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=? AND settled_revision=0`, g.ID, g.ChildRunID, g.ChildRunID).Scan(&legacy); e != nil {
-		if errors.Is(e, sql.ErrNoRows) {
-			return kernel.ErrExecutionConflict
-		}
-		return conflictOrDatabaseError(e)
-	}
-	if len(legacy) != 0 {
-		return kernel.ErrExecutionConflict
+func sqliteBuildOwnedRetirement(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease, permit kernel.ChildExecutionSettlement) (string, error) {
+	if e := loadOwnedPhysicalGrant(ctx, tx, g); e != nil {
+		return "", e
 	}
 	c, e := sqliteOwnedCompletion(ctx, tx, g)
 	if e != nil {
-		return e
+		return "", e
 	}
-	closures, e := sqliteOwnedRetirementClosures(ctx, tx, g, s)
+	authority, transfer, e := sqliteRetirementSource(ctx, tx, g)
 	if e != nil {
-		return e
+		return "", e
 	}
-	r, e := kernel.BuildOwnedRetirementReceipt(g, s, native, c, permit, closures)
+	r, e := kernel.BuildOwnedRetirementReceipt(g, s, native, c, permit, authority, transfer)
 	if e != nil {
-		return e
+		return "", e
 	}
 	payload, e := json.Marshal(r)
 	if e != nil {
-		return e
+		return "", e
 	}
-	_, e = tx.ExecContext(ctx, `INSERT INTO runtime_owned_retirements(grant_id,run_id,settled_revision,version,phase,payload_json) VALUES(?,?,?,?,?,?)`, g.ID, g.ChildRunID, s.Run.Revision, r.Version, "ACKNOWLEDGED", payload)
-	e = conflictOrDatabaseError(e)
-	if errors.Is(e, kernel.ErrConflict) {
-		return kernel.ErrExecutionConflict
-	}
-	if e != nil {
-		return e
-	}
+
 	if r.Evidence.Completion.LeaseOwned {
 		update, e := tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_owner='',execution_lease_id='',execution_expiry_ms=0 WHERE run_id=? AND execution_epoch=? AND execution_owner=? AND execution_lease_id=?`, g.ChildRunID, g.ExecutionEpoch, g.ExecutionOwnerID, g.ExecutionLeaseID)
 		if e != nil {
-			return conflictOrDatabaseError(e)
+			return "", conflictOrDatabaseError(e)
 		}
 		n, e := update.RowsAffected()
 		if e != nil {
-			return e
+			return "", e
 		}
 		if n != 1 {
-			return kernel.ErrExecutionConflict
+			return "", kernel.ErrExecutionConflict
 		}
 	}
-	return nil
+	return string(payload), nil
 }
 func sqliteLoadOwnedRetirement(ctx context.Context, q schemaQuery, id string) (kernel.OwnedRetirementReceipt, error) {
-	var grant, run, phase string
-	var rev, version uint64
+	var grant, run string
 	var raw []byte
-	e := q.QueryRowContext(ctx, `SELECT grant_id,run_id,settled_revision,version,phase,payload_json FROM runtime_owned_retirements WHERE grant_id=?`, id).Scan(&grant, &run, &rev, &version, &phase, &raw)
+	e := q.QueryRowContext(ctx, `SELECT grant_id,child_run_id,retirement_json FROM runtime_effects WHERE grant_id=? AND start_revision=0 AND retirement_json<>''`, id).Scan(&grant, &run, &raw)
 	if errors.Is(e, sql.ErrNoRows) {
 		return kernel.OwnedRetirementReceipt{}, kernel.ErrNotFound
 	}
@@ -101,8 +78,20 @@ func sqliteLoadOwnedRetirement(ctx context.Context, q schemaQuery, id string) (k
 		return kernel.OwnedRetirementReceipt{}, e
 	}
 	var r kernel.OwnedRetirementReceipt
-	if e = json.Unmarshal(raw, &r); e != nil || !r.Valid() || r.Evidence.Grant.ID != grant || r.Evidence.Grant.ChildRunID != run || r.Evidence.Snapshot.Run.Revision != rev || r.Version != version || phase != "ACKNOWLEDGED" {
+	if e = json.Unmarshal(raw, &r); e != nil || !r.Valid() || r.Evidence.Grant.ID != grant || r.Evidence.Grant.ChildRunID != run {
 		return r, kernel.ErrExecutionConflict
+	}
+	if len(r.ClosureRefs) != 0 {
+		t, e := sqliteLoadManagedByID(ctx, q, r.ClosureRefs[0].SourceID)
+		if e != nil {
+			if errors.Is(e, kernel.ErrNotFound) {
+				return r, kernel.ErrExecutionConflict
+			}
+			return r, e
+		}
+		if _, e = kernel.ObserveManagedRetirement(t, r); e != nil {
+			return r, e
+		}
 	}
 	return r, nil
 }
@@ -135,7 +124,7 @@ func (s *Store) LookupOwnedRetirementForRun(ctx context.Context, id string) (ker
 	if quarantine != 0 {
 		return kernel.OwnedRetirementReceipt{}, kernel.ErrExecutionConflict
 	}
-	rows, e := tx.QueryContext(ctx, "SELECT grant_id FROM runtime_owned_retirements WHERE run_id=?", id)
+	rows, e := tx.QueryContext(ctx, "SELECT grant_id FROM runtime_effects WHERE child_run_id=? AND start_revision=0 AND retirement_json<>''", id)
 	if e != nil {
 		return kernel.OwnedRetirementReceipt{}, e
 	}
@@ -165,7 +154,7 @@ func (s *Store) LookupOwnedRetirementForRun(ctx context.Context, id string) (ker
 		receipts = append(receipts, r)
 	}
 	var count int
-	if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?", id, id).Scan(&count); e != nil {
+	if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_effects WHERE start_revision>0 AND "+activeEffectScope+"", id, id).Scan(&count); e != nil {
 		return kernel.OwnedRetirementReceipt{}, e
 	}
 	return kernel.SelectOwnedRetirementForRun(id, receipts, snapshot, lease.Epoch, lease, count != 0)

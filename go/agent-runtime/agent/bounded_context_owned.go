@@ -10,23 +10,8 @@ import (
 
 func validBoundedContextComposition(d Dependencies) bool {
 	a := d.BoundedContext
-	if a == nil {
-		return true
-	}
-	if a.manager == nil || a.ports == nil || d.PrepareModelRequest != nil ||
-		(d.ContextSummary != nil && d.ContextSummary.bounded != a) {
-		return false
-	}
-	count := 0
-	for _, layer := range d.RunMiddleware {
-		if contextLayer, ok := layer.(*BoundedContextAdapter); ok {
-			if contextLayer != a {
-				return false
-			}
-			count++
-		}
-	}
-	return count == 1 || len(d.RunMiddleware) == 0
+	return a == nil || a.manager != nil && a.ports != nil && d.PrepareModelRequest == nil &&
+		(d.ContextSummary == nil || d.ContextSummary.bounded == a)
 }
 
 // A private, source-bound preparation rejection is not a provider
@@ -49,7 +34,7 @@ func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapsh
 	// preparation evidence. The actual preparation and sampling selection
 	// remain the same concrete operation as the ordinary native path.
 	if _, bound := r.managedOriginalDispatch(ctx, source.Run.ID); r.managedRecovery && (bound || r.managedObligationSource != nil) {
-		prepared, err := a.Prepare(ctx, model.CloneRequest(request))
+		prepared, err := a.prepareManaged(ctx, model.CloneRequest(request))
 		r.noteRootCallbackFailure(err)
 		if err == nil && !validPreparedModelRequest(request, prepared) {
 			err = ErrInvalidRequest
@@ -71,7 +56,7 @@ func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapsh
 		}
 	}()
 	var rejected candidateRejection
-	prepared, err := a.prepare(callCtx, model.CloneRequest(request), &rejected, true)
+	prepared, err := a.prepare(callCtx, model.CloneRequest(request), &rejected)
 	proved := false
 	if err == nil && !validPreparedModelRequest(request, prepared) {
 		err = ErrInvalidRequest

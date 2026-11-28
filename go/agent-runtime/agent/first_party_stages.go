@@ -10,54 +10,23 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// A complete concrete Budget owner has the historical exact order
-// Budget -> Context (if selected), plus one Model and one Tool adapter.
-// Partial/opaque chains retain their actual ordering and qualifications.
-func completeLegacyBudget(d Dependencies, ctx *BoundedContextAdapter) *BoundedBudgetAdapter {
-	b := selectedSamplingBudget(d)
-	if b == nil || selectedToolBudget(d) != b || len(d.ModelMiddleware) != 1 || len(d.ToolMiddleware) != 1 {
-		return nil
-	}
-	if ctx == nil && len(d.RunMiddleware) == 1 && d.RunMiddleware[0] == b ||
-		ctx != nil && len(d.RunMiddleware) == 2 && d.RunMiddleware[0] == b && d.RunMiddleware[1] == ctx {
-		return b
-	}
-	return nil
-}
-
-func contextOnlyRun(d Dependencies, a *BoundedContextAdapter) bool {
-	return len(d.RunMiddleware) == 0 || len(d.RunMiddleware) == 1 && d.RunMiddleware[0] == a
-}
-
-// No generic participant registry or chain synthesis. The standard
-// composition and its exact legacy spelling select the SAME concrete stages.
-func selectFirstPartyStages(d *Dependencies) (*BoundedContextAdapter, *BoundedBudgetAdapter, error) {
+// Context and Budget are selected through their explicit, fixed stages.
+func selectFirstPartyStages(d *Dependencies) error {
 	if !validBoundedBudgetComposition(*d) || !validBoundedContextComposition(*d) {
-		return nil, nil, ErrInvalidRequest
+		return ErrInvalidRequest
 	}
 	if summary := d.ContextSummary; summary != nil {
 		if !validSummaryComposition(*d) {
-			return nil, nil, ErrInvalidRequest
+			return ErrInvalidRequest
 		}
 		d.BoundedContext = summary.bounded
 	}
-	b := d.BoundedBudget
-	if b == nil {
-		b = completeLegacyBudget(*d, d.BoundedContext)
-		if b != nil {
-			d.BoundedBudget = b
-			d.RunMiddleware, d.ModelMiddleware, d.ToolMiddleware = nil, nil, nil
-		}
+	// A registered recovery Host is a persistence identity, not an opt-in mode.
+	// A configured Context must prove its actual first-party store against it.
+	if d.Runtime.HasManagedRecoveryHost() && d.BoundedContext != nil && !validManagedStores(*d) {
+		return ErrInvalidRequest
 	}
-	var a *BoundedContextAdapter
-	if d.BoundedContext != nil && contextOnlyRun(*d, d.BoundedContext) {
-		a = d.BoundedContext
-		d.RunMiddleware = nil
-	}
-	if d.ManagedRecovery && (a == nil || !validManagedDependencies(*d)) {
-		return nil, nil, ErrInvalidRequest
-	}
-	return a, b, nil
+	return nil
 }
 
 func finishNativeStage(ticket *callbackscope.Ticket, err *error) {
@@ -68,11 +37,15 @@ func finishNativeStage(ticket *callbackscope.Ticket, err *error) {
 	callbackscope.Returned(ticket, *err)
 }
 
-// The Runner now fixes this order: original Budget scope, Context hydration,
-// actual Run continuation, then Budget projection/settlement. Host middleware
-// cannot supply a new Next for any of these first-party stages.
-func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocation, terminal plugin.RunNext) (out kernel.Snapshot, err error) {
-	b := r.nativeBudget
+// Private continuations connect only the fixed Runtime stages. They are not
+// registration points and never cross a Host extension boundary.
+type runContinuation func(context.Context) (kernel.Snapshot, error)
+type modelCall func(context.Context, model.Request, model.StreamSink) (model.Response, error)
+type toolCall func(context.Context) (tools.ExecutionResult, error)
+
+// Original Budget scope, Context hydration, native operation, then settlement.
+func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocation, terminal runContinuation) (out kernel.Snapshot, err error) {
+	b := r.boundedBudget
 	if b == nil {
 		return r.invokeContextRun(ctx, inv, terminal)
 	}
@@ -89,16 +62,13 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 		callbackscope.Operation(stageCtx, b, "managed.budget.admitted", admission.ledger)
 	}
 	out, err = r.invokeContextRun(stageCtx, inv, terminal)
-	return b.finishRun(stageCtx, inv, admission, out, err, r.atomicBudget() == b)
+	return b.finishRun(stageCtx, inv, admission, out, err)
 }
 
-func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation, terminal plugin.RunNext) (out kernel.Snapshot, err error) {
-	a := r.nativeContext
+func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation, terminal runContinuation) (out kernel.Snapshot, err error) {
+	a := r.boundedContext
 	if a == nil {
-		if r.nativeBudget != nil {
-			return terminal(ctx) // complete native topology has no Host Run chain
-		}
-		return r.runChain.Invoke(ctx, inv, terminal)
+		return terminal(ctx)
 	}
 	stageCtx, ticket := callbackscope.Enter(ctx, inv.RunID, a, inv)
 	if ticket == nil {
@@ -133,33 +103,38 @@ func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation,
 	return out, err
 }
 
-func (r *Runner) invokeFirstPartyModel(ctx context.Context, request model.Request, emit model.StreamSink, terminal plugin.ModelNext) (out model.Response, err error) {
-	a := r.nativeBudget
-	if a == nil {
-		return r.modelChain.Invoke(ctx, request, emit, terminal)
+func (r *Runner) invokeAdmittedModel(ctx context.Context, request model.Request, emit model.StreamSink, terminal modelCall) (out model.Response, err error) {
+	b := r.modelAdmissionBarrier
+	if b == nil {
+		return terminal(ctx, request, emit)
 	}
-	stageCtx, ticket := callbackscope.Enter(ctx, request.RunID, a, request)
+	stageCtx, ticket := callbackscope.Enter(ctx, request.RunID, b, request)
 	if ticket == nil {
 		return model.Response{}, ErrInvalidRequest
 	}
 	defer finishNativeStage(ticket, &err)
-	// The concrete Budget operation is the only selected physical owner.
-	// It calls the existing provider admission terminal synchronously.
-	return a.Model(stageCtx, model.CloneRequest(request), emit, terminal)
+	if err = b.wait(stageCtx); err != nil {
+		return model.Response{}, err
+	}
+	out, err = terminal(stageCtx, request, emit)
+	callbackscope.Record(stageCtx, b, "model.admission_barrier.returned", request)
+	return out, err
 }
 
-func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvocation, terminal plugin.ToolNext) (out tools.ExecutionResult, err error) {
-	a := r.nativeBudget
+func (r *Runner) invokeProjectedTool(ctx context.Context, inv plugin.ToolInvocation, terminal toolCall) (out tools.ExecutionResult, err error) {
+	a := r.toolTimeline
 	if a == nil {
-		return r.toolChain.Invoke(ctx, inv, terminal)
+		return terminal(ctx)
 	}
 	stageCtx, ticket := callbackscope.EnterTool(ctx, inv.Run.ID, a, inv)
 	if ticket == nil {
 		return tools.ExecutionResult{}, ErrInvalidRequest
 	}
 	defer finishNativeStage(ticket, &err)
-	// Keep the exact original Tool authority and budget receipt ticket.
-	inv.Definition = tools.CloneDefinition(inv.Definition)
-	inv.Request = tools.CloneExecutionRequest(inv.Request)
-	return a.Tool(stageCtx, inv, terminal)
+	scope, started, err := a.start(stageCtx, inv)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	out, err = terminal(stageCtx)
+	return a.finish(stageCtx, scope, started, inv, out, err)
 }

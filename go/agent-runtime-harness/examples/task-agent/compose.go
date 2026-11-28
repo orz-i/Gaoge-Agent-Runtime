@@ -12,7 +12,6 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -134,12 +133,7 @@ func (counter recordedInputTokenCounter) Count(ctx context.Context, request runt
 // compose is deliberately local to this example: the host chooses stores,
 // authority, real model limits, preparation order and execution ownership.
 func compose(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource) (*harness.SessionClient, error) {
-	return composeContextMode(store, state, client, config, owner, transcript, false)
-}
 
-// The ordinary mode exists only for the example's opaque-failure regression.
-// It is not a fallback or an alternate recovery path in the public example.
-func composeContextMode(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource, opaque bool) (*harness.SessionClient, error) {
 	rt, err := kernel.New(kernel.Dependencies{Store: store, Clock: state.clock})
 	if err != nil {
 		return nil, err
@@ -199,31 +193,17 @@ func composeContextMode(store kernel.Store, state *taskState, client model.Clien
 	if err != nil {
 		return nil, err
 	}
-	var prepare agent.ModelRequestPreparer = bounded.Prepare
-	var rehydrate plugin.RunMiddleware = bounded
-	if opaque {
-		prepare, err = harness.NewManagedContextPreparer(state.store, manager, resolve)
-		if err != nil {
-			return nil, err
-		}
-		rehydrate, err = harness.NewContextRunMiddleware(state.store, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-	agentRunner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: rt, Model: client, Catalog: registry, Executor: registry, Clock: state.clock,
-		// Add any host schema projections BEFORE Context preparation, which must be last.
-		PrepareModelRequest: agent.ChainModelRequestPreparers(prepare),
-		RunMiddleware:       []plugin.RunMiddleware{rehydrate},
-		ModelMiddleware:     []plugin.ModelMiddleware{outputCeiling{tokens: config.outputTokens, state: state}},
-		Limits:              taskLimits(),
-		RunExecution:        &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration},
+	dependencies := agent.Dependencies{
+		Runtime: rt, Model: observeTaskModel(client, state), Catalog: registry, Executor: registry, Clock: state.clock,
+		BoundedContext: bounded,
+		Limits:         taskLimits(),
+		RunExecution:   &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration},
 		Execution: agent.ExecutionPolicy{
 			Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, MaxConcurrency: 1},
 			Tool:  agent.CallPolicy{Timeout: toolTimeout, MaxAttempts: 1, MaxConcurrency: 1},
 		},
-	})
+	}
+	agentRunner, err := agent.NewRunner(dependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -253,32 +233,60 @@ func composeContextMode(store kernel.Store, state *taskState, client model.Clien
 	})
 }
 
-type outputCeiling struct {
-	tokens int64
+type observedModelClient struct {
+	client model.Client
 	state  *taskState
 }
 
-func (outputCeiling) Name() string { return "task-agent.output-ceiling" }
+// Only the example's private instrumentation is wrapped. A named Provider
+// keeps its real request-bound identity, and an anonymous fixture stays anonymous.
+func observeTaskModel(client model.Client, state *taskState) model.Client {
+	observed := observedModelClient{client: client, state: state}
+	if _, ok := client.(model.RequestProviderNamer); ok {
+		return observedNamedModelClient{observed}
+	}
+	if _, ok := client.(model.ProviderNamer); ok {
+		return observedNamedModelClient{observed}
+	}
+	return observed
+}
 
-func (ceiling outputCeiling) Model(ctx context.Context, request model.Request, sink model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	// The Config freezes the per-call ceiling before Context preparation.
-	// Keep this observation middleware's existing ability to tighten it.
-	if request.MaxOutputTokens == 0 || request.MaxOutputTokens > ceiling.tokens {
-		request.MaxOutputTokens = ceiling.tokens
+type observedNamedModelClient struct{ observedModelClient }
+
+func (client observedNamedModelClient) ProviderNameForRequest(request model.Request) string {
+	if p, ok := client.client.(model.RequestProviderNamer); ok {
+		return p.ProviderNameForRequest(request)
 	}
+	return client.client.(model.ProviderNamer).ProviderName()
+}
+func (client observedModelClient) BindingFingerprintForRequest(request model.Request) string {
+	if p, ok := client.client.(model.RequestBindingFingerprinter); ok {
+		return p.BindingFingerprintForRequest(request)
+	}
+	return ""
+}
+
+func (client observedModelClient) Generate(ctx context.Context, request model.Request) (model.Response, error) {
+	return client.GenerateStream(ctx, request, nil)
+}
+
+func (client observedModelClient) GenerateStream(ctx context.Context, request model.Request, sink model.StreamSink) (model.Response, error) {
 	started := time.Now()
-	response, err := next(ctx, request, sink)
-	// An ownership rejection before physical dispatch is not a model call.
-	if !agent.IsModelPreDispatchDenied(err) {
-		ceiling.state.mu.Lock()
-		ceiling.state.requests = append(ceiling.state.requests, model.CloneRequest(request))
-		receipt := numericUsage(response.Usage)
-		ceiling.state.observations = append(ceiling.state.observations, modelObservation{
-			DurationMs: time.Since(started).Milliseconds(), Usage: receipt,
-		})
-		ceiling.state.mu.Unlock()
-		ceiling.state.recordInputCountUsageComparison(request, receipt, err)
+	var response model.Response
+	var err error
+	if streaming, ok := client.client.(model.StreamingClient); ok {
+		response, err = streaming.GenerateStream(ctx, request, sink)
+	} else {
+		response, err = client.client.Generate(ctx, request)
 	}
+	client.state.mu.Lock()
+	client.state.requests = append(client.state.requests, model.CloneRequest(request))
+	receipt := numericUsage(response.Usage)
+	client.state.observations = append(client.state.observations, modelObservation{
+		DurationMs: time.Since(started).Milliseconds(), Usage: receipt,
+	})
+	client.state.mu.Unlock()
+	client.state.recordInputCountUsageComparison(request, receipt, err)
 	return response, err
 }
 

@@ -17,7 +17,7 @@ import (
 )
 
 type settledToolPorts struct {
-	agent.BoundedBudgetPorts
+	nativeModelBudgetPorts
 	id      string
 	project func(context.Context, budget.Ledger) error
 }
@@ -51,38 +51,29 @@ func (m *settledToolModel) Generate(_ context.Context, q model.Request) (model.R
 	return model.Response{Content: "finished"}, nil
 }
 
-// RunSettledToolRecovery exercises the complete original Tool ledger -> native
-// receipt-only CAS -> successor Agent consumption path with real Kernel adapters.
-// The ledger factory can independently reopen the Host's own store.
-func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	t.Run("mixed-original-batch", func(t *testing.T) { mixedOriginalToolConsumption(t, factory, ledgerFactory) })
-	t.Run("timeline-consumption", func(t *testing.T) { toolTimelineConsumption(t, factory, ledgerFactory) })
-	t.Run("approval-recovery", func(t *testing.T) { originalToolApprovalRecovery(t, factory, ledgerFactory) })
-	t.Run("batch-boundary", func(t *testing.T) { toolBatchBoundary(t, factory, ledgerFactory) })
-	t.Run("capacity-admission", func(t *testing.T) { toolCapacityAdmission(t, factory, ledgerFactory) })
-	t.Run("unsent-recovery", func(t *testing.T) { toolUnsentRecovery(t, factory, ledgerFactory) })
-	t.Run("native-admission-return", func(t *testing.T) { nativeAdmissionReturns(t, factory, ledgerFactory) })
-	t.Run("actual-dispatch-denial", func(t *testing.T) { toolDispatchDenial(t, factory, ledgerFactory) })
-	for _, variant := range []string{"committed", "strict-rejection", "allow-completion", "foreign-ledger", "changed-receipt", "opaque-callback", "lost-recovery-ack", "cancel-before-consume", "cancel-during-project"} {
+// RunSettledToolRecovery exercises original Tool accounting and successor
+// consumption through one native Kernel Store, including independent reopen.
+func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
+	t.Run("mixed-original-batch", func(t *testing.T) { mixedOriginalToolConsumption(t, factory) })
+	t.Run("timeline-consumption", func(t *testing.T) { toolTimelineConsumption(t, factory) })
+	t.Run("approval-recovery", func(t *testing.T) { originalToolApprovalRecovery(t, factory) })
+	t.Run("batch-boundary", func(t *testing.T) { toolBatchBoundary(t, factory) })
+	t.Run("capacity-admission", func(t *testing.T) { toolCapacityAdmission(t, factory) })
+	t.Run("unsent-recovery", func(t *testing.T) { toolUnsentRecovery(t, factory) })
+	t.Run("native-admission-return", func(t *testing.T) { nativeAdmissionReturns(t, factory) })
+	t.Run("actual-dispatch-denial", func(t *testing.T) { toolDispatchDenial(t, factory) })
+	for _, variant := range []string{"committed", "strict-rejection", "allow-completion", "foreign-ledger", "changed-receipt", "lost-recovery-ack", "cancel-before-consume", "cancel-during-project"} {
 		t.Run(variant, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
-			var ledger budget.LedgerStore
-			var reopenLedger func() budget.LedgerStore
-			if ledgerFactory == nil {
-				store := budget.NewMemoryLedgerStore()
-				ledger = store
-				reopenLedger = func() budget.LedgerStore { return store }
-			} else {
-				ledger, reopenLedger = ledgerFactory(t)
-			}
+			ledger := newToolTestLedger(t, backing)
 			event := "tool.correction_requested"
 			committed := variant == "committed" || variant == "cancel-before-consume" || variant == "cancel-during-project"
 			if committed {
 				event = "tool.completed"
 			}
 			injected := errors.New("settled Tool result CAS cut")
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: event, injected: injected}
+			fault := &ea1AgentReceiptFault{Store: backing, LedgerStore: ledger, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: event, injected: injected}
 			rt := ea1StartRuntime(t, fault)
 			observer := ea1StartRuntime(t, peer)
 			m := &settledToolModel{strict: variant == "strict-rejection"}
@@ -114,7 +105,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 				t.Fatal(err)
 			}
 			var project func(context.Context, budget.Ledger) error
-			makeRunner := func(rt *kernel.Runtime, l budget.LedgerStore, scope string, opaque bool, verify bool) *agent.Runner {
+			makeRunner := func(rt *kernel.Runtime, l budget.LedgerStore, scope string, verify bool) *agent.Runner {
 				a, e := agent.NewBoundedBudgetAdapter(l, settledToolPorts{id: scope, project: func(ctx context.Context, l budget.Ledger) error {
 					if project != nil {
 						return project(ctx, l)
@@ -124,14 +115,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 				if e != nil {
 					t.Fatal(e)
 				}
-				layers := []plugin.ToolMiddleware{a}
-				if opaque {
-					layers = append(layers, ea1OpaqueToolMiddleware{})
-				}
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, ToolMiddleware: layers}
-				if variant == "cancel-during-project" {
-					d.RunMiddleware = []plugin.RunMiddleware{a}
-				}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, BoundedBudget: a}
 				if verify {
 					d.ToolOutcomeVerifier = agent.ToolOutcomeVerifierFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 						verifications++
@@ -145,7 +129,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 				return r
 			}
 			request := agent.StartRequest{ID: "settled-tool-run", RequestID: "original", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read evidence", Model: "fixture", ToolKeys: []string{"read", "other"}}
-			r := makeRunner(rt, ledger, "original-ledger", variant == "opaque-callback", false)
+			r := makeRunner(rt, fault, "original-ledger", false)
 			_, err = r.StartRun(ctx, request)
 			if !errors.Is(err, injected) || fault.failures != 1 || originalCalls != 1 || len(m.calls) != 1 {
 				t.Fatalf("fixture did not reach settlement cut: %v, faults=%d tools=%d models=%d", err, fault.failures, originalCalls, len(m.calls))
@@ -154,17 +138,14 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			if err != nil {
 				t.Fatal(err)
 			}
-			grant, err := observer.LookupChildExecution(ctx, request.ID)
-			if err != nil {
-				t.Fatal(err)
+			// The native receipt CAS already committed BOTH accounting and
+			// RecoveredTools. There is no split-only ledger-to-Run recovery
+			// transaction, nor an unresolved physical grant to reconstruct.
+			if _, pending, e := agent.FrozenPendingDispatch(before); e != nil || pending || before.Run.BudgetScopeID != "original-ledger" {
+				t.Fatal("native receipt left split dispatch authority", e)
 			}
-			completion, err := observer.LookupOwnedPhysicalCallbackReturn(ctx, grant)
-			if err != nil {
-				t.Fatal(err)
-			}
-			binding, found, bindErr := completion.ToolReturns.Find(original.Call.ID)
-			if variant != "opaque-callback" && (!completion.HostCompleted || completion.ControlCustody != kernel.OwnedCustodyScoped || bindErr != nil || !found || binding.ReceiptDigest == "") {
-				t.Fatalf("original completion not sealed: %+v", completion)
+			if _, e := observer.LookupChildExecution(ctx, request.ID); !errors.Is(e, kernel.ErrNotFound) {
+				t.Fatal("staged native receipt retained physical grant", e)
 			}
 			saved, err := ledger.LoadBudget(ctx, "original-ledger")
 			if err != nil {
@@ -176,18 +157,14 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 				t.Fatalf("missing original accounting: %+v", res)
 			}
 			freshStore := reopen()
-			freshLedger := reopenLedger()
+			freshLedger := newToolTestLedger(t, freshStore)
 			freshRT := ea1StartRuntime(t, freshStore)
 			if variant == "foreign-ledger" {
-				foreign := saved
-				foreign.ID = "foreign-ledger"
-				foreign.Revision = 1
-				if err = freshLedger.SaveBudget(ctx, foreign, 0); err != nil {
-					t.Fatal(err)
-				}
-				r = makeRunner(freshRT, freshLedger, "foreign-ledger", false, true)
+				// Scope selection is creation-only: a replacement Host cannot
+				// move this Run to a same-shaped foreign ledger on Resume.
+				r = makeRunner(freshRT, freshLedger, "foreign-ledger", true)
 			} else {
-				r = makeRunner(freshRT, freshLedger, "original-ledger", false, true)
+				r = makeRunner(freshRT, freshLedger, "original-ledger", true)
 			}
 			if variant == "changed-receipt" {
 				var raw map[string]json.RawMessage
@@ -206,59 +183,38 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 					t.Fatal(err)
 				}
 			}
-			if variant == "foreign-ledger" || variant == "changed-receipt" || variant == "opaque-callback" {
-				if _, err = r.Resume(ctx, request.ID, before.Run.Revision); !errors.Is(err, agent.ErrToolOutcomeUnknown) {
-					t.Fatalf("foreign/opaque receipt advanced: %v", err)
+			if variant == "changed-receipt" {
+				if _, err = r.Resume(ctx, request.ID, before.Run.Revision); !errors.Is(err, agent.ErrToolReceiptMismatch) {
+					t.Fatalf("changed native receipt advanced: %v", err)
 				}
 				current, e := freshRT.Load(ctx, request.ID)
 				if e != nil || !reflect.DeepEqual(current, before) {
 					t.Fatal("rejected recovery changed Run", e)
 				}
-				still, e := freshRT.LookupChildExecution(ctx, request.ID)
-				if e != nil || still != grant {
-					t.Fatal("rejected recovery changed grant", e)
+				if _, e := freshRT.LookupChildExecution(ctx, request.ID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatal("rejected consumption retained physical grant", e)
 				}
 				if originalCalls != 1 || len(m.calls) != 1 || verifications != 0 {
 					t.Fatal("negative recovery performed effects")
 				}
 				return
 			}
+			staged := before
 			if variant == "lost-recovery-ack" {
-				// A committed recovery CAS may lose its response. Re-open at
-				// the Store's actual new revision, never replay the old intent.
-				under := &ea1AgentReceiptFault{Store: freshStore, ExecutionStore: freshStore.(kernel.ExecutionStore), ControlStore: freshStore.(kernel.ControlStore), ChildExecutionStore: freshStore.(kernel.ChildExecutionStore), ExecutionQuarantineStore: freshStore.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: freshStore.(kernel.OwnedPhysicalExecutionStore), injected: injected}
-				recovery := &ea1RootRecoveryFault{ea1AgentReceiptFault: under, phase: "P3"}
-				r = makeRunner(ea1StartRuntime(t, recovery), freshLedger, "original-ledger", false, true)
-				if _, err = r.ReconcileToolOutcome(ctx, request.ID, before.Run.Revision, original.Call.ID); !errors.Is(err, injected) {
-					t.Fatal("missing recovery ACK loss", err)
+				// The old split recovery CAS cannot exist. Exercise ACK loss
+				// at native receipt consumption instead; receipt-CAS ACK loss
+				// itself is covered by runNativeToolBudget/receipt-ack.
+				cut := &ea1AgentReceiptFault{Store: freshStore, LedgerStore: freshLedger, ExecutionStore: freshStore.(kernel.ExecutionStore), ExecutionQuarantineStore: freshStore.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: freshStore.(kernel.PhysicalExecutionStore), event: event, after: true, injected: injected}
+				r = makeRunner(ea1StartRuntime(t, cut), cut, "original-ledger", true)
+				if _, err = r.Resume(ctx, request.ID, before.Run.Revision); !errors.Is(err, injected) || cut.failures != 1 {
+					t.Fatal("missing native consumption ACK loss", err)
 				}
-				r = makeRunner(freshRT, freshLedger, "original-ledger", false, true)
-			} else {
-				// Both public paths use the same original callback receipt.
-				if committed {
-					_, err = r.ReconcileToolOutcome(ctx, request.ID, before.Run.Revision, original.Call.ID)
-				} else {
-					_, err = r.Resume(ctx, request.ID, before.Run.Revision)
+				staged, err = freshRT.Load(ctx, request.ID)
+				if err != nil || staged.Run.Revision != before.Run.Revision+1 || originalCalls != 1 || len(m.calls) != 1 || verifications != 0 {
+					t.Fatal("consumption ACK replayed original effects", err)
 				}
-				if err != nil {
-					t.Fatal("receipt recovery", err)
-				}
+				r = makeRunner(freshRT, freshLedger, "original-ledger", false)
 			}
-			staged, err := freshRT.Load(ctx, request.ID)
-			if err != nil || staged.Run.Revision != before.Run.Revision+1 {
-				t.Fatal("not exactly one recovery CAS", err)
-			}
-			if _, pending, e := agent.FrozenPendingDispatch(staged); e != nil || pending {
-				t.Fatal("original intent not transferred", e)
-			}
-			if originalCalls != 1 || len(m.calls) != 1 || verifications != 0 {
-				t.Fatal("receipt-only recovery dispatched")
-			}
-			if _, err = r.ReconcileToolOutcome(ctx, request.ID, before.Run.Revision, original.Call.ID); !errors.Is(err, kernel.ErrConflict) {
-				t.Fatal("stale source accepted", err)
-			}
-			// No Host provider verifier is required to consume the staged result.
-			r = makeRunner(freshRT, freshLedger, "original-ledger", false, false)
 			if variant == "cancel-before-consume" || variant == "cancel-during-project" {
 				elect := func(ctx context.Context) error {
 					l, e := (budget.Coordinator{Store: freshLedger}).CancelRoot(ctx, "original-ledger", request.ID)
@@ -293,7 +249,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			if _, e := freshRT.LookupChildExecution(ctx, request.ID); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatal("original grant not retired", e)
 			}
-			if err := freshRT.VerifyOwnedRootSettlement(ctx, final); err != nil {
+			if err := freshRT.VerifyExecutionCustody(ctx, final, kernel.CustodyRetired); err != nil {
 				t.Fatal("terminal original callback history not observable", err)
 			}
 			if !r.VerifiedDeferredRootControl(ctx, freshRT, final) {
@@ -305,6 +261,14 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			}
 			if correctedCalls != map[bool]int{false: 0, true: 1}[m.strict] || after.View("").Usage.ToolCalls != (1+correctedCalls) {
 				t.Fatal("usage/dispatch mismatch", correctedCalls, after.View("").Usage)
+			}
+			if verifications != 0 || final.Run.BudgetScopeID != "original-ledger" {
+				t.Fatal("native consumption consulted provider or changed scope")
+			}
+			if variant == "foreign-ledger" {
+				if _, e := freshLedger.LoadBudget(ctx, "foreign-ledger"); !errors.Is(e, budget.ErrLedgerNotFound) {
+					t.Fatal("replacement Host enrolled foreign scope", e)
+				}
 			}
 			second := m.calls[1]
 			toolMessages := 0

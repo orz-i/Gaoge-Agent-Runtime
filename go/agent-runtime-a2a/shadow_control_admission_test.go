@@ -26,23 +26,24 @@ type pausedA2AAdmissionStore struct {
 	once       sync.Once
 }
 
-func (s *pausedA2AAdmissionStore) Apply(
-	ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation,
-) (kernel.Snapshot, error) {
-	committed, err := s.Store.Apply(ctx, id, revision, mutation)
-	if err == nil {
-		for _, event := range mutation.Events {
-			if event.Type == s.pauseEvent {
-				s.once.Do(func() { close(s.admitted) })
-				select {
-				case <-s.release:
-				case <-ctx.Done():
-					return committed, ctx.Err()
+func (s *pausedA2AAdmissionStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		committed, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil {
+			for _, event := range commitMutation.Events {
+				if event.Type == s.pauseEvent {
+					s.once.Do(func() { close(s.admitted) })
+					select {
+					case <-s.release:
+					case <-commitCtx.Done():
+						return committed, false, commitCtx.Err()
+					}
 				}
 			}
 		}
+		return committed, false, err
 	}
-	return committed, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func a2aControlFixture(t *testing.T, store kernel.Store, client RemoteClient, resolverBlock *atomic.Bool, resolverGate, resolverRelease chan struct{}) (
@@ -109,7 +110,10 @@ func TestPR113ControlResumeIntentFencesCancelACKAcrossRuntime(t *testing.T) {
 	remote := newUncertainResumeClient()
 	rt, _, child, original := a2aControlFixture(t, backing, remote, nil, nil, nil)
 	outcome := make(chan error, 1)
-	go func() { _, err := child.ResumeRun(t.Context(), original.Run.ID, "approved"); outcome <- err }()
+	go func() {
+		_, err := child.ResumeRun(t.Context(), original.Run.ID, shadowRevision(t, child, original.Run.ID), "approved")
+		outcome <- err
+	}()
 	waitA2AAdmitted(t, backing.admitted)
 	other, err := kernel.New(kernel.Dependencies{Store: backing})
 	if err != nil {
@@ -138,7 +142,7 @@ func TestPR113ControlResumeIntentFencesCancelACKAcrossRuntime(t *testing.T) {
 		pending.Run.Revision != original.Run.Revision+1 {
 		t.Fatalf("in-flight resume was projected terminal: %+v %v", pending.Run, err)
 	}
-	_, err = observer.CancelRun(t.Context(), original.Run.ID)
+	_, err = observer.CancelRemote(t.Context(), original.Run.ID, shadowRevision(t, observer, original.Run.ID))
 	if !errors.Is(err, ErrRemoteOutcomeUnknown) {
 		t.Fatalf("Cancel acknowledged a remote task while Resume could still send: %v", err)
 	}
@@ -156,7 +160,7 @@ func TestPR113ControlResumeIntentFencesCancelACKAcrossRuntime(t *testing.T) {
 	}
 	// Only once the original callback returned may a subsequent cancellation
 	// acquire a new independent, revision-scoped physical Control grant.
-	cancelled, err := observer.CancelRun(t.Context(), original.Run.ID)
+	cancelled, err := observer.CancelRemote(t.Context(), original.Run.ID, shadowRevision(t, observer, original.Run.ID))
 	if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 		t.Fatalf("post-return cancellation not admitted: %+v %v", cancelled.Run, err)
 	}
@@ -182,7 +186,7 @@ func TestPR113ControlCancelIntentFencesResumeAndObserver(t *testing.T) {
 		outcome <- err
 	}()
 	waitA2AAdmitted(t, backing.admitted)
-	if _, err := child.ResumeRun(t.Context(), original.Run.ID, "late approval"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
+	if _, err := child.ResumeRun(t.Context(), original.Run.ID, shadowRevision(t, child, original.Run.ID), "late approval"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
 		t.Fatalf("in-flight cancel admitted a new input Send: %v", err)
 	}
 	if _, err := child.LoadRun(t.Context(), original.Run.ID); !errors.Is(err, ErrRemoteOutcomeUnknown) {
@@ -296,17 +300,20 @@ type a2aControlLostStoreACK struct {
 
 var errA2AControlLostStoreACK = errors.New("test: Store write committed but reply lost")
 
-func (s *a2aControlLostStoreACK) Apply(ctx context.Context, id string, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	committed, err := s.Store.Apply(ctx, id, revision, m)
-	if err != nil {
-		return committed, err
-	}
-	for _, event := range m.Events {
-		if event.Type == s.event && s.hits.Add(1) == 1 {
-			return committed, errA2AControlLostStoreACK
+func (s *a2aControlLostStoreACK) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		committed, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return committed, false, err
 		}
+		for _, event := range commitMutation.Events {
+			if event.Type == s.event && s.hits.Add(1) == 1 {
+				return committed, false, errA2AControlLostStoreACK
+			}
+		}
+		return committed, false, nil
 	}
-	return committed, nil
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestPR113ControlStoreCommittedLostACKPreservesPhysicalFence(t *testing.T) {
@@ -339,14 +346,14 @@ func TestPR113ControlStoreCommittedLostACKPreservesPhysicalFence(t *testing.T) {
 					t.Fatalf("lost ACK did not preserve first-party pending control proof: %+v %v", state, err)
 				}
 				if op == "resume" {
-					if _, err := child.ResumeRun(t.Context(), original.Run.ID, "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
+					if _, err := child.ResumeRun(t.Context(), original.Run.ID, shadowRevision(t, child, original.Run.ID), "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
 						t.Fatalf("lost resume ACK reopened SendMessage: %v", err)
 					}
-					if _, err := child.CancelRun(t.Context(), original.Run.ID); phase == "admission" && !errors.Is(err, ErrRemoteOutcomeUnknown) {
+					if _, err := child.CancelRemote(t.Context(), original.Run.ID, shadowRevision(t, child, original.Run.ID)); phase == "admission" && !errors.Is(err, ErrRemoteOutcomeUnknown) {
 						t.Fatalf("lost resume admission allowed cancel ACK: %v", err)
 					}
 				} else {
-					if _, err := child.CancelRun(t.Context(), original.Run.ID); !errors.Is(err, ErrRemoteOutcomeUnknown) {
+					if _, err := child.CancelRemote(t.Context(), original.Run.ID, shadowRevision(t, child, original.Run.ID)); !errors.Is(err, ErrRemoteOutcomeUnknown) {
 						t.Fatalf("lost Cancel ACK reopened CancelTask: %v", err)
 					}
 				}
@@ -380,7 +387,7 @@ func TestPR113ControlReadFailureDoesNotLeakProviderErrorOrCancel(t *testing.T) {
 		strings.Contains(err.Error(), "private provider credential") {
 		t.Fatalf("read-only GET returned sensitive provider error: %v", err)
 	}
-	if _, err := runner.CancelRun(t.Context(), original.Run.ID); !errors.Is(err, ErrRemoteOutcomeUnknown) ||
+	if _, err := runner.CancelRemote(t.Context(), original.Run.ID, shadowRevision(t, runner, original.Run.ID)); !errors.Is(err, ErrRemoteOutcomeUnknown) ||
 		strings.Contains(err.Error(), "private provider credential") {
 		t.Fatalf("Cancel proceeded despite unverified GET: %v", err)
 	}

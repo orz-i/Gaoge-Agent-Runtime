@@ -17,35 +17,36 @@ import (
 type toolCallAuthority struct {
 	mu                sync.Mutex
 	id                string
-	budget            *toolBudgetAdmission
 	observed, invalid bool
 	original          toolOutcomeReceipt
 	cause             error
-	denial            *nativeAdmissionDenied
 }
 
 func toolAuthority(ctx context.Context) *toolCallAuthority {
 	a, _ := callbackscope.ToolCall(ctx).(*toolCallAuthority)
 	return a
 }
-func toolReceiptCandidate(result tools.ExecutionResult, err error, id string) bool {
-	return result.Receipt.ExecutionID == id &&
-		((err == nil && tools.ValidateExecutionResult(result) == nil) ||
-			tools.ValidRecoverableNoEffectReceipt(result, err, id) ||
-			tools.ValidRetryableNoEffectReceipt(result, err, id))
-}
 
-// qualifiedPendingKind is the original Call return classification shared by
-// accounting and approval. No descriptor is a valid pending return too.
-func qualifiedPendingKind(result tools.ExecutionResult, err error, id string) string {
-	if err != nil || result.Receipt.ExecutionID != id || result.Receipt.Disposition != tools.ReceiptDispositionPending ||
-		tools.ValidateExecutionResult(result) != nil {
-		return ""
+// qualifyToolReturn classifies a returned original Call once. An omitted
+// descriptor is a scheduled/opaque pending return; a retryable no-effect
+// receipt can be observed but is not a consumable terminal business outcome.
+func qualifyToolReturn(result tools.ExecutionResult, err error, id string) (terminal bool, pending string) {
+	if result.Receipt.ExecutionID != id {
+		return false, ""
+	}
+	if err != nil {
+		return tools.ValidRecoverableNoEffectReceipt(result, err, id), ""
+	}
+	if tools.ValidateExecutionResult(result) != nil {
+		return false, ""
+	}
+	if result.Receipt.Disposition != tools.ReceiptDispositionPending {
+		return true, ""
 	}
 	if result.Pending == nil {
-		return "pending"
+		return false, "pending"
 	}
-	return string(result.Pending.Kind)
+	return false, string(result.Pending.Kind)
 }
 
 // Only a single chain of wrappers may carry the actual original error.
@@ -91,7 +92,7 @@ func (a *toolCallAuthority) record(result tools.ExecutionResult, err error) (too
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.invalid || a.observed || a.denial != nil {
+	if a.invalid || a.observed {
 		a.invalid = true
 		return unqualifiedToolOutcome(errors.Join(ErrToolReceiptMismatch, err))
 	}
@@ -110,14 +111,9 @@ func (a *toolCallAuthority) validate(result tools.ExecutionResult, err error) (t
 	if a.invalid {
 		return unqualifiedToolOutcome(err)
 	}
-	if a.denial != nil {
-		if a.observed || !reflect.DeepEqual(result, tools.ExecutionResult{}) || !a.denial.matches(err) {
-			a.invalid = true
-			return unqualifiedToolOutcome(errors.Join(ErrToolReceiptMismatch, err))
-		}
-		return result, err
-	}
-	if !toolReceiptCandidate(result, err, a.id) {
+
+	terminal, pending := qualifyToolReturn(result, err, a.id)
+	if !terminal && pending == "" && !tools.ValidRetryableNoEffectReceipt(result, err, a.id) {
 		return result, err
 	}
 	actual := newToolOutcomeReceipt(result, err)
@@ -126,35 +122,4 @@ func (a *toolCallAuthority) validate(result tools.ExecutionResult, err error) (t
 		return unqualifiedToolOutcome(errors.Join(ErrToolReceiptMismatch, err))
 	}
 	return result, err
-}
-
-// The actual Budget Tool layer records the same unique native denial identity
-// as the Run layer. It is not an executor result or a retryable Tool receipt.
-func (a *toolCallAuthority) recordAdmissionDenied(ctx context.Context, adapter *BoundedBudgetAdapter, source any, cause error) *nativeAdmissionDenied {
-	if a == nil || a.budget == nil || a.budget.adapter != adapter {
-		return nil
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.invalid || a.observed || a.denial != nil {
-		return nil
-	}
-	d := recordNativeAdmissionDenial(ctx, adapter, "budget.tool.admission_denied", source, cause)
-	if d != nil {
-		a.denial = d
-	}
-	return d
-}
-
-func (a *toolCallAuthority) admissionReturn(ctx context.Context, result tools.ExecutionResult, err error) (*nativeAdmissionDenied, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.denial == nil {
-		return nil, false
-	}
-	if a.invalid || a.observed || !reflect.DeepEqual(result, tools.ExecutionResult{}) || !a.denial.matches(err) || !callbackscope.QualifiedToolReturn(ctx) {
-		a.invalid = true
-		return nil, true
-	}
-	return a.denial, true
 }

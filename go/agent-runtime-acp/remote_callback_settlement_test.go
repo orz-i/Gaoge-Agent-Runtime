@@ -18,11 +18,15 @@ func (s auditRejectCancelledStore) Load(ctx context.Context, id string) (kernel.
 	}
 	return s.Store.Load(ctx, id)
 }
-func (s auditRejectCancelledStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if err := ctx.Err(); err != nil {
-		return kernel.Snapshot{}, err
+
+func (s auditRejectCancelledStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		if err := commitCtx.Err(); err != nil {
+			return kernel.Snapshot{}, false, err
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.Apply(ctx, id, rev, m)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type auditCancelCtxACPClient struct {
@@ -61,7 +65,7 @@ func TestPR151ACPCancelCtxRetainsPhysicalReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cancelErr := runner.CancelRun(ctx, before.Run.ID, before.Run.Revision)
+	_, cancelErr := runner.CancelRemote(ctx, before.Run.ID, before.Run.Revision)
 	t.Logf("CancelRun returned err=%v, context=%v", cancelErr, ctx.Err())
 	close(fake.release)
 	after := <-done

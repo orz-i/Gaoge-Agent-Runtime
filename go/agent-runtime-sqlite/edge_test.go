@@ -182,10 +182,10 @@ func TestExternalStaleCASAcrossTwoSQLiteStores(t *testing.T) {
 	}}
 	next.Record.Run.Revision++
 	next.Record.Run.UpdatedAt = next.Record.Run.UpdatedAt.Add(time.Second)
-	if _, err := one.Apply(context.Background(), "stale", created.Run.Revision, next); err != nil {
+	if _, _, err := one.Commit(context.Background(), "stale", created.Run.Revision, next, kernel.CommitAuthority{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := two.Apply(context.Background(), "stale", created.Run.Revision, next); !errors.Is(err, kernel.ErrConflict) {
+	if _, _, err := two.Commit(context.Background(), "stale", created.Run.Revision, next, kernel.CommitAuthority{}); !errors.Is(err, kernel.ErrConflict) {
 		t.Fatalf("stale CAS accepted by independent SQLite opener: %v", err)
 	}
 }

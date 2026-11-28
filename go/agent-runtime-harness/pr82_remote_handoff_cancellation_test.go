@@ -190,7 +190,7 @@ func TestPR82LocalHandoffChildStillUsesVerifiedKernelCancellation(t *testing.T) 
 	delegation := f.delegation()
 	// Explicitly compose the exact fixed ChildRunner that creates the local
 	// Kernel Run. A mock Handoff returning matching metadata is NOT proof.
-	coordinator, err := handoff.New(&pr82BoundKernelChild{runtime: f.runtime})
+	coordinator, err := handoff.New(handoff.Config{Local: &pr82BoundKernelChild{runtime: f.runtime}})
 	if err != nil {
 		t.Fatal(err)
 	}

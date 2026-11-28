@@ -127,10 +127,6 @@ func (r *ShadowRunner) MatchesRemoteDelegation(d handoff.Delegation) bool {
 		d.MemberID == TargetPrefix+r.binding.TargetID && d.MemberRevision == r.binding.Revision
 }
 
-func (r *ShadowRunner) CancelRemote(ctx context.Context, id string, revision uint64) (kernel.Snapshot, error) {
-	return r.CancelRun(ctx, id, revision)
-}
-
 // ObservesFrozenRemoteShadow provides the same read-only proof used by A2A.
 // It never accepts a same-ID native Run, a forged ACP Session or stale binding.
 func (r *ShadowRunner) ObservesFrozenRemoteShadow(rt *kernel.Runtime, d handoff.Delegation, child kernel.Snapshot) bool {
@@ -365,7 +361,7 @@ func (r *ShadowRunner) LoadRun(ctx context.Context, id string) (kernel.Snapshot,
 	return snap, nil
 }
 
-func (r *ShadowRunner) CancelRun(ctx context.Context, id string, expectedRevision uint64) (kernel.Snapshot, error) {
+func (r *ShadowRunner) CancelRemote(ctx context.Context, id string, expectedRevision uint64) (kernel.Snapshot, error) {
 	if r == nil || r.runtime == nil || expectedRevision == 0 {
 		return kernel.Snapshot{}, ErrInvalidRunner
 	}

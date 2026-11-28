@@ -21,7 +21,7 @@ type storeContract interface {
 	DecideBeforeCreate(context.Context, kernel.RunCreationDecision) (kernel.RunCreationDecision, error)
 	LoadCreationDecision(context.Context, string) (kernel.RunCreationDecision, error)
 	Load(context.Context, string) (kernel.Snapshot, error)
-	Apply(context.Context, string, uint64, kernel.StoreMutation) (kernel.Snapshot, error)
+	Commit(context.Context, string, uint64, kernel.StoreMutation, kernel.CommitAuthority) (kernel.Snapshot, bool, error)
 	ListEvents(context.Context, string, int64, int) ([]kernel.Event, error)
 	ClaimTransitions(context.Context, kernel.TransitionClaimRequest) ([]kernel.TransitionClaim, error)
 	AckTransition(context.Context, kernel.TransitionLeaseRequest) error
@@ -85,8 +85,8 @@ var (
 	_ func(*agent.WorkingStateSummaryPolicy) *agent.WorkingStateSummaryPolicy                             = agent.CloneWorkingStateSummaryPolicy
 	_ func(*agent.BoundedContextAdapter, agent.ContextSummaryPorts) (*agent.ContextSummaryAdapter, error) = agent.NewContextSummaryAdapter
 	_                                                                                                     = agent.ModelInvocationContextSummary
-	_                                                                                                     = agent.Dependencies{ManagedRecovery: true}
-	_ func(*agent.Runner) bool                                                                            = (*agent.Runner).SupportsManagedRecovery
+
+	_ func(*agent.Runner) bool = (*agent.Runner).SupportsManagedRecovery
 )
 
 // A separately linked Host implements only the narrow, immutable first-party
@@ -95,23 +95,27 @@ var (
 // the Agent's internal settlement proof. Store backends must check the opaque
 // marker inside their own authoritative commit transaction.
 type childPhysicalStoreContract interface {
-	BeginChildExecution(context.Context, kernel.ChildExecutionGrant) error
+	LoadOwnedRetirement(context.Context, string) (kernel.OwnedRetirementReceipt, error)
+	LookupOwnedRetirementForRun(context.Context, string) (kernel.OwnedRetirementReceipt, error)
+	BeginPhysicalExecution(context.Context, kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error)
 	LookupChildExecution(context.Context, string) (kernel.ChildExecutionGrant, error)
-	MarkChildExecutionSettled(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
+	RecordPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.PhysicalCallbackOutcome, kernel.PhysicalCallbackReturn) error
+	LookupPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error)
+	CheckOwnedPhysicalEntry(context.Context, kernel.ChildExecutionGrant, kernel.ExecutionLease, kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error)
 	FinishChildExecution(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
 }
 
 var (
-	_ kernel.ChildExecutionStore                                                                 = (childPhysicalStoreContract)(nil)
-	_ childPhysicalStoreContract                                                                 = (kernel.ChildExecutionStore)(nil)
-	_ childPhysicalStoreContract                                                                 = (*memory.Store)(nil)
-	_ func(*kernel.Runtime, context.Context, string, uint64) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).BeginChildExecution
-	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error)         = (*kernel.Runtime).LookupChildExecution
-	_ func(*agent.Runner, context.Context, string) error                                         = (*agent.Runner).ReconcileChildPhysicalGrant
-	_ func(*kernel.Runtime) *kernel.Runtime                                                      = (*kernel.Runtime).WithoutPhysicalGrant
-	_ func([]byte) string                                                                        = agent.FrozenOriginFingerprint
-	_ func(kernel.Snapshot, []byte) bool                                                         = agent.MatchesFrozenOrigin
-	_                                                                                            = agent.Dependencies{
+	_ kernel.PhysicalExecutionStore                                                      = (childPhysicalStoreContract)(nil)
+	_ childPhysicalStoreContract                                                         = (kernel.PhysicalExecutionStore)(nil)
+	_ childPhysicalStoreContract                                                         = (*memory.Store)(nil)
+	_                                                                                    = (*kernel.Runtime).AdmitPhysicalExecution
+	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).LookupChildExecution
+	_ func(*agent.Runner, context.Context, string) error                                 = (*agent.Runner).ReconcilePhysicalExecution
+	_ func(*kernel.Runtime) *kernel.Runtime                                              = (*kernel.Runtime).WithoutPhysicalGrant
+	_ func([]byte) string                                                                = agent.FrozenOriginFingerprint
+	_ func(kernel.Snapshot, []byte) bool                                                 = agent.MatchesFrozenOrigin
+	_                                                                                    = agent.Dependencies{
 		ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return nil },
 		StartControlPreflight:    func(context.Context, agent.StartRequest) error { return nil },
 	}
@@ -120,8 +124,7 @@ var (
 // SubAgent uses the same original Agent loop, not a composite executor.
 var (
 	_ handoff.ChildRunner                                           = (*agent.Runner)(nil)
-	_ func(handoff.ChildRunner) (*handoff.Coordinator, error)       = handoff.New
-	_ func(*agent.Runner) (*handoff.Coordinator, error)             = handoff.NewDeferredAgent
+	_ func(handoff.Config) (*handoff.Coordinator, error)            = handoff.New
 	_ func(*agent.Runner, kernel.Snapshot, agent.StartRequest) bool = (*agent.Runner).VerifyFrozenStartRequest
 	_ func(kernel.Snapshot) bool                                    = agent.TerminalPhysicalEffectsSettled
 	_ func(*agent.Runner, *kernel.Runtime, kernel.Snapshot) bool    = (*agent.Runner).QuiescentApprovalCancellation

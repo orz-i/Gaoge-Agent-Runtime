@@ -12,92 +12,16 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// undispatchedRootNoEffect is the shared read-side witness for cancellation
-// election, crash resumption and no-Run terminal CAS. It never treats mere
-// Kernel absence as proof: the original physical Start grant is globally
-// complete and the elected Turn fence blocks any new dispatch.
+// A missing Run proves nothing. Only its committed negative creation decision
+// can be consumed by read-only cancellation recovery.
 func (runner *Runner) undispatchedRootNoEffect(
-	ctx context.Context, turn Turn, original Invocation, requireBudgetCancelled bool,
+	ctx context.Context, turn Turn, original Invocation, _ bool,
 ) (bool, error) {
-	if runner == nil || runner.runtime == nil || original.Attempt < 1 ||
-		original.ParentItemID != "" ||
-		(original.Status != InvocationAccepted && original.Status != InvocationCancelled && original.Status != InvocationFailed) ||
-		(!undispatchedRootTurn(original, turn) && !missingRuntimeSnapshotAllowed(turn, original)) ||
-		original.ExecutionRefID == "" || original.TurnID != turn.ID {
+	_, native, err := runner.readUncreatedRootDecision(ctx, turn, original)
+	if errors.Is(err, kernel.ErrNotFound) || errors.Is(err, kernel.ErrAlreadyExists) {
 		return false, nil
 	}
-	if native, ok := runner.agent.(*agent.Runner); !ok || !native.ObservesKernelRuntime(runner.runtime) {
-		return false, nil
-	}
-	if _, _, err := frozenTopLevelInvocationIdentity(original); err != nil {
-		return true, err
-	}
-	if _, err := runner.runtime.Load(ctx, original.ExecutionRefID); err == nil {
-		return false, nil
-	} else if !errors.Is(err, kernel.ErrNotFound) {
-		return true, err
-	}
-	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil {
-		return true, err
-	}
-	if ledger != nil {
-		if original.Attempt == 1 {
-			if len(ledger.RootRetries) != 0 || requireBudgetCancelled && !ledger.Cancelled {
-				return true, ErrExecutionOutcomeUnknown
-			}
-		} else {
-			grant, ok := ledger.RootRetries[original.ExecutionRefID]
-			if !ok && runner.nativeBudget() && !requireBudgetCancelled && original.Status == InvocationAccepted {
-				// The Host selected this Attempt but the native admission
-				// never committed. Its immutable selection and no-dispatch
-				// facts are sufficient to elect cancellation.
-				selection, selectionErr := nativeRetrySelection(ctx, runner.store, original)
-				if selectionErr != nil {
-					return true, selectionErr
-				}
-				draft := budget.LedgerMap{ledger.ID: budget.CloneLedger(*ledger)}
-				enrollment := budget.RunEnrollment{ScopeID: ledger.ID, Limits: ledger.Limits, Retry: budget.RootRetryGrant{InvocationID: original.ID, OriginalRunID: selection.Previous.ExecutionRefID, Attempt: original.Attempt, Active: true}}
-				if e := budget.CloseBeforeEnrollment(ctx, draft, original.ExecutionRefID, enrollment); e != nil {
-					return true, e
-				}
-				selected := draft[ledger.ID]
-				ledger = &selected
-			} else if !ok || !grant.Active || grant.InvocationID != original.ID || grant.Attempt != original.Attempt {
-				return true, ErrExecutionOutcomeUnknown
-			}
-			if requireBudgetCancelled && (ledger == nil || !ledger.CancelledRuns[original.ExecutionRefID]) {
-				return true, ErrExecutionOutcomeUnknown
-			}
-		}
-	}
-	items, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
-	if err != nil {
-		return true, err
-	}
-
-	invocations, err := runner.store.ListInvocations(ctx, turn.ID)
-	if err != nil {
-		return true, err
-	}
-	children := make([]Invocation, 0, len(invocations))
-	for _, owner := range invocations {
-		if owner.ID != original.ID {
-			children = append(children, owner)
-		}
-	}
-	if _, err = uncreatedRootHostEvidence(original, children, items, ledger); err != nil {
-		return true, err
-	}
-	if related, err := runner.relatedChildRunIDs(ctx, original.ExecutionRefID); err != nil {
-		return true, err
-	} else if len(related) != 0 {
-		return true, ErrConflict
-	}
-	// Historical Delegation Items are validated against immutable
-	// predecessor child Attempts above; a terminal predecessor is not a
-	// live descendant of this as-yet-unstarted replacement Run.
-	return true, nil
+	return native && err == nil, err
 }
 
 // uncreatedRootSelection is the same frozen selection used for Create,
@@ -122,7 +46,7 @@ func (runner *Runner) uncreatedRootSelection(ctx context.Context, turn Turn, inv
 }
 
 func (runner *Runner) readUncreatedRootDecision(ctx context.Context, turn Turn, inv Invocation) (kernel.RunCreationDecision, bool, error) {
-	native, err := runner.nativeRootCommands(ctx, turn.ID, true)
+	native, err := runner.nativeRootCommands(ctx, turn.ID)
 	if err != nil || native == nil {
 		return kernel.RunCreationDecision{}, false, err
 	}
@@ -164,124 +88,121 @@ func (runner *Runner) projectCreationDecisionBudget(ctx context.Context, d kerne
 	return runner.budgets.project(ctx, ledger)
 }
 
-func (runner *Runner) projectUncreatedRoot(ctx context.Context, turn Turn, inv Invocation, status InvocationStatus, reason string) (Snapshot, error) {
-	if proven, err := runner.undispatchedRootNoEffect(ctx, turn, inv, true); !proven || err != nil {
+// The permanent Runtime decision owns the outcome. These ordinary product
+// CAS writes may be interrupted independently and replayed in either process;
+// neither projection can admit execution or replace the committed decision.
+func (runner *Runner) projectNativeCreationDecision(ctx context.Context, turn Turn, inv Invocation, d kernel.RunCreationDecision) (Snapshot, error) {
+	q, err := runner.uncreatedRootSelection(ctx, turn, inv, kernel.RunStatusCancelled, "")
+	if err != nil || !d.MatchesSelection(q) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	proofCtx := withUncreatedRootWitness(ctx, inv, turn, status, reason)
-	closed, terminal, err := runner.store.SettleUncreatedRoot(proofCtx, inv, turn)
-	if err != nil {
-		return Snapshot{}, err
+	committed, err := runner.readNativeCreationDecision(ctx, q)
+	if err != nil || committed != d {
+		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	if err = runner.recordInvocationItem(ctx, closed); err != nil {
-		return Snapshot{}, err
-	}
-	if status == InvocationFailed {
-		pending, _, err := hostOutputProjectionState(ctx, runner.store, terminal)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if !pending {
-			if err = runner.recordTerminalAgentMessageItem(ctx, terminal, kernel.Snapshot{Run: kernel.Run{ID: inv.ExecutionRefID}}); err != nil {
-				return Snapshot{}, err
-			}
-			runner.ensureTerminalTurnFeed(ctx, terminal)
-		}
-	}
-	return runner.loadSnapshot(ctx, terminal, nil)
-}
-
-func (runner *Runner) projectNativeCreationDecision(ctx context.Context, turn Turn, inv Invocation, d kernel.RunCreationDecision) (Snapshot, error) {
 	if err := runner.projectCreationDecisionBudget(ctx, d); err != nil {
 		return Snapshot{}, err
 	}
 	status := invocationStatusFromTurn(TurnStatus(d.Status))
-	if current, err := runner.store.GetInvocation(ctx, inv.ID); err != nil {
-		return Snapshot{}, err
-	} else if !sameFrozenInvocationAuthority(inv, current) {
-		return Snapshot{}, ErrConflict
-	} else if current.Status == status {
-		actual, err := loadVerifiedTurn(ctx, runner.store, turn.ID)
-		if err != nil || actual.Status != turnStatusFromInvocation(status) {
-			return Snapshot{}, errors.Join(ErrConflict, err)
-		}
-		if err = runner.recordInvocationItem(ctx, current); err != nil {
-			return Snapshot{}, err
-		}
-		return runner.loadSnapshot(ctx, actual, nil)
+	code, detail := agentStartFailedCode, d.Reason
+	if status == InvocationCancelled {
+		code = "run.cancelled"
 	}
-	return runner.projectUncreatedRoot(ctx, turn, inv, status, d.Reason)
+	ctx = withTerminalWitness(ctx, inv, turnStatusFromInvocation(status))
+	for range maxRuntimeSyncRetryAttempts {
+		current, e := runner.store.GetInvocation(ctx, inv.ID)
+		if e != nil || !sameFrozenInvocationAuthority(inv, current) {
+			return Snapshot{}, errors.Join(ErrConflict, e)
+		}
+		if _, e = runner.syncInvocationStatus(ctx, current, status, code, detail); e != nil {
+			if errors.Is(e, ErrConflict) {
+				continue
+			}
+			return Snapshot{}, e
+		}
+		turn, e = loadVerifiedTurn(ctx, runner.store, turn.ID)
+		if e != nil {
+			return Snapshot{}, e
+		}
+		if turn.Status != turnStatusFromInvocation(status) || turn.ErrorCode != code || turn.ErrorDetail != detail {
+			turn.Status, turn.ErrorCode, turn.ErrorDetail = turnStatusFromInvocation(status), code, detail
+			turn.UpdatedAt = runner.clock.Now().UTC()
+			updated, updateErr := runner.store.UpdateTurn(ctx, turn, turn.Revision)
+			e = updateErr
+			if errors.Is(e, ErrConflict) {
+				continue
+			}
+			if e != nil {
+				return Snapshot{}, e
+			}
+			turn = updated
+		}
+		pending, _, e := hostOutputProjectionState(ctx, runner.store, turn)
+		if e != nil {
+			return Snapshot{}, e
+		}
+		if !pending {
+			if e = runner.recordTerminalAgentMessageItem(ctx, turn, kernel.Snapshot{Run: kernel.Run{ID: inv.ExecutionRefID}}); e != nil {
+				return Snapshot{}, e
+			}
+			runner.ensureTerminalTurnFeed(ctx, turn)
+		}
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	return Snapshot{}, ErrConflict
 }
 
-// cancelUndispatchedRoot is the no-effect counterpart of Kernel.Cancel.
-// Physical admission was already fenced. The original Store terminalizes
-// BOTH Invocation and Turn under one original Turn transaction, so a lost
-// ACK can never leave a half-cancelled accepted Attempt.
-func (runner *Runner) cancelUndispatchedRoot(
-	ctx context.Context, turn Turn, original Invocation, reason string,
-) (Snapshot, bool, error) {
-	recognized, err := runner.undispatchedRootNoEffect(ctx, turn, original, false)
-	if !recognized {
-		return Snapshot{}, false, err
-	}
-	if err != nil {
+func undispatchedRootTurn(inv Invocation, turn Turn) bool {
+	return inv.Attempt == 1 && turn.Status == TurnAccepted || inv.Attempt > 1 && turn.Status == TurnRunning
+}
+
+// Create and negative creation compete on the same permanent Runtime identity.
+// No Host election or inference from an absent Run can settle that race.
+func (runner *Runner) cancelUndispatchedRoot(ctx context.Context, turn Turn, original Invocation, reason string) (Snapshot, bool, error) {
+	// Existing Runs can always be stopped using their original Runtime
+	// authority even when optional Host configuration is unavailable.
+	if _, err := runner.runtime.Load(ctx, original.ExecutionRefID); err == nil {
+		return Snapshot{}, false, nil
+	} else if !errors.Is(err, kernel.ErrNotFound) {
 		return Snapshot{}, true, err
 	}
-	if original.Status == InvocationCancelled && turn.Status == TurnCancelled {
-		// Lost ACK after the atomic CAS or after the lifecycle Item write.
-		// Reconcile the exact original terminal fact without new work.
-		if err = runner.recordInvocationItem(ctx, original); err != nil {
-			return Snapshot{}, true, err
-		}
-		snapshot, readErr := runner.loadSnapshot(ctx, turn, nil)
-		return snapshot, true, readErr
+	native, err := runner.nativeRootCommands(ctx, turn.ID)
+	if err != nil || native == nil {
+		return Snapshot{}, err != nil, err
 	}
-	if original.Status != InvocationAccepted || !undispatchedRootTurn(original, turn) {
+	if original.ParentItemID != "" || original.TurnID != turn.ID || original.ExecutionRefID == "" {
 		return Snapshot{}, true, ErrConflict
 	}
-	native, err := runner.nativeRootCommands(ctx, turn.ID, false)
+	q, err := runner.uncreatedRootSelection(ctx, turn, original, kernel.RunStatusCancelled, reason)
 	if err != nil {
 		return Snapshot{}, true, err
 	}
-	if runner.nativeBudget() || native != nil {
-		q, e := runner.uncreatedRootSelection(ctx, turn, original, kernel.RunStatusCancelled, reason)
-		if e != nil {
-			return Snapshot{}, true, e
+	d, err := runner.readNativeCreationDecision(ctx, q)
+	if errors.Is(err, kernel.ErrNotFound) {
+		if original.Status != InvocationAccepted || !undispatchedRootTurn(original, turn) {
+			return Snapshot{}, true, ErrConflict
 		}
-		d, e := runner.readNativeCreationDecision(ctx, q)
-		if errors.Is(e, kernel.ErrNotFound) {
-			d, e = runner.decideNativeCreation(ctx, q)
-		}
-		if errors.Is(e, kernel.ErrAlreadyExists) {
-			return Snapshot{}, false, nil // Create won the native identity.
-		}
-		if e != nil {
-			return Snapshot{}, true, errors.Join(ErrExecutionOutcomeUnknown, e)
-		}
-		projected, e := runner.projectNativeCreationDecision(ctx, turn, original, d)
-		return projected, true, e
-	} else if original.Attempt == 1 {
-		if ledger, loadErr := runner.loadTurnBudget(ctx, turn); loadErr != nil {
-			return Snapshot{}, true, loadErr
-		} else if ledger != nil {
-			closed, closeErr := runner.budgets.coordinator().Cancel(ctx, turn.ID)
-			if closeErr != nil {
-				return Snapshot{}, true, closeErr
-			}
-			if err = runner.budgets.project(ctx, closed); err != nil {
-				return Snapshot{}, true, err
-			}
-		}
-	} else if err = runner.cancelTurnBudget(ctx, turn, original.ExecutionRefID); err != nil {
-		return Snapshot{}, true, err
+		d, err = runner.decideNativeCreation(ctx, q)
 	}
-	observed, err := runner.projectUncreatedRoot(ctx, turn, original, InvocationCancelled, "")
-	return observed, true, err
+	if errors.Is(err, kernel.ErrAlreadyExists) {
+		return Snapshot{}, false, nil
+	}
+	if err != nil {
+		return Snapshot{}, true, errors.Join(ErrExecutionOutcomeUnknown, err)
+	}
+	if intent, ok := ctx.Value(cancellationElectionKey{}).(Item); ok && intent.TurnID == turn.ID && intent.RunID == original.ExecutionRefID {
+		// External cleanup still owns its fence. Its settled effects are
+		// rechecked by the product CAS; the negative Runtime identity owns
+		// this root's outcome, not a Host no-effect/settlement receipt.
+		ctx = withVerifiedCancellationProjection(ctx, turn.ID)
+	}
+	projected, err := runner.projectNativeCreationDecision(ctx, turn, original, d)
+	return projected, true, err
 }
 
 func (runner *Runner) startOriginalRoot(ctx context.Context, inv Invocation, phase string, request agent.StartRequest) (kernel.Snapshot, error) {
 	physical := func(c context.Context) (kernel.Snapshot, error) { return runner.agent.StartRun(c, request) }
-	native, err := runner.nativeRootCommands(ctx, inv.TurnID, true)
+	native, err := runner.nativeRootCommands(ctx, inv.TurnID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}

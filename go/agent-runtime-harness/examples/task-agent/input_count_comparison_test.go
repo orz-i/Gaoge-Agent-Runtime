@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -144,15 +144,22 @@ func TestInputCountComparisonIsPassiveAcrossModelOutputCeiling(t *testing.T) {
 	state.acceptedInputCounts = map[[32]byte]int64{fp: 97}
 	var physicallySent model.Request
 	calls := 0
-	next := plugin.ModelNext(func(_ context.Context, r model.Request, _ model.StreamSink) (model.Response, error) {
+	provider := countFixtureModel(func(_ context.Context, r model.Request) (model.Response, error) {
 		calls++
 		physicallySent = model.CloneRequest(r)
 		return model.Response{Usage: &model.Usage{InputTokens: 97, OutputTokens: 5}}, nil
 	})
-	_, err = (outputCeiling{tokens: 128000, state: state}).Model(t.Context(), request, nil, next)
+	request.MaxOutputTokens = 128000
+	_, err = observeTaskModel(provider, state).Generate(t.Context(), request)
 	if err != nil || calls != 1 || physicallySent.MaxOutputTokens != 128000 || state.inputCountComparison.Equal != 1 ||
 		len(state.observations) != 1 || state.observations[0].Usage.InputTokens != 97 {
 		t.Fatalf("diagnostic comparison changed physical model request/outcome: calls=%d comparison=%+v err=%v",
 			calls, state.inputCountComparison, err)
 	}
+}
+
+type countFixtureModel func(context.Context, model.Request) (model.Response, error)
+
+func (m countFixtureModel) Generate(ctx context.Context, r model.Request) (model.Response, error) {
+	return m(ctx, r)
 }

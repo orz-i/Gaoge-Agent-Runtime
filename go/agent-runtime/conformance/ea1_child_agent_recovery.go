@@ -10,13 +10,11 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // RunEA1ChildAgentRecoveryUnknownSuite covers AC-Q P2 only. Actual child
-// Host/Model/Tool send precedes uncertain receipt; reconciliation never sends.
+// Model/Tool send precedes uncertain receipt; reconciliation never sends.
 func RunEA1ChildAgentRecoveryUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
-	t.Run("host_middleware", func(t *testing.T) { ea1ChildRecoveryHost(t, factory, false) })
 	ea1AgentUnknownReceipts(t, factory, true)
 }
 
@@ -32,17 +30,18 @@ func ea1ChildRecoveryParent(t *testing.T, rt *kernel.Runtime) kernel.Snapshot {
 // RunEA1ChildAgentRecoveryAdmissionSuite covers AC-Q P0. The API accepts only
 // runID, not caller actor, route, attempt or expected revision.
 func RunEA1ChildAgentRecoveryAdmissionSuite(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
-	ea1ChildRecoveryHost(t, factory, true)
+	ea1ChildRecoveryAdmission(t, factory)
 }
-func ea1ChildRecoveryHost(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), admission bool) {
+func ea1ChildRecoveryAdmission(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
 	backing, reopen := factory(t)
-	rt := ea1StartRuntime(t, backing)
+	cut := errors.New("original child Model receipt CAS failed")
+	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "agent.model_invocation.completed", injected: cut}
+	rt := ea1StartRuntime(t, fault)
 	parent := ea1ChildRecoveryParent(t, rt)
-	physical := &ea1AdmissionModel{}
-	host := &ea1UnknownHostMiddleware{failure: errors.New("original child Host sent, no receipt")}
+	physical := &ea1StartSettlementPhysical{rt: rt}
 	var originalRequest agent.StartRequest
 	makeRunner := func(runtime *kernel.Runtime) *agent.Runner {
-		r, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, RunExecution: &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}, RunMiddleware: []plugin.RunMiddleware{host}, StartControlPreflight: func(ctx context.Context, req agent.StartRequest) error {
+		r, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, RunExecution: &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}, StartControlPreflight: func(ctx context.Context, req agent.StartRequest) error {
 			if !reflect.DeepEqual(req, originalRequest) {
 				return agent.ErrInvalidRequest
 			}
@@ -63,9 +62,7 @@ func ea1ChildRecoveryHost(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	runner := makeRunner(rt)
 	request := agent.StartRequest{ID: "original-child", ParentRunID: parent.Run.ID, RequestID: "effect", OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"original":true}`)), Actor: parent.Run.Actor, Thread: parent.Run.Thread, Goal: "original Host callback", Model: "original-model"}
 	originalRequest = request
-	// PrepareRun also invokes configured RunMiddleware. Build isolated invalid
-	// inputs with a separate no-middleware native setup runner, so the unknown
-	// Host effect occurs only in the actual original Start under test.
+	// PrepareRun creates isolated admission inputs without dispatching a Model.
 	setup, setupErr := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: physical, RunExecution: &agent.RunExecution{OwnerID: "setup-owner", LeaseDuration: 3 * time.Minute}})
 	if setupErr != nil {
 		t.Fatal(setupErr)
@@ -94,8 +91,8 @@ func ea1ChildRecoveryHost(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		t.Fatal(e)
 	}
 	_, e = runner.StartRun(t.Context(), request)
-	if !errors.Is(e, host.failure) || !errors.Is(e, kernel.ErrChildExecutionBusy) || agent.IsNativeStartNoEffect(e) || host.count() != 1 || physical.calls.Load() != 0 {
-		t.Fatalf("actual child Host unknown: %v", e)
+	if !errors.Is(e, cut) || !errors.Is(e, kernel.ErrChildExecutionBusy) || agent.IsNativeStartNoEffect(e) || fault.failures != 1 || len(physical.requests) != 1 {
+		t.Fatalf("actual child Model receipt unknown: %v", e)
 	}
 	original, e := rt.Load(t.Context(), request.ID)
 	if e != nil {
@@ -104,12 +101,8 @@ func ea1ChildRecoveryHost(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if !runner.VerifyFrozenStartRequest(original, request) {
 		t.Fatal("original frozen source missing")
 	}
-	inv := host.first()
-	if inv.Operation != plugin.RunStart || inv.RunID != request.ID || inv.ParentRunID != parent.Run.ID || inv.Actor != request.Actor || inv.Thread != request.Thread {
-		t.Fatal("Host invocation source mismatch")
-	}
 	grant, e := rt.LookupChildExecution(t.Context(), request.ID)
-	if e != nil || grant.ChildRunID != request.ID || grant.ExpectedRevision != original.Run.Revision {
+	if e != nil || grant.ChildRunID != request.ID || grant.ExpectedRevision >= original.Run.Revision {
 		t.Fatalf("original scope: %v", e)
 	}
 	fresh := reopen()
@@ -123,7 +116,7 @@ func ea1ChildRecoveryHost(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		if err != nil || same != grant {
 			t.Fatal("original grant changed")
 		}
-		if host.count() != 1 || physical.calls.Load() != 0 {
+		if len(physical.requests) != 1 || len(physical.toolRequests) != 0 || fault.failures != 1 {
 			t.Fatal("recovery replayed callback")
 		}
 		if !owner.VerifyFrozenStartRequest(original, request) {
@@ -131,24 +124,26 @@ func ea1ChildRecoveryHost(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		}
 	}
 	assertOriginal()
-	if admission {
+	{
 		var nilRunner *agent.Runner
-		if e = nilRunner.ReconcileChildPhysicalGrant(context.Background(), request.ID); !errors.Is(e, agent.ErrInvalidRequest) {
+		if e = nilRunner.ReconcilePhysicalExecution(context.Background(), request.ID); !errors.Is(e, agent.ErrInvalidRequest) {
 			t.Fatalf("nil: %v", e)
 		}
 		assertOriginal()
+		// The prepared Root already owns an exact retired callback receipt;
+		// the unified entry observes it without mutating any Run.
 		for _, tc := range []struct {
 			id   string
 			want error
-		}{{"", kernel.ErrInvalidInput}, {"missing", kernel.ErrNotFound}, {wrong.Run.ID, agent.ErrInvalidRequest}, {root.Run.ID, agent.ErrInvalidRequest}, {corrupt.Run.ID, kernel.ErrChildExecutionBusy}, {clean.Run.ID, kernel.ErrNotFound}} {
-			if e = owner.ReconcileChildPhysicalGrant(t.Context(), tc.id); !errors.Is(e, tc.want) {
+		}{{"", kernel.ErrInvalidInput}, {"missing", kernel.ErrNotFound}, {wrong.Run.ID, agent.ErrInvalidRequest}, {root.Run.ID, nil}, {corrupt.Run.ID, kernel.ErrNotFound}, {clean.Run.ID, nil}} {
+			if e = owner.ReconcilePhysicalExecution(t.Context(), tc.id); !errors.Is(e, tc.want) {
 				t.Fatalf("input %q: %v want %v", tc.id, e, tc.want)
 			}
 			assertOriginal()
 		}
 	}
 	for i := 0; i < 2; i++ {
-		if e = owner.ReconcileChildPhysicalGrant(t.Context(), request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+		if e = owner.ReconcilePhysicalExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("unknown Host callback retired: %v", e)
 		}
 		assertOriginal()

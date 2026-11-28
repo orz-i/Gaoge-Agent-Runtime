@@ -7,9 +7,9 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 )
 
-// The v2 seal also preserves missing RawMessage values at required JSON
+// The current seal preserves missing RawMessage values at required JSON
 // positions. Model identity and receipts share the same lossless codec.
-const originalStateEvidenceVersion = "agent-state-opaque-v2"
+const originalStateEvidenceVersion = "agent-state-opaque-v5"
 
 type originalStateEvidence = jsoncontract.OpaqueEvidence
 type originalStateRawField = jsoncontract.OpaqueField

@@ -77,7 +77,7 @@ func TestACPHostV1RPCStreamingPermissionBoundary(t *testing.T) {
 		}
 		return nil
 	}
-	host, err := NewHost(HostDependencies{Backend: backend, Authorize: auth})
+	host, err := NewHost(HostDependencies{Implementation: wire.Implementation{Name: "host-product", Version: "2.3.4"}, Backend: backend, Authorize: auth})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,8 @@ func TestACPHostV1RPCStreamingPermissionBoundary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	init, err := client.Initialize(ctx, wire.InitializeRequest{ProtocolVersion: wire.ProtocolVersion(wire.WireProtocolVersion)})
-	if err != nil || init.AgentCapabilities.LoadSession || init.AgentCapabilities.SessionCapabilities.Resume != nil {
+	if err != nil || init.AgentInfo == nil || init.AgentInfo.Name != "host-product" || init.AgentInfo.Version != "2.3.4" ||
+		init.AgentCapabilities.LoadSession || init.AgentCapabilities.SessionCapabilities.Resume != nil {
 		t.Fatalf("unsupported recovery capability advertised: %+v %v", init.AgentCapabilities, err)
 	}
 	cwd, err := filepath.Abs(t.TempDir())
@@ -147,7 +148,7 @@ func TestACPHostV1RPCStreamingPermissionBoundary(t *testing.T) {
 }
 func TestACPHostFailsClosedOnUnsupportedMethodsBeforeHost(t *testing.T) {
 	backend := &hostedFake{}
-	host, err := NewHost(HostDependencies{Backend: backend, Authorize: func(context.Context, string, string) error { return nil }})
+	host, err := NewHost(HostDependencies{Implementation: wire.Implementation{Name: "host-product", Version: "2.3.4"}, Backend: backend, Authorize: func(context.Context, string, string) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +206,7 @@ func (h *concurrentHostedFake) Prompt(_ context.Context, _ wire.PromptRequest, e
 
 func TestACPHostStreamLeaseClosesAfterTerminalAndSerializesConcurrentChunks(t *testing.T) {
 	backend := &concurrentHostedFake{}
-	host, err := NewHost(HostDependencies{Backend: backend,
+	host, err := NewHost(HostDependencies{Implementation: wire.Implementation{Name: "host-product", Version: "2.3.4"}, Backend: backend,
 		Authorize: func(context.Context, string, string) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +256,7 @@ func TestACPHostStreamLeaseClosesAfterTerminalAndSerializesConcurrentChunks(t *t
 
 func TestACPHostPostCreationRevocationCannotClaimNoEffect(t *testing.T) {
 	backend := &hostedFake{}
-	host, err := NewHost(HostDependencies{Backend: backend,
+	host, err := NewHost(HostDependencies{Implementation: wire.Implementation{Name: "host-product", Version: "2.3.4"}, Backend: backend,
 		Authorize: func(_ context.Context, method, session string) error {
 			if method == "session/created" {
 				return ErrInvalidBinding

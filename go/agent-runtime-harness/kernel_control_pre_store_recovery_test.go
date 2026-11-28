@@ -31,12 +31,12 @@ func (store *thirdKernelReadFaultStore) Load(ctx context.Context, runID string) 
 	return store.Store.Load(ctx, runID)
 }
 
-func (store *thirdKernelReadFaultStore) ApplyControl(
-	ctx context.Context, runID string, expectedRevision uint64,
-	guard kernel.ControlGuard, mutation kernel.StoreMutation,
-) (kernel.Snapshot, bool, error) {
-	store.controlCalls.Add(1)
-	return store.Store.ApplyControl(ctx, runID, expectedRevision, guard, mutation)
+func (store *thirdKernelReadFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		store.controlCalls.Add(1)
+		return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+	}
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestKernelControlPreStoreReadFailureReleasesNativeDispatch(t *testing.T) {
@@ -123,14 +123,14 @@ type conflictingKernelControlStore struct {
 	rejectNext atomic.Bool
 }
 
-func (store *conflictingKernelControlStore) ApplyControl(
-	ctx context.Context, runID string, expectedRevision uint64,
-	guard kernel.ControlGuard, mutation kernel.StoreMutation,
-) (kernel.Snapshot, bool, error) {
-	if store.rejectNext.CompareAndSwap(true, false) {
-		return kernel.Snapshot{}, false, kernel.ErrConflict
+func (store *conflictingKernelControlStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		if store.rejectNext.CompareAndSwap(true, false) {
+			return kernel.Snapshot{}, false, kernel.ErrConflict
+		}
+		return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return store.Store.ApplyControl(ctx, runID, expectedRevision, guard, mutation)
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestKernelStoreControlConflictNeverProvesNativeNoEffect(t *testing.T) {
@@ -188,20 +188,22 @@ type forwardedKernelNoEffectStore struct {
 	forwardOnce atomic.Bool
 }
 
-func (store *forwardedKernelNoEffectStore) ApplyControl(
-	ctx context.Context, runID string, expectedRevision uint64,
-	guard kernel.ControlGuard, mutation kernel.StoreMutation,
-) (kernel.Snapshot, bool, error) {
-	snapshot, revoked, err := store.Store.ApplyControl(ctx, runID, expectedRevision, guard, mutation)
-	if err == nil && store.forwardOnce.CompareAndSwap(true, false) {
-		var unrelatedRuntime *kernel.Runtime
-		_, _, forwarded := unrelatedRuntime.ApplyControl(ctx, runID, expectedRevision, guard, kernel.Mutation{}, nil)
-		if !kernel.IsControlNoEffect(forwarded) {
-			panic("fixture did not create a genuine unrelated pre-Store proof")
+func (store *forwardedKernelNoEffectStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		guard := *commitAuth.Control
+
+		snapshot, revoked, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && store.forwardOnce.CompareAndSwap(true, false) {
+			var unrelatedRuntime *kernel.Runtime
+			_, _, forwarded := unrelatedRuntime.ApplyControl(commitCtx, commitID, commitRev, guard, kernel.Mutation{}, nil)
+			if !kernel.IsControlNoEffect(forwarded) {
+				panic("fixture did not create a genuine unrelated pre-Store proof")
+			}
+			return kernel.Snapshot{}, revoked, forwarded
 		}
-		return kernel.Snapshot{}, revoked, forwarded
+		return snapshot, revoked, err
 	}
-	return snapshot, revoked, err
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestCommittedStoreCannotForwardUnrelatedNoEffectProof(t *testing.T) {

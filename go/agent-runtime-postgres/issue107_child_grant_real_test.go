@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"os"
 	"strings"
 	"sync"
@@ -53,7 +54,7 @@ func TestIssue107RealPostgresChildGrantVsParentTermination(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child, err := one.Create(t.Context(), kernel.CreateRequest{ID: "child-" + name, ParentRunID: root.Run.ID, Kind: "agent",
+			child, err := one.Create(t.Context(), kernel.CreateRequest{ID: "child-" + name, ParentRunID: root.Run.ID, Kind: "agent", ExecutionRequired: true,
 				Actor: actor, Thread: thread, Goal: "effect", State: []byte(`{}`)})
 			if err != nil {
 				t.Fatal(err)
@@ -66,7 +67,7 @@ func TestIssue107RealPostgresChildGrantVsParentTermination(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				grant, beginErr = one.BeginChildExecution(context.Background(), child.Run.ID, child.Run.Revision)
+				grant, beginErr = conformance.AdmitChildFixture(context.Background(), one, child.Run.ID, child.Run.Revision)
 			}()
 			go func() {
 				defer wg.Done()
@@ -82,7 +83,7 @@ func TestIssue107RealPostgresChildGrantVsParentTermination(t *testing.T) {
 				if !errors.Is(cancelErr, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("child grant won but root Cancel=%v", cancelErr)
 				}
-				if err = NewKernelStore(twoDB).MarkChildExecutionSettled(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+				if err = NewKernelStore(twoDB).RecordPhysicalCallbackReturn(t.Context(), grant, grant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 					t.Fatalf("untrusted direct Store Mark authorized cleanup: %v", err)
 				}
 				if err = NewKernelStore(twoDB).FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {

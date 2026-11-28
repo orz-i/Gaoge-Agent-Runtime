@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -67,7 +66,7 @@ func TestContextSummaryCannotExecuteOrSatisfyRequiredBusinessTool(t *testing.T) 
 		t.Fatal(err)
 	}
 	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, Catalog: registry, Executor: registry,
-		RunMiddleware: []plugin.RunMiddleware{bounded}, ContextSummary: summary})
+		ContextSummary: summary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,9 +161,9 @@ func (s *summaryNativeAdmissionTrap) Load(context.Context, string) (kernel.Snaps
 func (s *summaryNativeAdmissionTrap) LoadManagedRecovery(context.Context, string) (kernel.ManagedTransfer, error) {
 	return s.transfer, nil
 }
-func (s *summaryNativeAdmissionTrap) BeginOwnedPhysicalExecution(context.Context, kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *summaryNativeAdmissionTrap) BeginPhysicalExecution(context.Context, kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	s.admissions++
-	return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
+	return kernel.PhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 }
 
 func summaryNativePointFixture(t *testing.T, completed bool) (*Runner, *summaryNativeAdmissionTrap) {

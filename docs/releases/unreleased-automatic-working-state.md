@@ -11,7 +11,7 @@ See the [integration guide](../automatic-working-state.md) and
 ## Supported composition
 
 The public Session integration supports ordinary Context recovery after callback
-return. The unified `Context.ManagedRecovery` option additionally uses the
+return. A matching registered recovery Host additionally enables the
 original native recovery admission transaction for an interrupted first-party Agent
 frame, including summary. It requires the exact Harness Store as
 `ManagedRecoveryHost` and restricted native callback composition. Shared

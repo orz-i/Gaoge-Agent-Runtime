@@ -14,7 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -73,7 +72,7 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 	a := &request.Agent
 	if a.ID != "" || a.RequestID != "" || a.ParentRunID != "" || a.LogicalParentRunID != "" || a.OriginFingerprint != "" ||
 		a.Actor != (kernel.ActorRef{}) || a.Thread != (kernel.ThreadRef{}) || a.Goal != "" ||
-		a.DeadlineAt != nil || a.CallAllowance != nil || a.AutoAllowance != nil ||
+		a.DeadlineAt != nil || a.CallAllowance != nil ||
 		len(a.RequiredToolKeys) != 0 || model.ValidateOutputContract(a.OutputContract) != nil || a.MaxModelOutputTokens < 0 || !enforceableHarnessBudgetLimits(a.Limits) {
 		return DelegateRequest{}, ErrInvalidRequest
 	}
@@ -583,26 +582,7 @@ func (runner *Runner) dispatchHandoff(
 	if err != nil {
 		return handoff.Delegation{}, err
 	}
-	var started handoff.Delegation
-	var startErr error
-	if native := runner.nativeLocalDelegation(frozen); native != nil {
-		_, outcome, e := native.ObservePhysicalDispatch(withoutContextCheckpoint(ctx), child.ExecutionRefID, plugin.RunStart, grant.ID, func(c context.Context) (kernel.Snapshot, error) {
-			started, startErr = runner.handoffs.StartOrLoad(c, parent, delegation)
-			return kernel.Snapshot{}, startErr
-		})
-		startErr = e
-		if started.ID == "" && agent.IsNativeStartNoEffect(startErr) {
-			if e = runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_start_no_effect"); e != nil {
-				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr, e)
-			}
-			return handoff.Delegation{}, dispatchProvenNoEffect{cause: startErr}
-		}
-		if !outcome.Matches(child.ExecutionRefID, plugin.RunStart) || outcome.Kind() == agent.PhysicalCallCreated {
-			return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr)
-		}
-	} else {
-		started, startErr = runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
-	}
+	started, startErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
 	if !sameHandoffFrozenExecution(frozen, started) ||
 		(started.Status != handoff.StatusRunning && !terminalDelegationStatus(started.Status)) {
 		// The call may already have reached an external ChildRunner. Keep

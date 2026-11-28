@@ -14,7 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -30,7 +29,7 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 		t.Fatal(err)
 	}
 	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
-		Store: store, Relations: relations, Clock: fixedClock{},
+		Runtime: runtime, Store: store, Relations: relations, Clock: fixedClock{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -48,15 +47,13 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 	client := &childRunLimitModel{t: t}
 	direct, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
-		RunMiddleware:   []plugin.RunMiddleware{bounded},
-		ModelMiddleware: []plugin.ModelMiddleware{bounded},
-		ToolMiddleware:  []plugin.ToolMiddleware{bounded},
-		Limits:          agent.Limits{MaxLLMCalls: 6, MaxToolCalls: 4},
+		BoundedBudget: bounded,
+		Limits:        agent.Limits{MaxLLMCalls: 6, MaxToolCalls: 4},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(direct)
+	handoffs, err := handoff.New(handoff.Config{Local: direct})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,26 +11,86 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel/statehistory"
 )
 
 // Store is the single-process atomic Kernel adapter used by minimal hosts and tests.
 type Store struct {
 	mu                sync.RWMutex
-	records           map[string]kernel.Snapshot
+	runs              map[string]memoryRun
 	creationDecisions map[string]kernel.RunCreationDecision
 	ledgers           budget.LedgerMap
-	events            map[string][]kernel.Event
 	transitions       map[string]transitionState
 	transitionOrder   []string
-	execution         map[string]memoryExecutionState
-	childGrants       map[string]memoryChildGrant
-	grantIdentities   map[string]string
-	ownedRetirements  map[string]kernel.OwnedRetirementReceipt
-	childGrantOwners  map[string]map[string]struct{}
+	effects           map[string]memoryEffect
+	effectOwners      map[string]map[string]struct{}
 	executionClock    func() time.Time
 	managedAuthority  kernel.ManagedAuthority
 	managedTransfers  map[string]kernel.ManagedTransfer
 	managedCurrent    map[string]string
+}
+
+// A Run owns its snapshot, execution fence and event history together.
+type memoryRun struct {
+	physical        kernel.Snapshot
+	execution       memoryExecutionState
+	events          []kernel.Event
+	archives        map[historyKey][]json.RawMessage
+	stateWriteBytes int64
+}
+
+type historyKey struct {
+	Stream     int
+	Generation uint64
+}
+
+func (r memoryRun) snapshot() (kernel.Snapshot, error) {
+	out := r.physical
+	hot, manifest, e := statehistory.OpenPhysical(out.State)
+	if e != nil {
+		return kernel.Snapshot{}, e
+	}
+	if manifest.Empty() {
+		return out, nil
+	}
+	state, e := statehistory.Restore(hot, manifest, func(stream int, gen uint64, count int) ([]json.RawMessage, error) {
+		items := r.archives[historyKey{stream, gen}]
+		if len(items) < count {
+			return nil, kernel.ErrExecutionConflict
+		}
+		return items[:count], nil
+	})
+	if e != nil {
+		return kernel.Snapshot{}, e
+	}
+	out.State = state
+	return out, nil
+}
+func (s *Store) snapshotLocked(id string) (kernel.Snapshot, error) {
+	run, ok := s.runs[id]
+	if !ok {
+		return kernel.Snapshot{}, kernel.ErrNotFound
+	}
+	return run.snapshot()
+}
+
+// StateWriteBytes reports the actual hot JSON, manifest and newly appended
+// history payload bytes submitted to the in-memory commit representation.
+// It excludes allocator and journal overhead; it is not an execution port.
+func (s *Store) StateWriteBytes(id string) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.runs[id]
+	if !ok {
+		return 0, kernel.ErrNotFound
+	}
+	return r.stateWriteBytes, nil
+}
+
+func (s *Store) setExecutionLocked(id string, state memoryExecutionState) {
+	run := s.runs[id]
+	run.execution = state
+	s.runs[id] = run
 }
 
 type transitionState struct {
@@ -56,14 +116,12 @@ func cloneRun(run kernel.Run) kernel.Run {
 // NewStore creates an empty in-memory Kernel Store.
 func NewStore() *Store {
 	return &Store{
-		ledgers: make(budget.LedgerMap),
-		records: make(map[string]kernel.Snapshot), events: make(map[string][]kernel.Event),
+		ledgers:           make(budget.LedgerMap),
+		runs:              make(map[string]memoryRun),
 		creationDecisions: make(map[string]kernel.RunCreationDecision),
 		transitions:       make(map[string]transitionState),
-		execution:         make(map[string]memoryExecutionState),
-		childGrants:       make(map[string]memoryChildGrant),
-		grantIdentities:   make(map[string]string),
-		childGrantOwners:  make(map[string]map[string]struct{}),
+		effects:           make(map[string]memoryEffect),
+		effectOwners:      make(map[string]map[string]struct{}),
 		executionClock:    time.Now,
 		managedAuthority:  newMemoryManagedAuthority(),
 		managedTransfers:  make(map[string]kernel.ManagedTransfer),
@@ -75,7 +133,7 @@ func NewStore() *Store {
 func (store *Store) Create(ctx context.Context, record kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if _, exists := store.records[record.Run.ID]; exists {
+	if _, exists := store.runs[record.Run.ID]; exists {
 		return kernel.Snapshot{}, kernel.ErrAlreadyExists
 	}
 	if decision, rejected := store.creationDecisions[record.Run.ID]; rejected {
@@ -91,16 +149,13 @@ func (store *Store) Create(ctx context.Context, record kernel.Record, events []k
 	if err := kernel.EnrollRunBudget(ctx, store.ledgers, record); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	snapshot := snapshotFromRecord(record)
-	journal := appendEvents(nil, events, record.Run.UpdatedAt)
-	snapshot.EventHead = int64(len(journal))
+	var run memoryRun
 	if record.ExecutionRequired {
-		store.execution[record.Run.ID] = memoryExecutionState{epoch: 1}
+		run.execution.epoch = 1
 	}
-	store.records[record.Run.ID] = cloneSnapshot(snapshot)
-	store.events[record.Run.ID] = cloneEvents(journal)
-	store.appendCommittedTransition(record.Run, events)
-	return cloneSnapshot(snapshot), nil
+	store.runs[record.Run.ID] = run
+	next := snapshotFromRecord(record)
+	return store.commitRunLocked(next, events, nil, statehistory.Prepare(string(next.Run.Kind), nil, next.State, statehistory.Manifest{}, next.Run.Revision)), nil
 }
 
 // DecideBeforeCreate and Create share the same native mutex and ledger CAS.
@@ -114,7 +169,7 @@ func (s *Store) DecideBeforeCreate(ctx context.Context, q kernel.RunCreationDeci
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	if _, ok := s.records[q.RunID]; ok {
+	if _, ok := s.runs[q.RunID]; ok {
 		return zero, kernel.ErrAlreadyExists
 	}
 	if c, ok := s.creationDecisions[q.RunID]; ok {
@@ -137,7 +192,7 @@ func (s *Store) loadCreationDecision(_ context.Context, id string) (kernel.RunCr
 	if c, ok := s.creationDecisions[id]; ok {
 		return c, nil
 	}
-	if _, ok := s.records[id]; ok {
+	if _, ok := s.runs[id]; ok {
 		return kernel.RunCreationDecision{}, kernel.ErrAlreadyExists
 	}
 	return kernel.RunCreationDecision{}, kernel.ErrNotFound
@@ -151,10 +206,7 @@ func (s *Store) LoadCreationDecision(ctx context.Context, id string) (kernel.Run
 
 func (s *Store) validateCreationRetry(ctx context.Context, e *budget.RunEnrollment) error {
 	return kernel.ValidateCreationRetry(ctx, e, func(_ context.Context, id string) (kernel.Snapshot, error) {
-		if v, ok := s.records[id]; ok {
-			return v, nil
-		}
-		return kernel.Snapshot{}, kernel.ErrNotFound
+		return s.snapshotLocked(id)
 	}, s.loadCreationDecision)
 }
 
@@ -165,10 +217,10 @@ func (store *Store) ListEvents(_ context.Context, runID string, afterSeq int64, 
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	if _, exists := store.records[runID]; !exists {
+	if _, exists := store.runs[runID]; !exists {
 		return nil, kernel.ErrNotFound
 	}
-	journal := store.events[runID]
+	journal := store.runs[runID].events
 	if afterSeq >= int64(len(journal)) {
 		return []kernel.Event{}, nil
 	}
@@ -183,40 +235,23 @@ func (store *Store) ListEvents(_ context.Context, runID string, afterSeq int64, 
 func (store *Store) Load(_ context.Context, runID string) (kernel.Snapshot, error) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	snapshot, ok := store.records[runID]
-	if !ok {
-		return kernel.Snapshot{}, kernel.ErrNotFound
+	snapshot, e := store.snapshotLocked(runID)
+	if e != nil {
+		return kernel.Snapshot{}, e
 	}
 	return cloneSnapshot(snapshot), nil
 }
 
-// Apply performs one revision-checked atomic replacement and event append.
-func (store *Store) Apply(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if store.execution[runID].epoch > 0 {
-		return kernel.Snapshot{}, kernel.ErrExecutionRequired
-	}
-	if mutation.Ledger != nil {
-		current, ok := store.records[runID]
-		if !ok || current.Run.ParentRunID == "" || !mutation.PhysicalPermit.IsPresent() {
-			return kernel.Snapshot{}, kernel.ErrExecutionRequired
-		}
-		if _, err := store.validateLiveRunOwners(ctx, current.Run); err != nil {
+// applyLocked is reached only after ordinary or fenced eligibility checks.
+func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation, control bool, consumed *kernel.ChildExecutionGrant) (kernel.Snapshot, error) {
+	if consumed == nil {
+		if err := store.nativeEntryGateLocked(runID); err != nil {
 			return kernel.Snapshot{}, err
 		}
 	}
-	return store.applyLocked(ctx, runID, expectedRevision, mutation, false)
-}
-
-// applyLocked is reached only after ordinary or fenced eligibility checks.
-func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation, control bool) (kernel.Snapshot, error) {
-	if err := store.nativeEntryGateLocked(runID); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	current, ok := store.records[runID]
-	if !ok {
-		return kernel.Snapshot{}, kernel.ErrNotFound
+	current, readErr := store.snapshotLocked(runID)
+	if readErr != nil {
+		return kernel.Snapshot{}, readErr
 	}
 	if current.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
@@ -229,10 +264,13 @@ func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevis
 	// Kernel Runtime carries its exact per-revision proof. Descendant
 	// Grants independently fence all competing ancestor mutations.
 	var rootGrantFound bool
-	for id := range store.childGrantOwners[runID] {
-		granted, ok := store.childGrants[id]
+	for id := range store.effectOwners[runID] {
+		granted, ok := store.activeEffect(id)
 		if !ok {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if consumed != nil && granted.grant == *consumed {
+			continue
 		}
 		if granted.grant.ChildRunID == runID {
 			rootGrantFound = true
@@ -249,9 +287,9 @@ func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevis
 	var safe kernel.ManagedSafePoint
 	if mutation.ManagedSafePoint.Present() {
 		g, ok := store.ownedGrantLocked(runID)
-		lease := store.execution[runID].lease
+		lease := store.runs[runID].execution.lease
 		safe = mutation.ManagedSafePoint.Point()
-		if !ok || g.settledRevision != 0 || g.completion.GrantID != "" || store.execution[runID].quarantineRev != 0 || !activeMemoryLease(store.execution[runID], lease, store.currentExecutionTime()) || safe.Host.KernelAuthority != store.managedAuthority || !mutation.ManagedSafePoint.MatchesMutation(current, mutation.Record, lease, g.grant, mutation.Events) {
+		if !ok || g.completion.GrantID != "" || store.runs[runID].execution.quarantineRev != 0 || !activeMemoryLease(store.runs[runID].execution, lease, store.currentExecutionTime()) || safe.Host.KernelAuthority != store.managedAuthority || !mutation.ManagedSafePoint.MatchesMutation(current, mutation.Record, lease, g.grant, mutation.Events) {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
 		if _, exists := store.managedTransfers[safe.ID]; exists {
@@ -259,9 +297,7 @@ func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevis
 		}
 	}
 	next := snapshotFromRecord(mutation.Record)
-	journal := store.events[runID]
-	nextEvents := appendEvents(journal, mutation.Events, mutation.Record.Run.UpdatedAt)
-	next.EventHead = int64(len(nextEvents))
+	next.EventHead = int64(len(store.runs[runID].events) + len(mutation.Events))
 	if safe.ID != "" && !kernel.ManagedSourceMatches(safe, next) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
@@ -269,16 +305,46 @@ func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevis
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+
+	_, manifest, e := statehistory.OpenPhysical(store.runs[runID].physical.State)
+	if e != nil {
+		return kernel.Snapshot{}, e
+	}
+	plan := statehistory.Prepare(string(next.Run.Kind), current.State, next.State, manifest, next.Run.Revision)
 	if safe.ID != "" {
 		store.saveManagedLocked(kernel.ManagedInitialTransfer(safe))
 	}
+	return store.commitRunLocked(next, mutation.Events, ledger, plan), nil
+}
+
+// commitRunLocked commits the already-qualified Run, original accounting
+// delta, journal and outbox under the same native mutex. Admission, control
+// and receipt recovery validate their original facts before reaching here.
+func (s *Store) commitRunLocked(next kernel.Snapshot, drafts []kernel.EventDraft, ledger *budget.LedgerMutation, plan statehistory.Plan) kernel.Snapshot {
 	if ledger != nil {
-		store.ledgers[ledger.ScopeID()] = ledger.Next()
+		s.ledgers[ledger.ScopeID()] = ledger.Next()
 	}
-	store.records[runID] = cloneSnapshot(next)
-	store.events[runID] = nextEvents
-	store.appendCommittedTransition(mutation.Record.Run, mutation.Events)
-	return cloneSnapshot(next), nil
+	run := s.runs[next.Run.ID]
+	run.events = appendEvents(run.events, drafts, next.Run.UpdatedAt)
+	next.EventHead = int64(len(run.events))
+	hot := next
+	hot.State = nil
+	run.physical = cloneSnapshot(hot)
+	run.physical.State = plan.Physical()
+	run.stateWriteBytes += int64(len(run.physical.State))
+	for _, delta := range plan.Appends {
+		if run.archives == nil {
+			run.archives = make(map[historyKey][]json.RawMessage)
+		}
+		key := historyKey{delta.Stream, delta.Generation}
+		run.archives[key] = append(run.archives[key], delta.Entries...)
+		for _, entry := range delta.Entries {
+			run.stateWriteBytes += int64(len(entry))
+		}
+	}
+	s.runs[next.Run.ID] = run
+	s.appendCommittedTransition(next.Run, drafts)
+	return cloneSnapshot(next)
 }
 
 // ClaimTransitions leases committed transitions for one projector.

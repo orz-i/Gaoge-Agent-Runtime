@@ -229,11 +229,11 @@ type auditClaimAdvancesRevision struct {
 	did bool
 }
 
-func (w *auditClaimAdvancesRevision) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (w *auditClaimAdvancesRevision) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	g := p.Candidate().Grant
-	var zero kernel.OwnedPhysicalAdmissionResult
+	var zero kernel.PhysicalAdmissionResult
 	if w.did {
-		return w.Store.BeginOwnedPhysicalExecution(ctx, p)
+		return w.Store.BeginPhysicalExecution(ctx, p)
 	}
 	w.did = true
 	rt, e := kernel.New(kernel.Dependencies{Store: w.Store})
@@ -258,7 +258,7 @@ func (w *auditClaimAdvancesRevision) BeginOwnedPhysicalExecution(ctx context.Con
 	if e = rt.ReleaseExecution(ctx, lease); e != nil {
 		return zero, e
 	}
-	return w.Store.BeginOwnedPhysicalExecution(ctx, p)
+	return w.Store.BeginPhysicalExecution(ctx, p)
 }
 
 func TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool(t *testing.T) {

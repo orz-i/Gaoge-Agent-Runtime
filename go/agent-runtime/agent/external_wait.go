@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -83,10 +82,10 @@ func (runner *Runner) QueryPendingTool(ctx context.Context, runID, callID string
 	if err != nil {
 		return nil, err
 	}
-	if snapshot.Run.Status != kernel.RunStatusRunning || state.ToolWait == nil || state.ToolWait.CallID != callID {
+	if snapshot.Run.Status != kernel.RunStatusRunning || state.toolWait() == nil || state.toolWait().CallID != callID {
 		return nil, ErrToolNotPending
 	}
-	return clonePendingTool(state.ToolWait), nil
+	return clonePendingTool(state.toolWait()), nil
 }
 
 // NotifyExternalToolResultReady atomically records one stable signal and its
@@ -110,7 +109,7 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		if snapshot.Run.Status != kernel.RunStatusRunning {
 			return snapshot, ErrToolNotPending
 		}
-		wait := state.ToolWait
+		wait := state.toolWait()
 		if wait == nil && state.ToolDispatchID == signal.CallID {
 			// An external provider can emit a ready signal synchronously from
 			// Tool.Execute, before its Pending descriptor has been committed.
@@ -125,8 +124,8 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		if wait.DeadlineAt != nil && !runner.clock.Now().Before(*wait.DeadlineAt) {
 			return snapshot, kernel.ErrDeadline
 		}
-		state.ToolWait = clonePendingTool(wait)
-		state.ToolWait.SignalID = signal.SignalID
+		state.toolReturn(wait.CallID).Wait = clonePendingTool(wait)
+		state.toolWait().SignalID = signal.SignalID
 		state.ExternalSignals = append(state.ExternalSignals, signal)
 		encoded, encodeErr := encodeState(state)
 		if encodeErr != nil {
@@ -143,13 +142,11 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		var applyErr error
 		grant, grantErr := runner.runtime.LookupChildExecution(ctx, signal.RunID)
 		if grantErr == nil && grant.IsOwned() {
-			completion, completionErr := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+			completion, completionErr := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
 			if snapshot.Run.ParentRunID != "" || completionErr != nil || !completion.HostCompleted {
 				return snapshot, ErrRootOutcomeUnknown
 			}
-			source := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-			target := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, snapshot.Checkpoint)
-			next, applyErr = runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, mutation, source, target)
+			next, applyErr = runner.commitReturnedState(ctx, snapshot, grant, mutation)
 		} else if grantErr != nil && !errors.Is(grantErr, kernel.ErrNotFound) {
 			return snapshot, grantErr
 		} else if runner.runExecution != nil {
@@ -204,20 +201,8 @@ func matchesToolSignal(wait *PendingTool, signal ExternalToolResultSignal) bool 
 
 func timePointer(value time.Time) *time.Time { normalized := value.UTC(); return &normalized }
 
-func validToolWaitState(state runState) bool {
-	if state.ToolWait == nil {
-		return true
-	}
-	wait := state.ToolWait
-	if !tools.ValidPending(&wait.PendingExecution) || wait.Kind == tools.PendingScheduled || wait.Generation == 0 {
-		return false
-	}
-	call, ok := nextPendingCall(state)
-	return ok && wait.CallID == call.ID && wait.ToolKey == call.ToolKey
-}
-
 func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snapshot, state runState, descriptor *tools.PendingExecution, ledger *budget.LedgerMutation) (kernel.Snapshot, bool, error) {
-	if !tools.ValidPending(descriptor) || state.ToolWait != nil {
+	if !tools.ValidPending(descriptor) || state.toolReturn(state.ToolDispatchID) != nil {
 		failed, err := runner.fail(ctx, snapshot, state, "agent.tool_wait_invalid", tools.ErrInvalidCall)
 		return failed, true, err
 	}
@@ -225,28 +210,26 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	if !ok {
 		return snapshot, true, ErrInvalidRequest
 	}
-	if descriptor.Kind == tools.PendingExternalResult {
-		frame, _ := callbackscope.RootToolFrame(ctx).(*originalToolFrame)
-		state.ExternalToolHold = frame.hold(tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
-	}
+
 	pending := tools.ClonePending(descriptor)
 	if snapshot.Run.DeadlineAt != nil && (pending.DeadlineAt == nil || snapshot.Run.DeadlineAt.Before(*pending.DeadlineAt)) {
 		pending.DeadlineAt = timePointer(*snapshot.Run.DeadlineAt)
 	}
-	state.ToolWait = &PendingTool{
+	wait := &PendingTool{
 		PendingExecution: *pending, CallID: call.ID, ToolKey: call.ToolKey, Generation: snapshot.Run.Revision + 1,
 	}
+	state.ToolReturns = append(state.ToolReturns, returnedTool{CallID: call.ID, Wait: wait})
 	// Dispatch the remaining calls of this model-produced batch before joining
 	// independent local children. External effects and approval checkpoints keep
 	// their original serial receipt/fencing contract.
 	if pending.Kind == tools.PendingChildTerminal &&
-		len(state.PendingCalls) > 1 && snapshot.Checkpoint == nil && state.PendingApproval == nil && independentChildBatch(state) {
+		len(state.PendingCalls)-len(state.ToolReturns) > 0 && snapshot.Checkpoint == nil && state.PendingApproval == nil && independentChildBatch(state) {
 		return runner.deferChildCall(ctx, snapshot, state, call, ledger)
 	}
 	events := []kernel.EventDraft{{Type: EventToolPending, Message: string(pending.Kind)}}
 	if pending.DeadlineAt != nil {
 		events = append(events, kernel.EventDraft{
-			Type: EventToolWaitDeadline, Wakeup: true, WakeupAt: pending.DeadlineAt, WakeupGeneration: state.ToolWait.Generation,
+			Type: EventToolWaitDeadline, Wakeup: true, WakeupAt: pending.DeadlineAt, WakeupGeneration: wait.Generation,
 		})
 	}
 	encoded, err := encodeState(state)
@@ -259,24 +242,13 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	return next, true, err
 }
 
-func (runner *Runner) toolWaitReady(ctx context.Context, snapshot kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
-	wait := state.ToolWait
-	if wait.SignalID != "" {
-		return snapshot, true, nil
+// An unresolved dispatch is never permission to resend or to fail the Run
+// on a wait deadline. Only the original receipt can consume that identity.
+func (runner *Runner) unresolvedToolReturn(state runState) error {
+	if wait := state.toolWait(); wait != nil && wait.DeadlineAt != nil && !runner.clock.Now().Before(*wait.DeadlineAt) {
+		return errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue)
 	}
-	if wait.DeadlineAt != nil && !runner.clock.Now().Before(*wait.DeadlineAt) {
-		failed, err := runner.fail(ctx, snapshot, state, "agent.tool_deadline_exceeded", kernel.ErrDeadline)
-		return failed, false, err
-	}
-	if wait.Kind != tools.PendingChildTerminal {
-		return snapshot, false, nil
-	}
-	child, err := runner.runtime.Load(ctx, wait.ChildRunID)
-	if err != nil {
-		return snapshot, false, err
-	}
-	return snapshot, child.Run.Status == kernel.RunStatusCompleted || child.Run.Status == kernel.RunStatusFailed ||
-		child.Run.Status == kernel.RunStatusCancelled, nil
+	return ErrToolOutcomeUnknown
 }
 
 // ResumeToolWait allows a durable wait delivery across unrelated revisions,
@@ -289,36 +261,21 @@ func (runner *Runner) ResumeToolWait(ctx context.Context, runID string, expected
 	if snapshot.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
-	if snapshot.Run.Status != kernel.RunStatusRunning || state.ToolWait == nil || state.ToolWait.Generation != generation {
+	wait := state.toolWait()
+	if snapshot.Run.Status != kernel.RunStatusRunning || wait == nil || wait.Generation != generation {
 		return snapshot, nil
 	}
-	if state.ToolDispatchID != "" {
-		// A pending Tool is already physically dispatched. For an
-		// exact ready signal, use the trusted read-only Provider verifier.
-		// NEVER call its non-idempotent Tool Handler from a queue delivery.
-		if state.ToolWait.Kind == tools.PendingExternalResult && state.ToolWait.SignalID != "" {
-			verified, verifyErr := runner.ReconcileToolOutcome(ctx, runID, expectedRevision, state.ToolDispatchID)
-			if verifyErr == nil {
-				// A Ready wakeup carries no physical Tool authority. After
-				// a trusted read-only COMMIT is persisted, the original
-				// feature may advance its already-committed state in a new
-				// CAS/owner segment. The Tool Handler is never reinvoked.
-				if verified.Run.Status == kernel.RunStatusRunning {
-					return runner.Resume(ctx, runID, verified.Run.Revision)
-				}
-				return verified, nil
-			}
-			if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
-				return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue, verifyErr)
-			}
-			return snapshot, errors.Join(ErrToolOutcomeUnknown, verifyErr)
+	// A ready signal carries no dispatch authority. Read the original
+	// provider receipt, then resume the already-committed business state.
+	if wait.Kind == tools.PendingExternalResult && wait.SignalID != "" {
+		verified, verifyErr := runner.ReconcileToolOutcome(ctx, runID, expectedRevision, state.ToolDispatchID)
+		if verifyErr != nil {
+			return snapshot, errors.Join(runner.unresolvedToolReturn(state), verifyErr)
 		}
-		// A deadline without a verified provider COMMIT must not discard its
-		// durable operation ID and must not authorize physical Tool replay.
-		if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
-			return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue)
+		if verified.Run.Status == kernel.RunStatusRunning {
+			return runner.Resume(ctx, runID, verified.Run.Revision)
 		}
-		return snapshot, ErrToolOutcomeUnknown
+		return verified, nil
 	}
-	return runner.Resume(ctx, runID, expectedRevision)
+	return snapshot, runner.unresolvedToolReturn(state)
 }

@@ -83,7 +83,7 @@ func seededTerminalProjectionChild(t *testing.T, status InvocationStatus) (*Runn
 		"turn-projection", "request", "child goal",
 		kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		kernel.ThreadRef{Kind: "conversation", ID: "thread"},
-		nil, nil, nil, nil, time.Now().UTC(),
+		nil, nil, nil, time.Now().UTC(),
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -72,32 +72,28 @@ func (childFailureCompletion) ValidateCompletion(context.Context, kernel.Run, mo
 	return CompletionCorrection{}, errChildFailureFixture
 }
 
-type childFailureMiddleware struct{}
-
-func (childFailureMiddleware) Name() string { return "child-failure-middleware" }
-func (childFailureMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	result, err := next(ctx)
-	return result, errors.Join(err, errChildFailureFixture)
-}
-
 type childFailureStore struct {
 	*memory.Store
 	fault           string
 	marks, finishes int
 }
 
-func (s *childFailureStore) Apply(ctx context.Context, id string, rev uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if mutation.Record.Run.Status == kernel.RunStatusFailed && s.fault == "failure-cas" {
-		return kernel.Snapshot{}, errChildFailureFixture
+func (s *childFailureStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		if commitMutation.Record.Run.Status == kernel.RunStatusFailed && s.fault == "failure-cas" {
+			return kernel.Snapshot{}, false, errChildFailureFixture
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.Apply(ctx, id, rev, mutation)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
-func (s *childFailureStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+
+func (s *childFailureStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	s.marks++
 	if s.fault == "mark" {
 		return errChildFailureFixture
 	}
-	err := s.Store.MarkChildExecutionSettled(ctx, g, p)
+	err := s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if err == nil && s.fault == "mark-ack" {
 		return errChildFailureFixture
 	}
@@ -128,10 +124,9 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 		{"unknown tool effect after approval", "approve", "tool", "", false, 1, 1},
 		{"unknown approval policy", "start", "approval-policy", "agent.approval_policy_failed", false, 1, 0},
 		{"unknown completion policy", "start", "completion", "agent.completion_validation_failed", false, 1, 0},
-		{"opaque middleware adds error", "start", "middleware", "context.input_budget_exceeded", false, 0, 0},
 		{"terminal CAS fails", "start", "failure-cas", "", false, 0, 0},
 		{"settlement marker fails", "start", "mark", "context.input_budget_exceeded", false, 0, 0},
-		{"settlement marker ACK lost", "start", "mark-ack", "context.input_budget_exceeded", false, 0, 0},
+		{"settlement marker ACK lost", "start", "mark-ack", "context.input_budget_exceeded", true, 0, 0},
 		{"retirement fails", "start", "finish", "context.input_budget_exceeded", false, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -153,14 +148,10 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			deps := Dependencies{Runtime: rt, Model: m, BoundedContext: adapter, RunMiddleware: []plugin.RunMiddleware{adapter},
-				StartControlPreflight:    func(context.Context, StartRequest) error { return nil },
+			deps := Dependencies{Runtime: rt, Model: m, BoundedContext: adapter, StartControlPreflight: func(context.Context, StartRequest) error { return nil },
 				ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return nil }}
 			if tc.fault == "completion" {
 				deps.CompletionPolicies = []CompletionPolicy{childFailureCompletion{}}
-			}
-			if tc.fault == "middleware" {
-				deps.RunMiddleware = append(deps.RunMiddleware, childFailureMiddleware{})
 			}
 			toolCalls := 0
 			request := StartRequest{ID: "child", RequestID: "request", ParentRunID: parent.Run.ID, OriginFingerprint: FrozenOriginFingerprint([]byte("{}")), Actor: actor, Thread: thread, Goal: strings.Repeat("B", 512), Model: "model"}
@@ -253,7 +244,7 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 						t.Fatalf("settlement error lost original cause: %v", err)
 					}
 					store.fault = ""
-					recovery := runner.ReconcileChildPhysicalGrant(t.Context(), request.ID)
+					recovery := runner.ReconcilePhysicalExecution(t.Context(), request.ID)
 					if tc.fault == "mark" {
 						if !errors.Is(recovery, kernel.ErrChildExecutionBusy) {
 							t.Fatalf("missing marker invented on recovery: %v", recovery)

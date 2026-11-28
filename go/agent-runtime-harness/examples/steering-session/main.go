@@ -140,9 +140,24 @@ func run(ctx context.Context, input io.Reader, output io.Writer, interactive boo
 	if err != nil || view.InputBinding != queue.BindingID() || current.Run.Actor != options.Session.Actor || current.Run.Thread != options.Session.Thread {
 		return errors.New("host identity or input binding mismatch")
 	}
-	queued, err := queue.Submit(ctx, current.Run, "input-1", correction)
+	queued, err := session.Steer(ctx, "turn-1", runID, "input-1", correction)
 	if err != nil {
 		return err
+	}
+	if replay, err := session.Steer(ctx, "turn-1", runID, "input-1", correction); err != nil || replay != queued {
+		return errors.New("steering replay changed the original queued input")
+	}
+	if _, err := session.Steer(ctx, "turn-1", runID+"-foreign", "wrong-run", correction); err == nil {
+		return errors.New("steering accepted an unrelated Run")
+	}
+	foreignOptions := options
+	foreignOptions.Session.Actor.ActorID = "another-user"
+	foreign, err := harness.OpenAgentSession(foreignOptions)
+	if err != nil {
+		return err
+	}
+	if _, err := foreign.Steer(ctx, "turn-1", runID, "wrong-user", correction); err == nil {
+		return errors.New("steering accepted an unrelated Actor")
 	}
 	if _, err := fmt.Fprintf(output, "queued=%d applied=%d (queue acceptance is not delivery)\n", queued.Sequence, view.InputCursor); err != nil {
 		return err
@@ -168,7 +183,7 @@ func run(ctx context.Context, input io.Reader, output io.Writer, interactive boo
 	if _, err := fmt.Fprintf(output, "applied=%d answer=beta: 18:00\n", view.InputCursor); err != nil {
 		return err
 	}
-	if _, err = queue.Submit(ctx, current.Run, "late-1", "Look up alpha again"); !errors.Is(err, agent.ErrInvalidRequest) {
+	if _, err = session.Steer(ctx, "turn-1", runID, "late-1", "Look up alpha again"); !errors.Is(err, harness.ErrInvalidRequest) {
 		return errors.New("completed task accepted late input")
 	}
 	// The Host persists all admitted user input, not just the initial prompt.

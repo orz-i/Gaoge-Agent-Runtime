@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -68,17 +67,6 @@ func (m *streamSuccessIdentityModel) GenerateStream(ctx context.Context, request
 	return result, nil
 }
 
-type mutationSuccessIdentityMiddleware struct{ replacement string }
-
-func (mutationSuccessIdentityMiddleware) Name() string { return "audit-identity-mutation" }
-func (m mutationSuccessIdentityMiddleware) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	response, err := next(ctx, request, emit)
-	if err == nil {
-		response.ResponseID = m.replacement
-	}
-	return response, err
-}
-
 func TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -86,8 +74,6 @@ func TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity(t *tes
 		firstEventID    string
 		secondEventID   string
 		ignoreSinkError bool
-		mutateID        string
-		mutate          bool
 		stream          bool
 		accepted        bool
 	}{
@@ -103,8 +89,6 @@ func TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity(t *tes
 		{name: "stream_valid_event_id", stream: true, firstID: "physical-id", firstEventID: "physical-id", accepted: true},
 		{name: "stream_final_only_id", stream: true, firstID: "physical-id", accepted: true},
 		{name: "stream_event_only_id", stream: true, firstEventID: "physical-id", accepted: true},
-		{name: "middleware_erases_unary_id", firstID: "physical-id", mutate: true},
-		{name: "middleware_pads_stream_id", stream: true, firstID: "physical-id", firstEventID: "physical-id", mutate: true, mutateID: " physical-id "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			underlying := &successIdentityModel{firstID: tc.firstID}
@@ -122,9 +106,6 @@ func TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity(t *tes
 			}})
 			runtime := newModelInvocationRuntime(t, memory.NewStore())
 			dependencies := agent.Dependencies{Runtime: runtime, Model: client, Catalog: registry, Executor: registry}
-			if tc.mutate {
-				dependencies.ModelMiddleware = []plugin.ModelMiddleware{mutationSuccessIdentityMiddleware{replacement: tc.mutateID}}
-			}
 			runner, err := agent.NewRunner(dependencies)
 			if err != nil {
 				t.Fatal(err)

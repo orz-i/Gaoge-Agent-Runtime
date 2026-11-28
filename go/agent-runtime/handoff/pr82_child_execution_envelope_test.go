@@ -46,7 +46,7 @@ func TestPR82HandoffChildMustMatchFrozenGoalAndRequestID(t *testing.T) {
 				if path == "start" {
 					child.loadErr = kernel.ErrNotFound
 				}
-				coordinator, err := handoff.New(child)
+				coordinator, err := handoff.New(handoff.Config{Local: child})
 				if err != nil {
 					t.Fatal(err)
 				}

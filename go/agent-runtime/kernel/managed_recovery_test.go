@@ -143,25 +143,26 @@ func TestManagedRecoveryModeAndExactDigest(t *testing.T) {
 	if _, _, e = ResolveManagedPhysicalAdmission(t.Context(), p, cancelP.OwnedAdmission(req, "next-lease", "next-grant"), s, l, g, a, g.ExecutionEpoch, now, nil); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("CANCEL enabled physical dispatch: %v", e)
 	}
-	cq := ManagedCancelRequest{RunID: s.Run.ID, SuspensionID: "safe", Selection: cancelP}
-	cancelled, m, e := ManagedCancellationMutation(p, cq, s, now)
+	cq := cancelP
+	cancelled, m, e := managedCancellationMutation(p, cq, s, now)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if m.Record.Run.Status != RunStatusCancelled || ManagedDigest(m.Record.State) != ManagedDigest(s.State) || cancelled.Terminal.EventHead != s.EventHead+1 {
+	if m.Record.Run.Status != RunStatusCancelled || ManagedDigest(m.Record.State) != ManagedDigest(s.State) || cancelled.Terminal != nil {
 		t.Fatal("cancel changed original evidence")
 	}
+	cancelled.Terminal = &Snapshot{Run: m.Record.Run, State: m.Record.State, EventHead: s.EventHead + int64(len(m.Events))}
 	if !ManagedCancelReplay(cancelled, cq, *cancelled.Terminal) {
 		t.Fatal("cancel ACK replay rejected")
 	}
 	forged := cancelP
 	forged.reservation.CancellationReason = "different"
-	cq.Selection = forged
+	cq = forged
 	if ManagedCancelReplay(cancelled, cq, *cancelled.Terminal) {
 		t.Fatal("foreign cancellation receipt adopted")
 	}
-	cq.Selection = proof
-	if _, _, e = ManagedCancellationMutation(p, cq, s, now); !errors.Is(e, ErrExecutionConflict) {
+	cq = proof
+	if _, _, e = managedCancellationMutation(p, cq, s, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("RESUME became cancellation: %v", e)
 	}
 }
@@ -198,9 +199,9 @@ func TestManagedTransferWireRejectsRetiredAuthority(t *testing.T) {
 type managedConfiguredKernel struct {
 	Store
 	ManagedRecoveryStore
-	OwnedPhysicalExecutionStore
+	PhysicalExecutionStore
 	transfer ManagedTransfer
-	enable   OwnedPhysicalAdmissionResult
+	enable   PhysicalAdmissionResult
 }
 
 func (s *managedConfiguredKernel) ManagedRecoveryAuthority(context.Context) (ManagedAuthority, error) {
@@ -209,10 +210,10 @@ func (s *managedConfiguredKernel) ManagedRecoveryAuthority(context.Context) (Man
 func (s *managedConfiguredKernel) LoadManagedRecovery(context.Context, string) (ManagedTransfer, error) {
 	return managedClone(s.transfer), nil
 }
-func (s *managedConfiguredKernel) BeginOwnedPhysicalExecution(_ context.Context, p OwnedPhysicalAdmission) (OwnedPhysicalAdmissionResult, error) {
+func (s *managedConfiguredKernel) BeginPhysicalExecution(_ context.Context, p PhysicalAdmission) (PhysicalAdmissionResult, error) {
 	s.enable = p.Candidate()
 	point := s.transfer.SafePoint
-	return ResolveOwnedPhysicalAdmission(point.Source, point.OriginalLease, point.OriginalLease.ExpiresAt.Add(time.Millisecond), false, false, p)
+	return ResolvePhysicalAdmission(point.Source, point.OriginalLease, point.OriginalLease.ExpiresAt.Add(time.Millisecond), false, false, p)
 }
 
 type managedConfiguredHost struct {

@@ -30,7 +30,7 @@ func (leakingHostedBackend) ResumeSession(context.Context, wire.ResumeSessionReq
 }
 
 func TestACPHostRedactsPostDispatchProviderAndExecutionErrors(t *testing.T) {
-	host, err := NewHost(HostDependencies{Backend: leakingHostedBackend{},
+	host, err := NewHost(HostDependencies{Implementation: wire.Implementation{Name: "host-product", Version: "2.3.4"}, Backend: leakingHostedBackend{},
 		Authorize: func(context.Context, string, string) error { return nil }})
 	if err != nil {
 		t.Fatal(err)

@@ -22,7 +22,7 @@ func (runner *Runner) SupportsContextSummary() bool {
 // permission and is used only to reject mismatched Host compositions.
 func (runner *Runner) UsesBudgetedContextSummary(adapter *BoundedBudgetAdapter) bool {
 	return runner.SupportsContextSummary() &&
-		adapter != nil && runner.samplingBudget == adapter && runner.toolBudget == adapter
+		adapter != nil && runner.boundedBudget == adapter
 }
 
 type contextSummaryModelKey struct{}
@@ -36,13 +36,10 @@ func validSummaryComposition(d Dependencies) bool {
 		d.PrepareModelRequest != nil {
 		return false
 	}
-	b := selectedSamplingBudget(d)
-	if b == nil {
-		return selectedToolBudget(d) == nil && contextOnlyRun(d, summary.bounded) &&
-			(d.BoundedContext == nil || d.BoundedContext == summary.bounded)
+	if d.BoundedBudget == nil {
+		return d.BoundedContext == nil || d.BoundedContext == summary.bounded
 	}
-	return d.BoundedContext == summary.bounded &&
-		(d.BoundedBudget == b || completeLegacyBudget(d, summary.bounded) == b)
+	return d.BoundedContext == summary.bounded
 }
 
 func cloneContextSummaryBinding(value *ContextSummaryBinding) *ContextSummaryBinding {
@@ -130,7 +127,7 @@ func validContextSummaryInvocation(invocation ModelInvocation) bool {
 			len(request.Tools) == 0 && len(request.HostedTools) == 0 && !request.RequireToolCall &&
 			request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 &&
 			request.PreviousResponseID == "" && request.PromptCacheKey == "" &&
-			sameFrozenOutputContract(request.OutputContract, workingStateSummaryContract())
+			reflect.DeepEqual(request.OutputContract, workingStateSummaryContract())
 	}
 	return invocation.Status == ModelInvocationConsumed
 }

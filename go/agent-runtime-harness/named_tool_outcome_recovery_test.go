@@ -25,16 +25,21 @@ type namedOutcomeFaultStore struct {
 	fired        bool
 }
 
-func (s *namedOutcomeFaultStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if l.RunID == s.child && !s.fired {
-		for _, e := range m.Events {
-			if e.Type == s.event {
-				s.fired = true
-				return kernel.Snapshot{}, s.cut
+func (s *namedOutcomeFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		l := *commitAuth.Lease
+
+		if l.RunID == s.child && !s.fired {
+			for _, e := range commitMutation.Events {
+				if e.Type == s.event {
+					s.fired = true
+					return kernel.Snapshot{}, false, s.cut
+				}
 			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.ApplyExecution(ctx, l, revision, m)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 // An original locally deferred Named Agent remains a native Root with a
@@ -81,12 +86,12 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
+				shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
 				if e != nil {
 					t.Fatal(e)
 				}
 				b := mustBudgetAdapter(t, shared)
-				deps := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolOutcomeVerifier: delegation, RunMiddleware: []plugin.RunMiddleware{b}, ModelMiddleware: []plugin.ModelMiddleware{b}, ToolMiddleware: []plugin.ToolMiddleware{b}}
+				deps := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolOutcomeVerifier: delegation, BoundedBudget: b}
 				if boundedApproval {
 					approval, e := agent.NewBoundedToolApproval(func(_ context.Context, q tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
 						if q.Call.ToolKey == roleEvidenceTool {
@@ -109,7 +114,7 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				route, e := handoff.NewDeferredAgent(native)
+				route, e := handoff.New(handoff.Config{Local: native, PrepareLocal: true})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -156,13 +161,11 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			staged, e := native.Resume(ctx, child.RunID, interrupted.Run.Revision)
-			if e != nil || staged.Run.Status != kernel.RunStatusRunning || physical != 1 {
-				t.Fatal("original receipt recovery", e, staged.Run.Status, physical)
-			}
-			done, e := native.Resume(ctx, child.RunID, staged.Run.Revision)
-			if e != nil || done.Run.Status != kernel.RunStatusCompleted || physical != 1 {
-				t.Fatal("child business consume", e, done.Run.Status, physical)
+			// Native Resume recovers the original receipt and continues the same
+			// child loop; it does not expose the legacy receipt-only yield.
+			done, e := native.Resume(ctx, child.RunID, interrupted.Run.Revision)
+			if e != nil || done.Run.Status != kernel.RunStatusCompleted || physical != 1 || len(m.requests) != 3 {
+				t.Fatal("original receipt recovery and child business consume", e, done.Run.Status, physical, len(m.requests))
 			}
 			if boundedApproval && (childApprovals != 1 || !native.VerifyDeferredToolResults(ctx, rt, done) || !native.VerifiedDeferredRootControl(ctx, rt, done)) {
 				t.Fatal("original bounded approval result/control did not survive child recovery", childApprovals)

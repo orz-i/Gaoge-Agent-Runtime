@@ -1,5 +1,130 @@
 # Breaking changes (pre-stable Beta)
 
+## Agent-centric first-party execution (AC-01)
+
+- Replace `harness.NewToolTimelineMiddleware` with `harness.NewBoundedToolTimelineAdapter`.
+  The old Tool execution wrapper and its duplicate timeline projection are removed.
+- Configure Context Summary through `ContextSummary`, with explicit matching
+  `BoundedContext` and `BoundedBudget` for budgeted operation, not a
+  `RunMiddleware` registration of its Context owner. The Runner selects
+  the original concrete Context stage directly.
+- Configure `BoundedContextAdapter` exclusively through `Dependencies.BoundedContext`
+  (or the matching Summary owner). Its executable `Run` middleware interface and
+  registration name are removed; a competing Run wrapper or request preparer is rejected.
+- Removed `NewContextRunMiddleware`, `HydrateContextRun`, `NewManagedContextPreparer`,
+  and the public `BoundedContextAdapter.Prepare` / `PrepareRequest` methods. The
+  single `NewBoundedContextAdapter` supplies hydration and preparation to the Runner;
+  no separate Host lifecycle or standalone compaction entry remains.
+- Configure Budget exclusively through `Dependencies.BoundedBudget`; partial and
+  triple middleware registrations no longer compile (`BoundedBudgetAdapter.Name`
+  is removed). One owner encloses the fixed Run/Model/Tool stages.
+- Removed public Run/Model/Tool middleware, Next and chain registration APIs.
+  Use explicit first-party stages, request preparation, model/Tool ports and
+  observers instead. Standalone Budget execution and public Model response
+  authority registration are removed. Use `harness.NewModelTimelineObserver`
+  for best-effort live events. The Harness snapshot synchronization projects
+  committed Model receipt facts idempotently, including on Refresh after restart.
+
+- Removed `agent.Dependencies.ManagedRecovery` and `AgentSessionContextOptions.ManagedRecovery`. Recovery capability is derived from the exact registered Host Store and first-party stage sources; the persisted original capability cannot be changed on reopen.
+
+- Root execution custody observations now use the single `kernel.ExecutionCustodyStore.VerifyExecutionCustody` port and shared `VerifyExecutionCustodyFacts` reducer. The five prior settlement verification methods and their separate Store interfaces are removed. The explicit read predicate does not grant dispatch or control authority; the later write must still arbitrate the original transaction.
+
+- Child and Root physical callback returns now use `RecordPhysicalCallbackReturn`, `LookupPhysicalCallbackReturn` and the common `PhysicalCallbackCompletion` fact. The separate `MarkChildExecutionSettled` command and Memory settled-revision field are removed. Child consumption validates the original complete return snapshot; new SQL writes use the same callback-return columns. Old SQL settled-revision-only rows fail closed pending the AC-03 schema cut; a legacy revision marker cannot fabricate a return receipt.
+
+- Physical execution admission now uses one `kernel.PhysicalExecutionStore` and `BeginPhysicalExecution` transaction with `PhysicalAdmission`. The old Child/Owned Store interfaces and admission methods are removed. Runtime binds the original committed result directly through `AdmitPhysicalExecution`; `WithPhysicalGrant` and standalone unleased Root admission are removed. Parent-bound operations still fence immutable physical ancestors; independently leased operations retain native lease/epoch and attempt-specific commit acknowledgement, and managed continuation consumes the original predecessor in that same admission transaction. A visible Grant cannot be converted into a new admission permit.
+
+- Physical retirement observation is part of `PhysicalExecutionStore`; the separate `OwnedRetirementStore` capability is removed. Managed retirement keeps a single source ID and closure digest in the receipt, not a nested copy of the complete Managed Transfer and terminal snapshot. SQL current Managed rows now index the sole history payload (legacy NOT NULL payload columns contain JSON null on new writes); the original history must resolve before a retirement can be observed. Empty ordinary retirement receipt wire remains unchanged; old nonempty managed closure objects are not interpreted as the new reference format. Schema and explicit legacy cutover remain AC-03 work.
+
+- Managed cancellation is now an ordinary `ApplyControl` transaction carrying the original authorized recovery selection through its `CancellationGuard`. Removed the standalone `CommitManagedCancellation` Runtime/Store API, `ManagedCancelRequest` and separate managed budget cancellation reducer. The Store qualifies the exact expired predecessor and descendant/ledger facts, consumes its Effect, commits the common native cancellation, revokes the owner and records the actual resulting selection in the same transaction. Exact ACK replay returns the committed snapshot; no second terminal snapshot is constructed before commit.
+
+- The Kernel Store now exposes one Run write transaction, `Commit(ctx, runID, revision, mutation, authority)`. Removed Store `Apply`, `ApplyExecution`, `ApplyControl`, `ApplyOwnedPhysicalRecovery` and `ControlStore`; existing Runtime feature methods submit that same command. Original lease, control or receipt proof are transient mutually exclusive authority inputs (zero is an unclaimed/ancestor-fenced write), not selectable execution modes. The same native transaction qualifies source, commits Run/accounting/journal and returns the actual committed snapshot and owner-revocation result. Store implementations and fault fixtures must use the new method; no fallback write port is retained.
+
+- Agent physical return recovery now exposes only `Runner.ReconcilePhysicalExecution(ctx, runID)`, replacing `ReconcileChildPhysicalGrant` and `ReconcileRootPhysicalExecution`. The persisted Run parent relation selects the original ownership constraint; an unreturned callback remains fenced. Original Tool ledger outcomes always require their original opaque evidence.
+
+## Native SQL Profile hard cut (AC-03)
+
+SQLite v14 and the matching PostgreSQL layout store one permanent Effect
+row and an active ancestor index. Separate Grant identity, retirement, and
+replicated ancestor Grant tables and earlier SQLite migration entry points
+are retired. Initialize a fresh Profile; the current adapters reject legacy
+layouts without modifying their data. Resolve original obligations with the
+previous writer and retain or export the original Profile before cutover.
+
+## Agent hot state and immutable history (AC-04)
+
+The existing Run Create/Commit transaction now stores sealed Agent history
+as immutable ordered entries, selected by the current hot State envelope.
+The complete logical Snapshot is reconstructed byte-for-byte before exposure
+or authority verification. Pending model requests retain only their unmatched
+raw bytes plus references to the exact transcript suffix of the same revision;
+pending receipts stay in hot state. No logical Agent wire or SQL schema change
+is required for this refinement. Do not mix writers.
+The SQLite v14 and matching PostgreSQL layout require a fresh Profile;
+earlier Profiles remain unchanged. Do not decode the internal state column
+as logical Agent JSON or mix old/new writers.
+
+## Native Agent budget (AC-04)
+
+The BoundedBudget adapter must use exactly the same native Run and ledger
+Store instance as Runtime. The split-store Model/Tool reservation, dispatch,
+receipt, and finish paths are retired. Host scope resolution enrolls the Run
+at creation; later accounting reads that binding. Projection follows the
+native commit. Legacy split-store execution state is not migrated or
+requalified; resolve its original obligations with the previous writer.
+
+## Agent-as-Tool composition (AC-05)
+
+Use `handoff.New(handoff.Config{Local: loop, Remote: remoteResolver})` for
+the fixed local Agent and independent remote route. The frozen `Delegation.Remote`
+bit is the only local/remote selector. Removed `NewRouted`, `NewDeferredAgent`,
+`NewAgentWithRemote`, `NewDeferredAgentWithRemote`, `NewDeferredAgentWithRouting`,
+the route classifier and duplicate ownership-query APIs; no aliases remain.
+`PrepareLocal: true` calls the same local Agent's `PrepareRun`; the Host later
+invokes that original Agent's `Resume`. Custom nonremote resolvers use `Opaque`
+and cannot acquire local authority from a resolved Agent or matching Run ID.
+A fixed custom `Local` must explicitly implement `LocalKernelChildRunner` to
+attest Kernel ownership. Native observation uses `LocalAgent` and
+`ObservesLocalDelegation`; physical control still requires the original custody
+proof. Remote authorization, signed shadow receipts and protocol cancellation
+remain independent. This composition change adds no persisted state.
+
+## Unified Tool return frontier and recovery (AC-05)
+
+The private sealed Agent state is now `agent-state-opaque-v5`. Pending Calls
+retain their original identity exactly once. Waits and terminal receipts share
+one CallID-bound return collection, including the original wait evidence when
+available. Root and parented physical Agent admissions use one native leased
+execution and retirement protocol. Receipt-only recovery consumes the original
+returned callback and never opens an independent Tool execution lease. An
+unresolved physical child retains its ancestor fence and must not borrow a
+Root's deferred-control authority.
+
+Removed `budget.Coordinator.DispatchTool` and `ResolveUnsentTool`; native
+Agent accounting uses `PlanDispatch` and the sealed `PlanUnsentToolDispatch`
+in its existing atomic Run transition. Unmetered Tool recovery is also bound
+to the original Call digest and physical callback return. This is not new
+approval custody, provider completion or budget authority. Complete old
+obligations with the previous writer and retain its Profile; use a fresh
+Profile for the new writer. No in-place migration or old-state fallback.
+
+## Unified Agent call allowance (AC-05)
+
+`agent.StartRequest` and `harness.StartRequest` now accept one
+`CallAllowance`, with optional `Renewal *AutoAllowancePolicy`. The separate
+`AutoAllowance` start and Invocation input fields are removed. Manual grants
+accept call increments only; both grant paths extend the same cumulative
+ceiling within the original hard Run limits. The read-only View still exposes
+renewal progress. Host retry seals the single original allowance, including
+its nested renewal policy, and rejects legacy separate-policy inputs.
+Removing the independent admission field also changes Config admission hashes
+for requests without an allowance; use only the new writer on a fresh Profile.
+
+The single allowance record
+contains the ceiling, renewal policy and progress. Older sealed states are
+rejected rather than interpreting a previously automatic policy as manual.
+Finish original obligations with the prior writer and retain its Profile;
+use a fresh Profile for the new writer. No in-place data migration is provided.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

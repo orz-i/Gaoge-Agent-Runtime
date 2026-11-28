@@ -39,7 +39,6 @@ type ea1ChildApprovalSettlementFixture struct {
 	request                                         agent.StartRequest
 	parent, grandparent, created, waiting, approved kernel.Snapshot
 	physical                                        *ea1StartSettlementPhysical
-	host                                            *ea1ChildSettlementHost
 	approval                                        *ea1ControlApproval
 	definition                                      tools.Definition
 	registry                                        *tools.Registry
@@ -73,7 +72,6 @@ func ea1NewChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kerne
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.host = &ea1ChildSettlementHost{operation: plugin.RunResolveApproval, name: "ea1.original.child.approval", request: f.request, physical: f.physical}
 	setup := f.runner(rt, "setup-owner", false)
 	store.afterCreate = func(_ context.Context, s kernel.Snapshot) error {
 		f.created = s
@@ -89,17 +87,14 @@ func ea1NewChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kerne
 	if f.waiting.Checkpoint == nil || f.waiting.Checkpoint.Status != kernel.CheckpointPending || !ea1RecoveryJSONEqual(f.waiting.Checkpoint, f.approval.checkpoint) || !ea1RecoveryJSONEqual(f.approval.definition, f.definition) || f.approval.call.ID != "original-call" || f.approval.call.ToolKey != "effect" {
 		t.Fatal("original pending checkpoint/call/catalog missing")
 	}
-	if len(f.physical.requests) != 1 || len(f.physical.toolRequests) != 0 || f.physical.hostCalls != 0 || f.approval.calls != 0 || store.begins != 1 || store.marks != 1 || store.finishes != 1 {
+	if len(f.physical.requests) != 1 || len(f.physical.toolRequests) != 0 || f.approval.calls != 0 || store.begins != 1 || store.marks != 1 || store.finishes != 1 {
 		t.Fatal("setup callbacks or source scope count wrong")
 	}
 	if _, e = rt.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatal("original Start scope not retired", e)
 	}
-	expectedClaims := 0
-	if native {
-		expectedClaims = 1
-	}
-	if store.acquireCalls != expectedClaims || store.releaseCalls != expectedClaims {
+	expectedClaims := 1
+	if store.atomicClaims != expectedClaims || store.acquireCalls != 0 || store.releaseCalls != 0 {
 		t.Fatal("setup did not preserve explicit/default Child native policy")
 	}
 	store.begins, store.marks, store.finishes = 0, 0, 0
@@ -108,12 +103,11 @@ func ea1NewChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kerne
 	return f
 }
 func (f *ea1ChildApprovalSettlementFixture) runner(rt *kernel.Runtime, owner string, control bool) *agent.Runner {
-	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, ApprovalPolicies: []plugin.ApprovalPolicy{ea1ControlPolicy{}}, ToolMiddleware: []plugin.ToolMiddleware{f.physical}}
+	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, ApprovalPolicies: []plugin.ApprovalPolicy{ea1ControlPolicy{}}}
 	if f.native {
 		deps.RunExecution = &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}
 	}
 	if control {
-		deps.RunMiddleware = []plugin.RunMiddleware{f.host}
 		deps.ApprovalControlPreflight = func(ctx context.Context, s kernel.Snapshot) error {
 			f.preflights.Add(1)
 			if !ea1RecoveryJSONEqual(s, f.waiting) {
@@ -186,7 +180,7 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ExpectedRevision != f.waiting.Run.Revision || g.ChildRunID != f.request.ID || f.store.begins != 1 {
+	if e != nil || !g.IsOwned() || g.ExpectedRevision != f.waiting.Run.Revision || g.ChildRunID != f.request.ID || f.store.begins != 1 {
 		t.Fatal("original approval ChildGrant missing", e)
 	}
 	if (phase == "P3" && f.store.marks != 0) || (phase == "P4" && f.store.marks != 1) || f.store.finishes != 0 {
@@ -198,7 +192,7 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 	ar := ea1StartRuntime(t, a)
 	fresh := f.runner(ar, "fresh-recovery", true)
 	ea1ChildRecoveryPhaseUnchanged(t, ar, before, f.parent, f.grandparent, g)
-	e = fresh.ReconcileChildPhysicalGrant(t.Context(), f.request.ID)
+	e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID)
 	if phase == "P3" {
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatal("receipt alone invented missing approval marker", e)
@@ -211,7 +205,7 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 		ea1CompBarrierUnchanged(t, ar, before)
 		ea1CompBarrierUnchanged(t, ar, f.parent)
 		ea1CompBarrierUnchanged(t, ar, f.grandparent)
-		if e = fresh.ReconcileChildPhysicalGrant(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		if e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID); e != nil {
 			t.Fatal("original approval marker replayed", e)
 		}
 	}
@@ -221,15 +215,12 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 	}
 	ea1CompBarrierUnchanged(t, ar, before)
 	f.assertReceipt(before)
-	expectedClaims := 0
-	if native {
-		expectedClaims = 1
-	}
-	if f.store.acquireCalls != expectedClaims || f.store.releaseCalls != expectedClaims {
+	expectedClaims := 2
+	if f.store.atomicClaims != expectedClaims || f.store.acquireCalls != 0 || f.store.releaseCalls != 0 {
 		t.Fatal("approval/recovery fabricated native acquisition")
 	}
 }
 func ea1ChildApprovalElection(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), native, deadline bool) {
 	f := ea1NewChildApprovalSettlement(t, factory, native, deadline)
-	ea1ChildSettlementElection(t, f.reopen, f.request, f.waiting, f.parent, f.grandparent, f.physical, f.definition, f.host, f.runner, f, deadline)
+	ea1ChildSettlementElection(t, f.reopen, f.request, f.waiting, f.parent, f.grandparent, f.physical, f.definition, f.runner, f, deadline)
 }

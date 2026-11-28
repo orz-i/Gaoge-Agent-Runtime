@@ -84,7 +84,7 @@ func TestHarnessAutomaticallyContinuesAgentWithSameRunIdentity(t *testing.T) {
 	host, runtime, direct, client := testAutoHarness(t, 1)
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1,
 	}
 	done, err := host.StartAgentTurn(t.Context(), request)
@@ -114,7 +114,7 @@ func TestHarnessAutomaticSegmentsExhaustToOriginalManualContinuation(t *testing.
 	host, runtime, direct, client := testAutoHarness(t, 2)
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 2,
 	}
 	paused, err := host.StartAgentTurn(t.Context(), request)

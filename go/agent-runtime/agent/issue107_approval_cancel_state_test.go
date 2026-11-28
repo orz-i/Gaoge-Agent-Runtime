@@ -79,7 +79,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 			if err := json.Unmarshal(s.State, &st); err != nil {
 				t.Fatal(err)
 			}
-			st.ToolWait = &PendingTool{}
+			st.ToolReturns = []returnedTool{{Wait: &PendingTool{}}}
 			s.State, _ = encodeState(st)
 		},
 		"no approval binding": func(s *kernel.Snapshot) {

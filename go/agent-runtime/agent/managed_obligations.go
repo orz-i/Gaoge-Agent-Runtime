@@ -28,13 +28,13 @@ func (r *Runner) freezeManagedSource(ctx context.Context, s kernel.Snapshot, sta
 		return p, l, false, ErrInvalidRequest
 	}
 	p.SourceRevision, p.InputBinding, p.InputCursor = s.Run.Revision+1, state.InputBinding, state.InputCursor
-	if r.nativeBudget != nil {
+	if r.boundedBudget != nil {
 		admission := r.nativeRunBudget(ctx, s.Run.ID)
 		if admission == nil || admission.projectionErr != nil || admission.ledger.ID != binding.TurnID {
 			return p, l, false, ErrInvalidRequest
 		}
 		var err error
-		l, err = r.nativeBudget.observeRunBudget(ctx, admission.ledger, s.Run.ID)
+		l, err = r.boundedBudget.observeRunBudget(ctx, admission.ledger, s.Run.ID)
 		if err != nil {
 			return p, l, false, err
 		}
@@ -54,14 +54,13 @@ func (r *Runner) freezeManagedSource(ctx context.Context, s kernel.Snapshot, sta
 
 func managedObligationsQuiescent(state runState) bool {
 	return len(state.PendingCalls) == 0 && state.PendingApproval == nil && state.ToolAdmission == nil &&
-		state.ToolDispatchID == "" && state.ToolWait == nil && len(state.DeferredChildren) == 0 &&
-		len(state.RecoveredTools) == 0 && len(state.ExternalSignals) == 0 &&
-		state.ExternalToolCancellation == nil && state.ExternalToolHold == nil
+		state.ToolDispatchID == "" && len(state.ToolReturns) == 0 && len(state.ExternalSignals) == 0 &&
+		state.ExternalToolCancellation == nil
 }
 
 func (r *Runner) managedBudgetOwner() any {
-	if r.nativeBudget != nil {
-		return r.nativeBudget
+	if r.boundedBudget != nil {
+		return r.boundedBudget
 	}
 	return nil
 }
@@ -77,11 +76,11 @@ func (r *Runner) freezeManagedObligations(ctx context.Context, s kernel.Snapshot
 	if inv.Purpose == ModelInvocationContextSummary {
 		phase = string(inv.Status)
 		p.BindingDigest = kernel.ManagedDigest(inv.ContextSummary)
-		if !callbackscope.Operation(ctx, r.nativeContext, "context.summary.native-phase:"+phase, inv) {
+		if !callbackscope.Operation(ctx, r.boundedContext, "context.summary.native-phase:"+phase, inv) {
 			return nil, false, ErrInvalidRequest
 		}
 	}
-	if r.nativeBudget != nil {
+	if r.boundedBudget != nil {
 		if inv.Status != ModelInvocationConsumed && (inv.SamplingPlan == nil || inv.SamplingPlan.LedgerID != l.ID) {
 			return nil, false, ErrInvalidRequest
 		}
@@ -89,7 +88,7 @@ func (r *Runner) freezeManagedObligations(ctx context.Context, s kernel.Snapshot
 			return nil, false, nil
 		}
 	}
-	journal, ok := callbackscope.ManagedObligationSuspension(ctx, r.nativeContext, r.managedBudgetOwner(), inv.Request, phase)
+	journal, ok := callbackscope.ManagedObligationSuspension(ctx, r.boundedContext, r.managedBudgetOwner(), inv.Request, phase)
 	if !ok {
 		return nil, false, nil
 	}
@@ -126,7 +125,7 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 	if err != nil || !state.ManagedRecovery || !r.SupportsManagedRecovery() ||
 		state.InputBinding != p.InputBinding || state.InputCursor != p.InputCursor ||
 		(p.InputBinding != "" && (r.inputs == nil || r.inputBinding != p.InputBinding)) ||
-		(p.LedgerID != "") != (r.nativeBudget != nil) {
+		(p.LedgerID != "") != (r.boundedBudget != nil) {
 		return p, ErrInvalidRequest
 	}
 	if !managedObligationsQuiescent(state) {
@@ -183,7 +182,7 @@ func (r *Runner) checkManagedLedger(ctx context.Context, p managedObligations, h
 	if p.LedgerID == "" {
 		return budget.Ledger{}, nil
 	}
-	l, err := r.nativeBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
+	l, err := r.boundedBudget.store.LoadBudget(ctx, p.LedgerID)
 	if err != nil {
 		return l, err
 	}
@@ -247,7 +246,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 	normalized.Status = first.Status
 	normalized.ExecutionAttempt, normalized.DispatchAttempt = first.ExecutionAttempt, first.DispatchAttempt
 	normalized.ExecutionLeaseUntil, normalized.RetryAfter = first.ExecutionLeaseUntil, first.RetryAfter
-	normalized.ProviderResponseID, normalized.Response, normalized.Usage = first.ProviderResponseID, first.Response, first.Usage
+	normalized.ProviderResponseID, normalized.Response = first.ProviderResponseID, first.Response
 	normalized.CompletedAt, normalized.ErrorCode = first.CompletedAt, first.ErrorCode
 	normalized.OutcomeErrorCode, normalized.OutcomeErrorDetail = first.OutcomeErrorCode, first.OutcomeErrorDetail
 	if !sameBoundedValue(normalized, *first) {
@@ -263,7 +262,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 	p.Phase = string(last.Status)
 	p.RequalifiedFrom = t.SafePoint.ID
 	if p.LedgerID != "" {
-		l, e := r.nativeBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
+		l, e := r.boundedBudget.store.LoadBudget(ctx, p.LedgerID)
 		if e != nil {
 			return empty, nil, e
 		}
@@ -367,15 +366,7 @@ func (r *Runner) recoverManagedModelFrontier(ctx context.Context, s kernel.Snaps
 	inv.ExecutionLeaseUntil = nil
 	now := r.clock.Now().UTC()
 	inv.RetryAfter = &now
-	if !replaceLastModelInvocation(&state, inv) {
-		return s, ErrInvalidRequest
-	}
-	encoded, err := encodeState(state)
-	if err != nil {
-		return s, err
-	}
-	return r.commitNativeTransition(ctx, s, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "agent.model_invocation.retryable", Message: inv.ID, Wakeup: true}}})
+	return r.commitInvocationState(ctx, s, &state, inv, kernel.EventDraft{Type: "agent.model_invocation.retryable", Message: inv.ID, Wakeup: true})
 }
 
 func (r *Runner) preflightManagedPoint(ctx context.Context, point kernel.ManagedSafePoint, current kernel.Snapshot) (managedObligations, error) {

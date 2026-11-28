@@ -14,7 +14,7 @@ import (
 func TestStartOrLoadReusesStableChildRun(t *testing.T) {
 	t.Parallel()
 	children := newFakeChildren()
-	coordinator, err := handoff.New(children)
+	coordinator, err := handoff.New(handoff.Config{Local: children})
 	if err != nil {
 		t.Fatalf("create handoff coordinator: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestRoutedCoordinatorSelectsChildPerDelegation(t *testing.T) {
 	t.Parallel()
 	local := newFakeChildren()
 	remote := newFakeChildren()
-	coordinator, err := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(
+	coordinator, err := handoff.New(handoff.Config{Opaque: handoff.ChildRunnerResolverFunc(func(
 		_ context.Context,
 		delegation handoff.Delegation,
 	) (handoff.ChildRunner, error) {
@@ -52,7 +52,7 @@ func TestRoutedCoordinatorSelectsChildPerDelegation(t *testing.T) {
 			return remote, nil
 		}
 		return local, nil
-	}))
+	})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,12 +75,12 @@ func TestRoutedCoordinatorSelectsChildPerDelegation(t *testing.T) {
 
 func TestRoutedCoordinatorFailsClosedWithoutChild(t *testing.T) {
 	t.Parallel()
-	coordinator, err := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(
+	coordinator, err := handoff.New(handoff.Config{Opaque: handoff.ChildRunnerResolverFunc(func(
 		context.Context,
 		handoff.Delegation,
 	) (handoff.ChildRunner, error) {
 		return nil, nil
-	}))
+	})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func (child *captureInitialChildRunner) StartRun(
 func TestHandoffForwardsOnlyAuthorizedChildInitialToolKeys(t *testing.T) {
 	t.Parallel()
 	children := &captureInitialChildRunner{fakeChildren: newFakeChildren()}
-	coordinator, err := handoff.New(children)
+	coordinator, err := handoff.New(handoff.Config{Local: children})
 	if err != nil {
 		t.Fatal(err)
 	}
