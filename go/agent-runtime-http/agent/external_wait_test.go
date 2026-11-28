@@ -56,7 +56,7 @@ func TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, private := range []string{"private-host-operation", strings.Repeat("b", 64), "externalSignals", "toolWait"} {
+	for _, private := range []string{"private-host-operation", strings.Repeat("b", 64), "externalSignals", "toolWait", "toolReturns"} {
 		if strings.Contains(string(data), private) {
 			t.Fatalf("correlation %q leaked: %s", private, data)
 		}
@@ -92,7 +92,7 @@ func TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation(t *testing.T) {
 		if err = json.Unmarshal(recorder.Body.Bytes(), &actual); err != nil || recorder.Code != http.StatusOK || projections != 1 || actual.PendingTool == nil {
 			t.Fatalf("authorized projection=%d response=%s err=%v", projections, recorder.Body, err)
 		}
-		for _, private := range []string{"private-host-operation", strings.Repeat("b", 64), "externalSignals", "toolWait"} {
+		for _, private := range []string{"private-host-operation", strings.Repeat("b", 64), "externalSignals", "toolWait", "toolReturns"} {
 			if strings.Contains(recorder.Body.String(), private) {
 				t.Fatalf("HTTP correlation %q leaked: %s", private, recorder.Body)
 			}

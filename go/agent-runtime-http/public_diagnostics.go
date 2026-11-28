@@ -190,7 +190,7 @@ func stripDiagnosticFields(value any, businessContent bool) {
 					}
 					continue
 				}
-			case "toolwait", "externalsignals":
+			case "toolwait", "toolreturns", "externalsignals":
 				if !businessContent {
 					delete(item, key)
 					continue
