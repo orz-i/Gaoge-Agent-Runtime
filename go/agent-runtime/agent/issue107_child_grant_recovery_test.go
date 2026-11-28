@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -34,11 +35,14 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := kernel.ExecutionAcquireRequest{}
+	q := kernel.ExecutionAcquireRequest{RunID: child.Run.ID, OwnerID: "fixture", LeaseDuration: time.Minute}
 	admissionProof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), child.State, child)
 	owned, admission, err := rt.AdmitPhysicalExecution(t.Context(), child, q, admissionProof, "start", "")
 	original := admission.Grant
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owned.CheckOwnedPhysicalEntry(t.Context(), child); err != nil {
 		t.Fatal(err)
 	}
 	// Synthetic trusted callback owns the original Agent per-revision
@@ -89,7 +93,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if markErr := rt.RecordPhysicalCallbackReturn(t.Context(), original, final.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(final.Run.ID, final.Run.Revision, "agent_physical_callback_return", original.ID, kernel.PhysicalCallbackReturnPayload(final, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); markErr != nil {
+	if markErr := rt.RecordPhysicalCallbackReturn(t.Context(), original, final.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(final.Run.ID, final.Run.Revision, "agent_physical_callback_return", original.ID, kernel.PhysicalCallbackReturnPayload(final, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); markErr != nil {
 		t.Fatal(markErr)
 	}
 	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); err != nil {
@@ -98,7 +102,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if _, err = rt.Cancel(t.Context(), parent.Run.ID, parent.Run.Revision, "after trusted receipt"); err != nil {
 		t.Fatal(err)
 	}
-	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
+	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); err != nil {
 		t.Fatalf("retired Grant replay accepted: %v", err)
 	}
 }

@@ -75,12 +75,6 @@ func (runner *Runner) withReceiptOwner(ctx context.Context, runID string, expect
 		scoped.externalRunLease = true
 		return execute(ctx, &scoped)
 	}
-	if runner.runExecution == nil || (runner.defaultRunOwner && source.Run.ParentRunID != "") {
-		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
-			return kernel.Snapshot{}, err
-		}
-		return execute(ctx, runner)
-	}
 	config := *runner.runExecution
 	lease, err := runner.runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
 		RunID: runID, OwnerID: config.OwnerID, LeaseDuration: config.LeaseDuration,

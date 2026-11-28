@@ -63,6 +63,9 @@ func (s *ea1ChildResumeSettlementStore) RecordPhysicalCallbackReturn(ctx context
 	return e
 }
 func (s *ea1ChildResumeSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	if s.mode == "P4" {
+		return s.fault
+	}
 	e := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
@@ -196,7 +199,7 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if e != nil {
 			t.Fatal("original committed marker could not recover", e)
 		}
-		if e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		if e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID); e != nil {
 			t.Fatal("original marker replayed", e)
 		}
 		ea1CompBarrierUnchanged(t, ar, before)
@@ -226,7 +229,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	begin := make(chan struct{}, 2)
 	allowBegin := make(chan struct{})
 	barrier := func(g kernel.ChildExecutionGrant) {
-		if g.ChildRunID != request.ID || g.ExpectedRevision != source.Run.Revision || g.IsOwned() != (approval == nil || approval.native) {
+		if g.ChildRunID != request.ID || g.ExpectedRevision != source.Run.Revision || !g.IsOwned() {
 			t.Error("wrong original Child admission candidate")
 		}
 		begin <- struct{}{}
@@ -306,7 +309,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 		t.Fatal(e)
 	}
 	g, e := ar.LookupChildExecution(t.Context(), request.ID)
-	if e != nil || g.IsOwned() != (approval == nil || approval.native) || g.ExpectedRevision != source.Run.Revision || g.ChildRunID != request.ID {
+	if e != nil || !g.IsOwned() || g.ExpectedRevision != source.Run.Revision || g.ChildRunID != request.ID {
 		t.Fatal("winner scope not original", e)
 	}
 	ea1CompBarrierUnchanged(t, ar, source)
@@ -314,7 +317,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	if lease.LeaseID == "" {
 		lease = sb.acquired
 	}
-	if (approval == nil || approval.native) && (lease.RunID != request.ID || lease.LeaseID == "" || lease.Epoch == 0 || !g.MatchesExecution(lease) || sa.atomicClaims+sb.atomicClaims != 1 || sa.acquireCalls+sb.acquireCalls != 0) {
+	if lease.RunID != request.ID || lease.LeaseID == "" || lease.Epoch == 0 || !g.MatchesExecution(lease) || sa.atomicClaims+sb.atomicClaims != 1 || sa.acquireCalls+sb.acquireCalls != 0 {
 		t.Fatal("winner native authority missing or loser claimed")
 	}
 	ea1ChildRecoveryPhaseControls(t, ar, current, parent, grandparent, g)

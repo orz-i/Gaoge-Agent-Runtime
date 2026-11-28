@@ -3,6 +3,7 @@ package conformance
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -87,7 +88,7 @@ func RunEA1P0SourceAdmissionSuite(t *testing.T, makeStore func(*testing.T) kerne
 			t.Fatalf("unleased root admission: %v", err)
 		}
 		root, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "root", ParentRunID: parent.Run.ID, Kind: "agent", Actor: actor, Thread: thread,
+			ID: "root", ParentRunID: parent.Run.ID, Kind: "agent", ExecutionRequired: true, Actor: actor, Thread: thread,
 			Goal: "original owner", State: []byte(`{}`),
 		})
 		if err != nil {
@@ -109,14 +110,25 @@ func RunEA1P0SourceAdmissionSuite(t *testing.T, makeStore func(*testing.T) kerne
 		if _, err = AdmitChildFixture(t.Context(), rt, foreign.Run.ID, foreign.Run.Revision); !errors.Is(err, kernel.ErrExecutionRequired) {
 			t.Fatalf("unsupported kind acquired external physical authority: %v", err)
 		}
-		next, err := rt.Apply(t.Context(), root.Run.ID, root.Run.Revision, kernel.Mutation{
+		lease, err := rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: root.Run.ID, OwnerID: "fixture", LeaseDuration: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound, err := rt.WithExecution(lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, err := bound.Apply(t.Context(), root.Run.ID, root.Run.Revision, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: root.State,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+		if err := rt.ReleaseExecution(t.Context(), lease); err != nil {
+			t.Fatal(err)
+		}
 		for _, rev := range []uint64{root.Run.Revision, next.Run.Revision + 1} {
-			if _, err = AdmitChildFixture(t.Context(), rt, root.Run.ID, rev); !errors.Is(err, kernel.ErrExecutionConflict) {
+			if _, err = AdmitChildFixture(t.Context(), rt, root.Run.ID, rev); !errors.Is(err, kernel.ErrConflict) {
 				t.Fatalf("stale/future expected Revision %d admitted physical Grant: %v", rev, err)
 			}
 		}

@@ -27,7 +27,7 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 			t.Fatal(err)
 		}
 		child, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "child", ParentRunID: parent.Run.ID, Kind: "agent",
+			ID: "child", ParentRunID: parent.Run.ID, Kind: "agent", ExecutionRequired: true,
 			Actor: actor, Thread: thread, Goal: "original child", State: []byte(`{}`),
 		})
 		if err != nil {
@@ -62,7 +62,7 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 			t.Fatal(err)
 		}
 		child, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "child", ParentRunID: parent.Run.ID, Kind: "agent",
+			ID: "child", ParentRunID: parent.Run.ID, Kind: "agent", ExecutionRequired: true,
 			Actor: actor, Thread: thread, Goal: "child", State: []byte(`{}`),
 		})
 		if err != nil {
@@ -106,17 +106,17 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 		if err != nil {
 			t.Fatal(err)
 		}
-		grant, err := AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
+		bound, err := rt.WithExecution(lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		grant, err := AdmitChildFixture(t.Context(), bound, child.Run.ID, child.Run.Revision)
 		if err != nil {
 			t.Fatal(err)
 		}
 		_, cancelErr := rt.Cancel(t.Context(), child.Run.ID, child.Run.Revision, "denied during physical callback")
 		if !errors.Is(cancelErr, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("Agent self-Cancel escaped its Grant: %v", cancelErr)
-		}
-		bound, err := rt.WithExecution(lease)
-		if err != nil {
-			t.Fatal(err)
 		}
 		if err = bound.RequireExecution(t.Context(), child.Run.ID); err != nil {
 			t.Fatalf("no-effect Cancel secretly revoked original Agent Execution Epoch: %v", err)

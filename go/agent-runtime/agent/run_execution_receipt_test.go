@@ -159,7 +159,7 @@ func nativePendingToolReceipt(t *testing.T, parented bool) {
 		t.Fatalf("Pending Tool was reexecuted: effects=%d err=%v", effects, e)
 	}
 	grant, e := rt.LookupChildExecution(t.Context(), first.Run.ID)
-	if e != nil || grant.IsOwned() == parented {
+	if e != nil || !grant.IsOwned() {
 		t.Fatalf("wrong original Grant: %v err=%v", grant, e)
 	}
 	if _, e = runner.ReconcileToolOutcome(t.Context(), first.Run.ID, first.Run.Revision, "late-call"); !errors.Is(e, agent.ErrToolOutcomeUnknown) || effects != 1 {
@@ -172,8 +172,8 @@ func nativePendingToolReceipt(t *testing.T, parented bool) {
 		if retained, e := rt.LookupChildExecution(t.Context(), first.Run.ID); e != nil || retained != grant {
 			t.Fatalf("unknown Tool changed original Grant: %v %v", retained, e)
 		}
-		if e = rt.ReleaseExecution(t.Context(), lease); e != nil {
-			t.Fatal(e)
+		if e = rt.ReleaseExecution(t.Context(), lease); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+			t.Fatalf("original unknown effect allowed standalone lease release: %v", e)
 		}
 		return
 	}

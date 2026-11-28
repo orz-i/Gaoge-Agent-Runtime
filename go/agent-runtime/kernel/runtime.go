@@ -266,7 +266,7 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 		return Snapshot{}, err
 	}
 	if mutation.Ledger != nil {
-		if (runtime.execution == nil && (current.Run.ParentRunID == "" || runtime.physicalGrant == nil || runtime.physicalGrant.IsOwned())) || evidence {
+		if runtime.execution == nil || evidence {
 			return Snapshot{}, ErrExecutionRequired
 		}
 		if _, ok := runtime.store.(budget.LedgerStore); !ok {

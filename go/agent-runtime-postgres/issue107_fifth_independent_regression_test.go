@@ -56,7 +56,7 @@ func TestAuditIssue107RealPostgresBeginOnAlreadyCancelledChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	child, err := original.Create(t.Context(), kernel.CreateRequest{
-		ID: "child", Kind: "agent", ParentRunID: parent.Run.ID, Actor: actor, Thread: thread,
+		ID: "child", Kind: "agent", ExecutionRequired: true, ParentRunID: parent.Run.ID, Actor: actor, Thread: thread,
 		Goal: "child already cancelling", State: []byte(`{}`),
 	})
 	if err != nil {

@@ -42,7 +42,7 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 		snapshot.Run.ID != grant.ChildRunID || snapshot.Run.Revision < grant.ExpectedRevision {
 		return false
 	}
-	if snapshot.Run.Kind != "agent" || (!grant.IsOwned() && snapshot.Run.ParentRunID == "") {
+	if snapshot.Run.Kind != "agent" || !grant.IsOwned() {
 		return false
 	}
 	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision, "agent_physical_settled", grant.ID, snapshot.State, snapshot)

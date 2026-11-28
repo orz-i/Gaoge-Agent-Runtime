@@ -93,11 +93,6 @@ func (store *KernelStore) BeginPhysicalExecution(ctx context.Context, admission 
 		if e != nil {
 			return e
 		}
-		if !grant.IsOwned() {
-			if e = pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
-				return e
-			}
-		}
 		if source.Run.Kind != snapshot.Run.Kind || source.Run.ParentRunID != snapshot.Run.ParentRunID ||
 			source.Run.LogicalParentRunID != snapshot.Run.LogicalParentRunID || source.Run.Actor != snapshot.Run.Actor || source.Run.Thread != snapshot.Run.Thread {
 			return kernel.ErrExecutionConflict
@@ -133,11 +128,7 @@ func (store *KernelStore) BeginPhysicalExecution(ctx context.Context, admission 
 			}
 		} else {
 			var active int64
-			query := pgActiveEffects(tx).Where("child_run_id = ?", grant.ChildRunID)
-			if grant.IsOwned() {
-				query = pgActiveEffects(tx).Where(activeEffectScope, grant.ChildRunID, grant.ChildRunID)
-			}
-			if e = query.Count(&active).Error; e != nil {
+			if e = pgActiveEffects(tx).Where(activeEffectScope, grant.ChildRunID, grant.ChildRunID).Count(&active).Error; e != nil {
 				return translateKernelError(e)
 			}
 			v, e = kernel.ResolvePhysicalAdmission(snapshot, pgManagedLease(current), now, current.ExecutionQuarantineRevision != 0, active != 0, admission)
@@ -147,11 +138,6 @@ func (store *KernelStore) BeginPhysicalExecution(ctx context.Context, admission 
 		}
 		if e = pgActivateEffect(tx, v.Grant, append(ancestors, v.Grant.ChildRunID)); e != nil {
 			return e
-		}
-		if !v.Grant.IsOwned() {
-			result = v
-			readyToCommit = true
-			return nil
 		}
 		entryEpoch, e := kernel.PrepareOwnedEntryEpoch(v.Grant, current.ExecutionEpoch, current.ExecutionPhysicalEpoch)
 		if e != nil {
@@ -324,11 +310,6 @@ func (store *KernelStore) RecordPhysicalCallbackReturn(ctx context.Context, g ke
 		if e != nil {
 			return e
 		}
-		if !g.IsOwned() {
-			if e = pgNativeEntryGate(tx, g.ChildRunID); e != nil {
-				return e
-			}
-		}
 		row, e := pgLoadPhysicalGrant(tx, g.ChildRunID, g.ID)
 		if errors.Is(e, kernel.ErrNotFound) {
 			return kernel.ErrExecutionConflict
@@ -352,7 +333,7 @@ func (store *KernelStore) RecordPhysicalCallbackReturn(ctx context.Context, g ke
 		if result.RowsAffected != 1 {
 			return kernel.ErrExecutionConflict
 		}
-		if g.IsOwned() && current.ExecutionPhysicalEpoch < g.ExecutionEpoch {
+		if current.ExecutionPhysicalEpoch < g.ExecutionEpoch {
 			return pgAdvanceOwnedEntryEpoch(tx, g)
 		}
 		return nil

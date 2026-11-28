@@ -50,11 +50,6 @@ func (s *Store) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdm
 	var v kernel.PhysicalAdmissionResult
 	var next kernel.ManagedTransfer
 	var old memoryEffect
-	if !g.IsOwned() {
-		if e = s.nativeEntryGateLocked(g.ChildRunID); e != nil {
-			return zero, e
-		}
-	}
 	if p.IsManagedRecovery() {
 		var found bool
 		old, found = s.ownedGrantLocked(g.ChildRunID)
@@ -65,37 +60,25 @@ func (s *Store) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdm
 		v, next, e = kernel.ResolveManagedPhysicalAdmission(ctx, t, p, current, persisted, old.grant, s.managedAuthority, native.physicalEpoch, s.currentExecutionTime(), s.ledgers)
 	} else {
 		hasGrants := len(s.effectOwners[g.ChildRunID]) != 0
-		if !g.IsOwned() {
-			hasGrants = false
-			for id := range s.effectOwners[g.ChildRunID] {
-				previous, ok := s.activeEffect(id)
-				if !ok || previous.grant.ChildRunID == g.ChildRunID {
-					hasGrants = true
-					break
-				}
-			}
-		}
 		v, e = kernel.ResolvePhysicalAdmission(current, persisted, s.currentExecutionTime(), native.quarantineRev != 0, hasGrants, p)
 	}
 	if e != nil {
 		return zero, e
 	}
 	g = v.Grant
-	if g.IsOwned() {
-		entryEpoch, e := kernel.PrepareOwnedEntryEpoch(g, native.epoch, native.physicalEpoch)
-		if e != nil {
-			return zero, e
-		}
-		if p.IsManagedRecovery() {
-			s.consumeEffectLocked(old, nil)
-			s.saveManagedLocked(next)
-		}
-		if p.AcquiresLease() {
-			native.epoch, native.lease = v.Lease.Epoch, v.Lease
-		}
-		native.physicalEpoch = entryEpoch
-		s.setExecutionLocked(g.ChildRunID, native)
+	entryEpoch, e := kernel.PrepareOwnedEntryEpoch(g, native.epoch, native.physicalEpoch)
+	if e != nil {
+		return zero, e
 	}
+	if p.IsManagedRecovery() {
+		s.consumeEffectLocked(old, nil)
+		s.saveManagedLocked(next)
+	}
+	if p.AcquiresLease() {
+		native.epoch, native.lease = v.Lease.Epoch, v.Lease
+	}
+	native.physicalEpoch = entryEpoch
+	s.setExecutionLocked(g.ChildRunID, native)
 	ancestors = append(ancestors, g.ChildRunID)
 	s.effects[g.ID] = memoryEffect{grant: g, ancestors: ancestors}
 	for _, id := range ancestors {
@@ -213,12 +196,8 @@ func (s *Store) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.Child
 	if err := s.validateEffectOwnersLocked(original); err != nil {
 		return err
 	}
-	if g.IsOwned() {
-		if native.epoch != g.ExecutionEpoch {
-			return kernel.ErrExecutionConflict
-		}
-	} else if err := s.nativeEntryGateLocked(g.ChildRunID); err != nil {
-		return err
+	if native.epoch != g.ExecutionEpoch {
+		return kernel.ErrExecutionConflict
 	}
 
 	completion, write, err := kernel.ReducePhysicalCallbackReturn(g, current, native.lease, rev, o, p, original.completion, 0, native.physicalEpoch)
@@ -227,10 +206,8 @@ func (s *Store) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.Child
 	}
 	original.completion = completion
 	s.effects[g.ID] = original
-	if g.IsOwned() {
-		native.physicalEpoch = g.ExecutionEpoch
-		s.setExecutionLocked(g.ChildRunID, native)
-	}
+	native.physicalEpoch = g.ExecutionEpoch
+	s.setExecutionLocked(g.ChildRunID, native)
 	return nil
 }
 func (s *Store) LookupPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
@@ -242,22 +219,9 @@ func (s *Store) LookupPhysicalCallbackReturn(ctx context.Context, g kernel.Child
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var original memoryEffect
-	if g.IsOwned() {
-		var err error
-		original, err = s.loadOwnedPhysicalGrantLocked(g)
-		if err != nil {
-			return kernel.PhysicalCallbackCompletion{}, err
-		}
-	} else {
-		var ok bool
-		original, ok = s.activeEffect(g.ID)
-		if !ok {
-			return kernel.PhysicalCallbackCompletion{}, kernel.ErrNotFound
-		}
-		if original.grant != g {
-			return kernel.PhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
-		}
+	original, err := s.loadOwnedPhysicalGrantLocked(g)
+	if err != nil {
+		return kernel.PhysicalCallbackCompletion{}, err
 	}
 	if _, exists := s.runs[g.ChildRunID]; !exists {
 		return kernel.PhysicalCallbackCompletion{}, kernel.ErrExecutionConflict

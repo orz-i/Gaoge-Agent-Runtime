@@ -31,6 +31,7 @@ func TestIssue107SQLiteGrantSurvivesReopenUntilOriginalSettlement(t *testing.T) 
 	}
 	childReq := sampleCreate("child")
 	childReq.ParentRunID = parent.Run.ID
+	childReq.ExecutionRequired = true
 	child, err := rt.Create(t.Context(), childReq)
 	if err != nil {
 		t.Fatal(err)

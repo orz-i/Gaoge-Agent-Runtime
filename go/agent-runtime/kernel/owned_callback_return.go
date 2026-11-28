@@ -196,27 +196,25 @@ func ordinaryOwnedOperation(op string) bool {
 }
 
 func (p PhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o PhysicalCallbackOutcome) bool {
-	if g.ID == "" || g.ChildRunID != s.Run.ID || s.Run.Kind != "agent" || s.Run.Revision < g.ExpectedRevision {
+	if !g.IsOwned() || g.ID == "" || g.ChildRunID != s.Run.ID || s.Run.Kind != "agent" || s.Run.Revision < g.ExpectedRevision {
 		return false
 	}
 	if o.ControlCustody == OwnedCustodyNotEntered {
-		return g.IsOwned() && ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" &&
+		return ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" &&
 			s.Run.Revision == g.ExpectedRevision && p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_not_entered", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
 	}
 	// A borrowed operation still requires its exact complete return;
 	// it has no lease ownership or deferred-control custody to transfer.
 	if s.Run.ParentRunID != "" {
-		if !o.HostCompleted || o.ControlCustody != "" || o.ToolReturns != "" || (!g.IsOwned() && o.LeaseOwned) {
+		if !o.HostCompleted || o.ControlCustody != "" || o.ToolReturns != "" {
 			return false
 		}
-	} else if g.IsOwned() {
+	} else {
 		if !o.ControlCustody.Valid() || !o.ToolReturns.Valid() ||
 			(o.ToolReturns != "" && (!o.HostCompleted || o.ControlCustody == OwnedCustodyPrepared)) ||
 			(o.ControlCustody == OwnedCustodyPrepared && g.AdmissionOperation != "prepare") {
 			return false
 		}
-	} else if s.Run.ParentRunID == "" || o != (PhysicalCallbackOutcome{HostCompleted: true}) {
-		return false
 	}
 	return p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_physical_callback_return", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
 }

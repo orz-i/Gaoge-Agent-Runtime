@@ -36,7 +36,7 @@ func runRetirementSuccessorClosure(t *testing.T, factory func(*testing.T) Manage
 			t.Fatal(err)
 		}
 	case "descendant-grant":
-		child, err := f.rt.Create(t.Context(), kernel.CreateRequest{ID: "successor-child", Kind: "agent", ParentRunID: f.source.Run.ID,
+		child, err := f.rt.Create(t.Context(), kernel.CreateRequest{ID: "successor-child", Kind: "agent", ExecutionRequired: true, ParentRunID: f.source.Run.ID,
 			Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, Goal: "new child", State: json.RawMessage(`{}`)})
 		if err != nil {
 			t.Fatal(err)

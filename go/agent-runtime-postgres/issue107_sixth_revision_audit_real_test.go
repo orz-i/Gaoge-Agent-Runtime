@@ -51,7 +51,7 @@ func TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision(t *test
 		t.Fatal(err)
 	}
 	child, err := rt.Create(t.Context(), kernel.CreateRequest{
-		ID: "child", Kind: "agent", ParentRunID: parent.Run.ID, Actor: actor, Thread: thread,
+		ID: "child", Kind: "agent", ExecutionRequired: true, ParentRunID: parent.Run.ID, Actor: actor, Thread: thread,
 		Goal: "child with pending effect at revision R", State: []byte(`{}`),
 	})
 	if err != nil {

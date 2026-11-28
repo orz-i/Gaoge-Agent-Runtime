@@ -50,39 +50,27 @@ func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExec
 	if !permit.Matches(grant, child) {
 		return kernel.ErrExecutionConflict
 	}
-	if !grant.IsOwned() {
-		completion, e := loadPhysicalCallbackReturn(ctx, tx, grant)
-		if e != nil || kernel.ValidatePhysicalRetirement(grant, child, completion, permit) != nil {
-			if e != nil && !errors.Is(e, kernel.ErrNotFound) {
-				return e
-			}
-			return kernel.ErrExecutionConflict
-		}
+	if e := loadOwnedPhysicalGrant(ctx, tx, grant); e != nil {
+		return e
 	}
-	var receipt string
-	if grant.IsOwned() {
-		if e := loadOwnedPhysicalGrant(ctx, tx, grant); e != nil {
-			return e
-		}
-		native, quarantine, e := sqliteManagedLease(ctx, tx, grant.ChildRunID)
-		if e != nil {
-			return e
-		}
-		var active int
-		if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_effects WHERE start_revision>0 AND "+activeEffectScope+"", grant.ChildRunID, grant.ChildRunID).Scan(&active); e != nil {
-			return e
-		}
-		var physicalEpoch uint64
-		if e = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", grant.ChildRunID).Scan(&physicalEpoch); e != nil {
-			return e
-		}
-		if active != 1 || native.Epoch != grant.ExecutionEpoch || physicalEpoch != grant.ExecutionEpoch || quarantine != 0 {
-			return kernel.ErrExecutionConflict
-		}
-		receipt, e = sqliteBuildOwnedRetirement(ctx, tx, grant, child, native, permit)
-		if e != nil {
-			return e
-		}
+	native, quarantine, e := sqliteManagedLease(ctx, tx, grant.ChildRunID)
+	if e != nil {
+		return e
+	}
+	var active int
+	if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_effects WHERE start_revision>0 AND "+activeEffectScope+"", grant.ChildRunID, grant.ChildRunID).Scan(&active); e != nil {
+		return e
+	}
+	var physicalEpoch uint64
+	if e = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", grant.ChildRunID).Scan(&physicalEpoch); e != nil {
+		return e
+	}
+	if active != 1 || native.Epoch != grant.ExecutionEpoch || physicalEpoch != grant.ExecutionEpoch || quarantine != 0 {
+		return kernel.ErrExecutionConflict
+	}
+	receipt, e := sqliteBuildOwnedRetirement(ctx, tx, grant, child, native, permit)
+	if e != nil {
+		return e
 	}
 	if err = sqliteConsumePhysicalGrant(ctx, tx, grant, receipt); err != nil {
 		return err
@@ -141,9 +129,6 @@ func ownedGrantBlocks(ctx context.Context, q schemaQuery, runID string, lease *k
 	if err != nil {
 		return err
 	}
-	if !g.IsOwned() {
-		return nil
-	}
 	if deny {
 		return kernel.ErrChildExecutionBusy
 	}
@@ -200,11 +185,6 @@ func (s *Store) BeginPhysicalExecution(ctx context.Context, permit kernel.Physic
 	if e = sqliteReserveGrantIdentity(ctx, tx, g); e != nil {
 		return zero, e
 	}
-	if !g.IsOwned() {
-		if e = sqliteNativeEntryGate(ctx, tx, g.ChildRunID); e != nil {
-			return zero, e
-		}
-	}
 	native, quarantine, e := sqliteManagedLease(ctx, tx, g.ChildRunID)
 	if e != nil {
 		return zero, e
@@ -244,13 +224,7 @@ func (s *Store) BeginPhysicalExecution(ctx context.Context, permit kernel.Physic
 		}
 	} else {
 		var count int
-		query := "SELECT count(*) FROM runtime_effects WHERE start_revision>0 AND child_run_id=?"
-		args := []any{g.ChildRunID}
-		if g.IsOwned() {
-			query = "SELECT count(*) FROM runtime_effects WHERE start_revision>0 AND " + activeEffectScope
-			args = append(args, g.ChildRunID)
-		}
-		if e = tx.QueryRowContext(ctx, query, args...).Scan(&count); e != nil {
+		if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_effects WHERE start_revision>0 AND "+activeEffectScope, g.ChildRunID, g.ChildRunID).Scan(&count); e != nil {
 			return zero, e
 		}
 		v, e = kernel.ResolvePhysicalAdmission(current, native, time.UnixMilli(now).UTC(), quarantine != 0, count != 0, permit)
@@ -261,9 +235,6 @@ func (s *Store) BeginPhysicalExecution(ctx context.Context, permit kernel.Physic
 	g = v.Grant
 	if e = sqliteActivateEffect(ctx, tx, g, append(ancestors, g.ChildRunID)); e != nil {
 		return zero, e
-	}
-	if !g.IsOwned() {
-		return v, permit.CommitOutcome(conflictOrDatabaseError(tx.Commit()))
 	}
 	physicalEpoch, e = kernel.PrepareOwnedEntryEpoch(g, native.Epoch, physicalEpoch)
 	if e != nil {

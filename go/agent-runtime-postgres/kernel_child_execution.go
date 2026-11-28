@@ -63,23 +63,19 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 		if e != nil {
 			return e
 		}
-		if pgPhysicalGrant(row) != grant || (!grant.IsOwned() && kernel.ValidatePhysicalRetirement(grant, snapshot, pgCallbackCompletion(row), permit) != nil) {
+		if pgPhysicalGrant(row) != grant {
 			return kernel.ErrExecutionConflict
 		}
-		var receipt string
-
-		if grant.IsOwned() {
-			var active int64
-			if e := pgActiveEffects(tx).Where(activeEffectScope, grant.ChildRunID, grant.ChildRunID).Count(&active).Error; e != nil {
-				return translateKernelError(e)
-			}
-			if active != 1 || child.ExecutionEpoch != grant.ExecutionEpoch || child.ExecutionPhysicalEpoch != grant.ExecutionEpoch || child.ExecutionQuarantineRevision != 0 {
-				return kernel.ErrExecutionConflict
-			}
-			receipt, e = pgBuildOwnedRetirement(tx, row, grant, snapshot, pgManagedLease(child), permit)
-			if e != nil {
-				return e
-			}
+		var active int64
+		if e := pgActiveEffects(tx).Where(activeEffectScope, grant.ChildRunID, grant.ChildRunID).Count(&active).Error; e != nil {
+			return translateKernelError(e)
+		}
+		if active != 1 || child.ExecutionEpoch != grant.ExecutionEpoch || child.ExecutionPhysicalEpoch != grant.ExecutionEpoch || child.ExecutionQuarantineRevision != 0 {
+			return kernel.ErrExecutionConflict
+		}
+		receipt, e := pgBuildOwnedRetirement(tx, row, grant, snapshot, pgManagedLease(child), permit)
+		if e != nil {
+			return e
 		}
 		return pgConsumePhysicalGrant(tx, grant, receipt)
 	})

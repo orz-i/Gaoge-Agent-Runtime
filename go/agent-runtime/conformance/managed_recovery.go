@@ -336,7 +336,7 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				if e != nil {
 					t.Fatal(e)
 				}
-				req := kernel.CreateRequest{ID: "competing-logical-child", LogicalParentRunID: f.source.Run.ID, Kind: "agent", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, Goal: "competing child", State: json.RawMessage("{}")}
+				req := kernel.CreateRequest{ID: "competing-logical-child", LogicalParentRunID: f.source.Run.ID, Kind: "agent", ExecutionRequired: true, Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, Goal: "competing child", State: json.RawMessage("{}")}
 				child, e := peer.Create(t.Context(), req)
 				if e != nil {
 					t.Fatal(e)
@@ -819,7 +819,7 @@ func runManagedStoreAncestorGate(t *testing.T, factory func(*testing.T) ManagedR
 	for _, winner := range []string{"admission", "child"} {
 		t.Run(winner, func(t *testing.T) {
 			f := managedStoreSetup(t, factory)
-			child, e := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: "managed-child", Kind: "agent", Goal: "original managed child", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, ParentRunID: f.source.Run.ID, State: json.RawMessage(`{"child":"original"}`)})
+			child, e := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: "managed-child", Kind: "agent", ExecutionRequired: true, Goal: "original managed child", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, ParentRunID: f.source.Run.ID, State: json.RawMessage(`{"child":"original"}`)})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -833,7 +833,7 @@ func runManagedStoreAncestorGate(t *testing.T, factory func(*testing.T) ManagedR
 			managedStoreSame(t, f, candidate)
 			q := managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "owner", LeaseID: "lease", GrantID: "successor", LeaseDuration: time.Minute, Selection: selection}
 			if winner == "child" {
-				if _, e = AdmitChildFixture(t.Context(), childRuntime, child.Run.ID, child.Run.Revision); e != nil {
+				if grant, e = AdmitChildFixture(t.Context(), childRuntime, child.Run.ID, child.Run.Revision); e != nil {
 					t.Fatal(e)
 				}
 				if _, e = enableManagedRecovery(t.Context(), f.store, q); !errors.Is(e, kernel.ErrExecutionConflict) {

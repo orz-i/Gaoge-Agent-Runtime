@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -18,9 +19,20 @@ func AdmitChildFixture(ctx context.Context, rt *kernel.Runtime, id string, rev u
 		return kernel.ChildExecutionGrant{}, err
 	}
 	source.Run.Revision = rev
+	lease, bound := rt.BoundExecutionLease()
 	q := kernel.ExecutionAcquireRequest{}
-	proof := featurecontrol.Seal(id, rev, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), source.State, source)
-	_, result, err := rt.AdmitPhysicalExecution(ctx, source, q, proof, "start", "")
+	if !bound {
+		q = kernel.ExecutionAcquireRequest{RunID: id, OwnerID: "child-fixture", LeaseDuration: time.Minute}
+	}
+	operation := "start"
+	if source.Run.Status == kernel.RunStatusWaitingInput {
+		operation = "approval"
+	}
+	proof := featurecontrol.Seal(id, rev, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, lease, operation, ""), source.State, source)
+	scoped, result, err := rt.AdmitPhysicalExecution(ctx, source, q, proof, operation, "")
+	if err == nil {
+		_, err = scoped.CheckOwnedPhysicalEntry(ctx, source)
+	}
 	return result.Grant, err
 }
 
@@ -39,7 +51,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
 		newRun := func(id, parent string) kernel.Snapshot {
 			t.Helper()
-			s, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", ParentRunID: parent,
+			s, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", ParentRunID: parent, ExecutionRequired: parent != "",
 				Actor: actor, Thread: thread, Goal: "shared-physical-authority", RequestID: id, State: []byte(`{}`)})
 			if err != nil {
 				t.Fatal(err)
@@ -49,7 +61,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		root := newRun("root", "")
 		middle := newRun("middle", root.Run.ID)
 		child := newRun("child", middle.Run.ID)
-		q := kernel.ExecutionAcquireRequest{}
+		q := kernel.ExecutionAcquireRequest{RunID: child.Run.ID, OwnerID: "child-fixture", LeaseDuration: time.Minute}
 		admissionProof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), child.State, child)
 		if _, _, e := rt.AdmitPhysicalExecution(t.Context(), child, q, admissionProof, "resume", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("child admission accepted proof for a different operation: %v", e)
@@ -91,7 +103,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 			t.Fatal(loadErr)
 		}
 		proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_physical_settled", grant.ID, latest.State, latest)
-		outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true}
+		outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
 		callback := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(latest, outcome), nil)
 		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, outcome, proof); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatal("settlement proof manufactured an original return", err)
@@ -101,7 +113,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 			t.Fatalf("trusted Agent post-callback settlement marker was rejected: %v", err)
 		}
 		returned, returnErr := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
-		if returnErr != nil || returned.GrantID != grant.ID || !returned.MatchesReturnSnapshot(latest) || returned.LeaseOwned || returned.ControlCustody != "" {
+		if returnErr != nil || returned.GrantID != grant.ID || !returned.MatchesReturnSnapshot(latest) || !returned.LeaseOwned || returned.ControlCustody != "" {
 			t.Fatalf("original child return fact: %+v %v", returned, returnErr)
 		}
 		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, outcome, callback); err != nil {

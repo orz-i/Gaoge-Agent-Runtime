@@ -26,7 +26,7 @@ func ValidatePhysicalRetirement(g ChildExecutionGrant, current Snapshot, complet
 			return nil
 		}
 	} else if completion.HostCompleted && completion.ReturnRevision <= current.Run.Revision &&
-		((g.IsOwned() && current.Run.ParentRunID == "") || completion.MatchesReturnSnapshot(current)) {
+		(current.Run.ParentRunID == "" || completion.MatchesReturnSnapshot(current)) {
 		return nil
 	}
 	return ErrExecutionConflict
@@ -48,36 +48,29 @@ func ValidateOwnedPhysicalRecoveryRequest(g ChildExecutionGrant, revision uint64
 func ResolvePhysicalAdmission(current Snapshot, persisted ExecutionLease, now time.Time, quarantined, hasGrants bool, permit PhysicalAdmission) (PhysicalAdmissionResult, error) {
 	var zero PhysicalAdmissionResult
 	g, claimed := permit.candidate.Grant, permit.candidate.Lease
-	if !g.IsOwned() {
-		if current.Run.Kind != "agent" || persisted.Epoch != 0 {
-			return zero, ErrExecutionRequired
+	if permit.attempt == ([32]byte{}) {
+		return zero, ErrExecutionConflict
+	}
+	if permit.AcquiresLease() {
+		if current.Run.Revision != g.ExpectedRevision {
+			return zero, ErrConflict
 		}
-		claimed, persisted = ExecutionLease{}, ExecutionLease{}
-	} else {
-		if permit.attempt == ([32]byte{}) {
-			return zero, ErrExecutionConflict
+		if hasGrants {
+			return zero, ErrChildExecutionBusy
 		}
-		if permit.AcquiresLease() {
-			if current.Run.Revision != g.ExpectedRevision {
-				return zero, ErrConflict
-			}
-			if hasGrants {
-				return zero, ErrChildExecutionBusy
-			}
-			lease, e := PlanExecutionAcquire(current.Run, persisted, now, permit.acquire, claimed.LeaseID, quarantined)
-			if e != nil {
-				return zero, e
-			}
-			claimed, persisted = lease, lease
-			g.ExecutionEpoch = lease.Epoch
-			g.AdmissionSourceHash = ownedAdmissionAttemptHash(current, lease, g.AdmissionOperation, g.ID, permit.attempt)
+		lease, e := PlanExecutionAcquire(current.Run, persisted, now, permit.acquire, claimed.LeaseID, quarantined)
+		if e != nil {
+			return zero, e
 		}
-		if err := ValidatePhysicalAdmissionRequest(g, claimed); err != nil {
-			return zero, err
-		}
-		if !g.MatchesExecution(persisted) || !now.Before(persisted.ExpiresAt) {
-			return zero, ErrExecutionConflict
-		}
+		claimed, persisted = lease, lease
+		g.ExecutionEpoch = lease.Epoch
+		g.AdmissionSourceHash = ownedAdmissionAttemptHash(current, lease, g.AdmissionOperation, g.ID, permit.attempt)
+	}
+	if err := ValidatePhysicalAdmissionRequest(g, claimed); err != nil {
+		return zero, err
+	}
+	if !g.MatchesExecution(persisted) || !now.Before(persisted.ExpiresAt) {
+		return zero, ErrExecutionConflict
 	}
 	if !permit.Matches(g, current, claimed) {
 		return zero, ErrExecutionConflict
@@ -99,14 +92,11 @@ func ValidatePhysicalCompletion(g ChildExecutionGrant, c PhysicalCallbackComplet
 	if c == (PhysicalCallbackCompletion{}) {
 		return ErrNotFound
 	}
-	if !g.Identity().Valid() || c.GrantID != g.ID || c.ReturnRevision < g.ExpectedRevision || c.ReturnRevision == 0 ||
+	if !g.IsOwned() || !g.Identity().Valid() || c.GrantID != g.ID || c.ReturnRevision < g.ExpectedRevision || c.ReturnRevision == 0 ||
 		!validToolReceiptDigest(c.ReturnSourceHash) || !c.ControlCustody.Valid() || !c.ToolReturns.Valid() ||
 		(c.NotEntered() && (c.HostCompleted || c.ToolReturns != "" || c.ReturnRevision != g.ExpectedRevision || !ordinaryOwnedOperation(g.AdmissionOperation))) ||
 		(c.ControlCustody == OwnedCustodyPrepared && g.AdmissionOperation != "prepare") ||
 		(c.ToolReturns != "" && (!c.HostCompleted || c.ControlCustody == OwnedCustodyPrepared)) {
-		return ErrExecutionConflict
-	}
-	if !g.IsOwned() && (!c.HostCompleted || c.LeaseOwned || c.ControlCustody != "" || c.ToolReturns != "") {
 		return ErrExecutionConflict
 	}
 	return nil
@@ -118,12 +108,12 @@ func ValidatePhysicalCompletion(g ChildExecutionGrant, c PhysicalCallbackComplet
 // write. Expiry is not a reason to discard an original callback return.
 func ReducePhysicalCallbackReturn(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, revision uint64, outcome PhysicalCallbackOutcome, permit PhysicalCallbackReturn, existing PhysicalCallbackCompletion, settled, physicalEpoch uint64) (PhysicalCallbackCompletion, bool, error) {
 	if current.Run.Revision != revision || !permit.Matches(g, current, outcome) || settled != 0 ||
-		(g.IsOwned() && (!g.MatchesExecution(persisted) || physicalEpoch > g.ExecutionEpoch || (physicalEpoch != g.ExecutionEpoch && outcome.ControlCustody != OwnedCustodyNotEntered))) {
+		!g.MatchesExecution(persisted) || physicalEpoch > g.ExecutionEpoch || (physicalEpoch != g.ExecutionEpoch && outcome.ControlCustody != OwnedCustodyNotEntered) {
 		return PhysicalCallbackCompletion{}, false, ErrExecutionConflict
 	}
 	next := permit.Completion(g, current, outcome)
 	if existing != (PhysicalCallbackCompletion{}) {
-		if (g.IsOwned() && physicalEpoch != g.ExecutionEpoch) || ValidatePhysicalCompletion(g, existing) != nil || existing != next {
+		if physicalEpoch != g.ExecutionEpoch || ValidatePhysicalCompletion(g, existing) != nil || existing != next {
 			return PhysicalCallbackCompletion{}, false, ErrExecutionConflict
 		}
 		return existing, false, nil

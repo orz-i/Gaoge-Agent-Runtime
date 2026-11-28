@@ -15,7 +15,7 @@ import (
 
 func newIssue107Run(t *testing.T, rt *kernel.Runtime, id, parent string) kernel.Snapshot {
 	t.Helper()
-	snapshot, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", ParentRunID: parent, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, RequestID: id, Goal: "original child authority", State: []byte(`{}`)})
+	snapshot, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", ExecutionRequired: true, ParentRunID: parent, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, RequestID: id, Goal: "original child authority", State: []byte(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 		t.Fatalf("unsafe original pre-callback release accepted: %v", err)
 	}
 	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", grant.ID, child.State, child)
-	if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); err != nil {
+	if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {
@@ -67,7 +67,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if _, err = conformance.AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("terminated ancestor admitted child: %v", err)
 	}
-	if _, err = rt.Create(t.Context(), kernel.CreateRequest{ID: "late-child", Kind: "agent", ParentRunID: root.Run.ID, Actor: root.Run.Actor, Thread: root.Run.Thread, Goal: "late", State: []byte(`{}`)}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = rt.Create(t.Context(), kernel.CreateRequest{ID: "late-child", Kind: "agent", ExecutionRequired: true, ParentRunID: root.Run.ID, Actor: root.Run.Actor, Thread: root.Run.Thread, Goal: "late", State: []byte(`{}`)}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("late child created after parent Cancel: %v", err)
 	}
 }
@@ -106,7 +106,7 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 					t.Fatalf("child won but parent Cancel=%v", cancelErr)
 				}
 				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", grant.ID, child.State, child)
-				if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); err != nil {
+				if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); err != nil {
 					t.Fatal(err)
 				}
 				if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {

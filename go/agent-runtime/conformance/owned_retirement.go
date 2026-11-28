@@ -243,7 +243,7 @@ func runRetirementRejectedFinish(t *testing.T, factory func(*testing.T) ManagedR
 	case "wrong-revision":
 		g.ExpectedRevision++
 	case "descendant":
-		child, e := f.rt.Create(t.Context(), kernel.CreateRequest{ID: "retirement-child", Kind: "agent", ParentRunID: f.source.Run.ID, Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, Goal: "original child", State: json.RawMessage(`{}`)})
+		child, e := f.rt.Create(t.Context(), kernel.CreateRequest{ID: "retirement-child", Kind: "agent", ExecutionRequired: true, ParentRunID: f.source.Run.ID, Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, Goal: "original child", State: json.RawMessage(`{}`)})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -479,7 +479,7 @@ func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecovery
 	}
 	root := create(rootRT, "owned-root", "", "owned", true)
 	parent := create(childRT, "borrowed-parent", "", "borrowed", false)
-	child := create(childRT, "borrowed-child", parent.Run.ID, "borrowed", false)
+	child := create(childRT, "borrowed-child", parent.Run.ID, "borrowed", true)
 	lease, e := rootRT.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: root.Run.ID, OwnerID: "owner", LeaseDuration: time.Minute})
 	if e != nil {
 		t.Fatal(e)
@@ -529,7 +529,7 @@ func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecovery
 			t.Fatalf("loser left fence: %+v %v", g, e)
 		}
 	}
-	if winner.IsOwned() {
+	if winner.ChildRunID == root.Run.ID {
 		o := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
 		proof := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_physical_callback_return", winner.ID, kernel.PhysicalCallbackReturnPayload(root, o), nil)
 		if e = rootRT.RecordPhysicalCallbackReturn(ctx, winner, root.Run.Revision, o, proof); e != nil {
@@ -541,7 +541,7 @@ func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecovery
 		}
 	} else {
 		mark := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", winner.ID, child.State, child)
-		if e = childRT.RecordPhysicalCallbackReturn(ctx, winner, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", winner.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); e != nil {
+		if e = childRT.RecordPhysicalCallbackReturn(ctx, winner, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", winner.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); e != nil {
 			t.Fatal(e)
 		}
 		if e = childRT.FinishChildExecution(ctx, winner, mark); e != nil {
@@ -584,7 +584,7 @@ func runGrantIdentityRollback(t *testing.T, factory func(*testing.T) ManagedReco
 	}
 	create := func(id string) kernel.Snapshot {
 		t.Helper()
-		s, e := first.Create(ctx, kernel.CreateRequest{ID: id, ParentRunID: parent.Run.ID, Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "identity rollback", State: []byte("{}")})
+		s, e := first.Create(ctx, kernel.CreateRequest{ID: id, ParentRunID: parent.Run.ID, Kind: "agent", ExecutionRequired: true, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "identity rollback", State: []byte("{}")})
 		if e != nil {
 			t.Fatal(e)
 		}

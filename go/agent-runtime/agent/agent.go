@@ -921,7 +921,7 @@ func (runner *Runner) createPreparedRun(ctx context.Context, request StartReques
 	return runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		Budget:            enrollment,
-		ExecutionRequired: runner.runExecution != nil && (request.ParentRunID == "" || !runner.defaultRunOwner),
+		ExecutionRequired: true,
 		RequestID:         request.RequestID, ParentRunID: request.ParentRunID, LogicalParentRunID: request.LogicalParentRunID,
 		Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
 		Events: []kernel.EventDraft{{

@@ -193,7 +193,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				}
 				previous = competing
 			case "descendant-fence":
-				child, e := peer.Create(ctx, kernel.CreateRequest{ID: "atomic-child", Kind: "agent", ParentRunID: source.Run.ID, Actor: source.Run.Actor, Thread: source.Run.Thread, Goal: "descendant fence", State: []byte(`{}`)})
+				child, e := peer.Create(ctx, kernel.CreateRequest{ID: "atomic-child", Kind: "agent", ExecutionRequired: true, ParentRunID: source.Run.ID, Actor: source.Run.Actor, Thread: source.Run.Thread, Goal: "descendant fence", State: []byte(`{}`)})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -225,7 +225,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				}
 			}
 			if childGrant.ID != "" {
-				if e = peer.RecordPhysicalCallbackReturn(ctx, childGrant, childGrant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(childSource.Run.ID, childSource.Run.Revision, "agent_physical_callback_return", childGrant.ID, kernel.PhysicalCallbackReturnPayload(childSource, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); e != nil {
+				if e = peer.RecordPhysicalCallbackReturn(ctx, childGrant, childGrant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}, featurecontrol.Seal(childSource.Run.ID, childSource.Run.Revision, "agent_physical_callback_return", childGrant.ID, kernel.PhysicalCallbackReturnPayload(childSource, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}), nil)); e != nil {
 					t.Fatal(e)
 				}
 				if e = peer.FinishChildExecution(ctx, childGrant, childProof); e != nil {

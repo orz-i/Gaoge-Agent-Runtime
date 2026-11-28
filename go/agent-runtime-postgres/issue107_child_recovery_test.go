@@ -21,7 +21,7 @@ func TestIssue107PostgresChildGrantSurvivesNewStoreInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := rt.Create(t.Context(), kernel.CreateRequest{ID: "c", Kind: "agent", ParentRunID: parent.Run.ID,
+	child, err := rt.Create(t.Context(), kernel.CreateRequest{ID: "c", Kind: "agent", ExecutionRequired: true, ParentRunID: parent.Run.ID,
 		Actor: actor, Thread: thread, Goal: "child", State: []byte(`{}`)})
 	if err != nil {
 		t.Fatal(err)

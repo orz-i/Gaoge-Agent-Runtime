@@ -42,7 +42,7 @@ type ea1ChildControlStore struct {
 }
 
 func (s *ea1ChildControlStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
-	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+	if commitAuth.Lease != nil {
 		if s.fault != nil && s.failures == 0 && commitID == s.faultRun && commitMutation.Record.Run.ID == commitID &&
 			commitMutation.Record.Run.Status == kernel.RunStatusCompleted && commitMutation.Record.Result != nil &&
 			commitMutation.Record.Result.ContentType == "application/json" {
@@ -177,7 +177,7 @@ func (f *ea1ChildControlFixture) assertResolved(s kernel.Snapshot) {
 }
 func (f *ea1ChildControlFixture) scope() kernel.ChildExecutionGrant {
 	g, e := f.peer.LookupChildExecution(f.t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() != f.native || g.ExpectedRevision != f.waiting.Run.Revision || g.ChildRunID != f.request.ID {
+	if e != nil || !g.IsOwned() || g.ExpectedRevision != f.waiting.Run.Revision || g.ChildRunID != f.request.ID {
 		f.t.Fatalf("wrong actual child approval grant: %+v %v", g, e)
 	}
 	return g
@@ -195,7 +195,7 @@ func (f *ea1ChildControlFixture) fence() {
 		for _, status := range []kernel.RunStatus{kernel.RunStatusRunning, kernel.RunStatusFailed} {
 			_, e := f.peer.Apply(ctx, a.Run.ID, a.Run.Revision, kernel.Mutation{Status: status, State: a.State, Checkpoint: a.Checkpoint})
 			want := kernel.ErrChildExecutionBusy
-			if f.native && a.Run.ID == s.Run.ID {
+			if a.Run.ID == s.Run.ID {
 				want = kernel.ErrExecutionRequired
 			}
 			if !errors.Is(e, want) {
@@ -207,13 +207,11 @@ func (f *ea1ChildControlFixture) fence() {
 	if f.store.acquireCalls+f.store.releaseCalls != 0 {
 		t.Fatal("child approval used standalone lease operations")
 	}
-	if (f.native && (!g.MatchesExecution(f.store.acquired) || f.store.acquired.Epoch <= f.setupLease.Epoch)) || (!f.native && f.store.acquired != f.setupLease) {
+	if !g.MatchesExecution(f.store.acquired) || f.store.acquired.Epoch <= f.setupLease.Epoch {
 		t.Fatal("child approval lost its original atomic lease policy")
 	}
-	if f.native {
-		if e := f.peerStore.(kernel.ExecutionStore).CheckExecution(ctx, s.Run.ID, &f.store.acquired); !errors.Is(e, kernel.ErrExecutionRequired) {
-			t.Fatalf("waiting approval allowed native dispatch: %v", e)
-		}
+	if e := f.peerStore.(kernel.ExecutionStore).CheckExecution(ctx, s.Run.ID, &f.store.acquired); !errors.Is(e, kernel.ErrExecutionRequired) {
+		t.Fatalf("waiting approval allowed native dispatch: %v", e)
 	}
 	if len(f.physical.requests) != 1 || len(f.physical.toolRequests) != 0 {
 		t.Fatal("P1 already dispatched original Tool")

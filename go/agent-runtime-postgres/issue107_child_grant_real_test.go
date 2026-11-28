@@ -54,7 +54,7 @@ func TestIssue107RealPostgresChildGrantVsParentTermination(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child, err := one.Create(t.Context(), kernel.CreateRequest{ID: "child-" + name, ParentRunID: root.Run.ID, Kind: "agent",
+			child, err := one.Create(t.Context(), kernel.CreateRequest{ID: "child-" + name, ParentRunID: root.Run.ID, Kind: "agent", ExecutionRequired: true,
 				Actor: actor, Thread: thread, Goal: "effect", State: []byte(`{}`)})
 			if err != nil {
 				t.Fatal(err)

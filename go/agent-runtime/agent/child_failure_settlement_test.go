@@ -79,7 +79,7 @@ type childFailureStore struct {
 }
 
 func (s *childFailureStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
-	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+	if commitAuth.Lease != nil {
 		if commitMutation.Record.Run.Status == kernel.RunStatusFailed && s.fault == "failure-cas" {
 			return kernel.Snapshot{}, false, errChildFailureFixture
 		}
@@ -89,9 +89,6 @@ func (s *childFailureStore) Commit(commitCtx context.Context, commitID string, c
 }
 
 func (s *childFailureStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
-	if g.IsOwned() {
-		return s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
-	}
 	s.marks++
 	if s.fault == "mark" {
 		return errChildFailureFixture
@@ -129,7 +126,7 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 		{"unknown completion policy", "start", "completion", "agent.completion_validation_failed", false, 1, 0},
 		{"terminal CAS fails", "start", "failure-cas", "", false, 0, 0},
 		{"settlement marker fails", "start", "mark", "context.input_budget_exceeded", false, 0, 0},
-		{"settlement marker ACK lost", "start", "mark-ack", "context.input_budget_exceeded", false, 0, 0},
+		{"settlement marker ACK lost", "start", "mark-ack", "context.input_budget_exceeded", true, 0, 0},
 		{"retirement fails", "start", "finish", "context.input_budget_exceeded", false, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

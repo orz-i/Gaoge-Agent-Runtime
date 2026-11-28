@@ -130,11 +130,6 @@ func (s *Store) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.Child
 		return conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if !g.IsOwned() {
-		if err = sqliteNativeEntryGate(ctx, tx, g.ChildRunID); err != nil {
-			return err
-		}
-	}
 	original, err := loadPhysicalGrant(ctx, tx, g.ChildRunID, g.ID)
 	if err == nil && original != g {
 		return kernel.ErrExecutionConflict
@@ -176,7 +171,7 @@ func (s *Store) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.Child
 	if n != 1 {
 		return kernel.ErrExecutionConflict
 	}
-	if g.IsOwned() && physicalEpoch < g.ExecutionEpoch {
+	if physicalEpoch < g.ExecutionEpoch {
 		if err = advanceOwnedEntryEpoch(ctx, tx, g); err != nil {
 			return err
 		}

@@ -77,17 +77,7 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 	if err := store.validateEffectOwnersLocked(previous); err != nil {
 		return err
 	}
-	child, err := store.snapshotLocked(grant.ChildRunID)
-	if err != nil {
-		return err
-	}
-	if grant.IsOwned() {
-		return store.retireOwnedLocked(previous, permit)
-	} else if kernel.ValidatePhysicalRetirement(grant, child, previous.completion, permit) != nil {
-		return kernel.ErrExecutionConflict
-	}
-	store.consumeEffectLocked(previous, nil)
-	return nil
+	return store.retireOwnedLocked(previous, permit)
 }
 
 func (store *Store) LookupChildExecution(ctx context.Context, childID string) (kernel.ChildExecutionGrant, error) {

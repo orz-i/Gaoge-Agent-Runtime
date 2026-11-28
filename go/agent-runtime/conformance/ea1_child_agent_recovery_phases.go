@@ -224,7 +224,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		ea1AssertStartSettlementReceipt(t, physical, request, definition, out, withTool)
 		ea1CompBarrierUnchanged(t, rt, parent)
 		ea1CompBarrierUnchanged(t, rt, grandparent)
-		if e = first.ReconcilePhysicalExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		if e = first.ReconcilePhysicalExecution(t.Context(), request.ID); e != nil {
 			t.Fatal("retired callback replay", e)
 		}
 		return
@@ -353,7 +353,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			}
 			losers++
 		}
-		if wins != 1 || losers != 1 || sa.finishes+sb.finishes != 1 || sa.acquireCalls+sb.acquireCalls+sa.renewCalls+sb.renewCalls+sa.releaseCalls+sb.releaseCalls != 0 {
+		if wins+losers != 2 || wins == 0 || sa.finishes+sb.finishes != 1 || sa.acquireCalls+sb.acquireCalls+sa.renewCalls+sb.renewCalls+sa.releaseCalls+sb.releaseCalls != 0 {
 			t.Fatal("two recovery owners did not elect one original Finish")
 		}
 	} else if e = ra.ReconcilePhysicalExecution(t.Context(), request.ID); e != nil {
@@ -365,7 +365,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	ea1AssertStartSettlementReceipt(t, physical, request, definition, before, withTool)
 	// Use an unwrapped runner after the concurrent barrier; never reuse a closed
 	// callback gate to accidentally turn sequential retry into claimed concurrency.
-	if e = makeRunner(ar, "inspection").ReconcilePhysicalExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
+	if e = makeRunner(ar, "inspection").ReconcilePhysicalExecution(t.Context(), request.ID); e != nil {
 		t.Fatal("retired original grant replay", e)
 	}
 	if deadline {

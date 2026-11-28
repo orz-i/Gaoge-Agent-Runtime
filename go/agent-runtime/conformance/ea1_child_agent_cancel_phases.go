@@ -116,6 +116,9 @@ func (s *ea1ChildCancelStore) RecordPhysicalCallbackReturn(ctx context.Context, 
 	return e
 }
 func (s *ea1ChildCancelStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	if s.mode == "P4" {
+		return s.fault
+	}
 	e := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
@@ -286,14 +289,11 @@ func ea1ChildCancelUnknownWithModelReadDelay(
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() != native || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || f.store.acquireCalls+f.store.releaseCalls != 0 {
+	if e != nil || !g.IsOwned() || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || f.store.acquireCalls+f.store.releaseCalls != 0 {
 		t.Fatal("unknown original child scope missing", e)
 	}
 	{
-		wantApply, wantNative := 1, 0
-		if native {
-			wantApply, wantNative = 0, 1
-		}
+		wantApply, wantNative := 0, 1
 		if f.store.applyHits != wantApply || f.store.nativeHits != wantNative {
 			t.Fatal("receipt fault missed actual ordinary/native Store port")
 		}
@@ -399,7 +399,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() != native || g.ExpectedRevision != f.prepared.Run.Revision || f.store.acquireCalls+f.store.releaseCalls != 0 {
+	if e != nil || !g.IsOwned() || g.ExpectedRevision != f.prepared.Run.Revision || f.store.acquireCalls+f.store.releaseCalls != 0 {
 		t.Fatal("original child settlement scope absent", e)
 	}
 	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)
@@ -420,7 +420,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if _, lookupErr := ar.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(lookupErr, kernel.ErrNotFound) {
 			t.Fatal("original marker recovery did not retire scope", lookupErr)
 		}
-		if replayErr := f.runner(ar, "second-inspection", true).ReconcilePhysicalExecution(t.Context(), f.request.ID); !errors.Is(replayErr, kernel.ErrNotFound) {
+		if replayErr := f.runner(ar, "second-inspection", true).ReconcilePhysicalExecution(t.Context(), f.request.ID); replayErr != nil {
 			t.Fatal("original marker replayed", replayErr)
 		}
 		if tool {
