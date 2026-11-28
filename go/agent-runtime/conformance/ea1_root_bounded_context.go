@@ -22,7 +22,7 @@ func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store,
 		t.Run("P1/callback-completion-"+mode, func(t *testing.T) {
 			backing, peer := factory(t)
 			injected := errors.New("original pending intent CAS denied before commit")
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "agent.model_invocation.pending", injected: injected}
+			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "agent.model_invocation.pending", injected: injected}
 			rt := ea1StartRuntime(t, fault)
 			observer := ea1StartRuntime(t, peer)
 			request := ea1AdmissionRequest()

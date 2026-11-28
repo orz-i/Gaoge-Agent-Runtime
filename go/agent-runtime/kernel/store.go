@@ -63,6 +63,48 @@ type StoreMutation struct {
 	ManagedSafePoint ManagedSafePointProof
 }
 
+// CommitAuthority carries the original authority of one Run write. It is
+// transient, never a second persisted execution identity. The zero value
+// allows only the existing unclaimed/ancestor-fenced CAS.
+type CommitAuthority struct {
+	Lease    *ExecutionLease
+	Control  *ControlGuard
+	Recovery *ReceiptRecovery
+}
+type ReceiptRecovery struct {
+	Grant  ChildExecutionGrant
+	Permit OwnedPhysicalRecovery
+}
+
+func LeaseCommit(l ExecutionLease) CommitAuthority { return CommitAuthority{Lease: &l} }
+func ControlCommit(g ControlGuard) CommitAuthority { return CommitAuthority{Control: &g} }
+func ReceiptCommit(g ChildExecutionGrant, p OwnedPhysicalRecovery) CommitAuthority {
+	return CommitAuthority{Recovery: &ReceiptRecovery{g, p}}
+}
+
+// Validate checks the command shape only. The original authority is always
+// qualified against locked Store facts by the committing adapter.
+func (a CommitAuthority) Validate(id string, rev uint64, m StoreMutation) error {
+	if id == "" || rev == 0 {
+		return ErrInvalidInput
+	}
+	if a.Lease != nil {
+		if a.Control != nil || a.Recovery != nil || !validExecutionLease(*a.Lease) || a.Lease.RunID != id || m.Record.Run.ID != id || m.Record.Run.Revision != rev+1 {
+			return ErrInvalidInput
+		}
+	}
+	if a.Recovery != nil {
+		if a.Control != nil || a.Recovery.Grant.ChildRunID != id {
+			return ErrInvalidInput
+		}
+		return ValidateOwnedPhysicalRecoveryRequest(a.Recovery.Grant, rev, m)
+	}
+	if (a.Control == nil || a.Control.managed == nil) && (m.Record.Run.ID != id || m.Record.Run.Revision != rev+1) {
+		return ErrConflict
+	}
+	return nil
+}
+
 // CommittedTransition is the feature-neutral durable projection of one
 // successfully committed Run revision. Stores append it in the same atomic
 // transaction as the aggregate CAS and Event journal append.
@@ -125,14 +167,15 @@ type EventJournal interface {
 }
 
 // Store persists the minimal Run root, opaque feature state, Event journal, and
-// committed-transition outbox. The outbox append is part of Create/Apply's
+// committed-transition outbox. The outbox append is part of Create/Commit's
 // transaction boundary; projector claim/ack is deliberately separate.
 type Store interface {
 	Create(context.Context, Record, []EventDraft) (Snapshot, error)
 	DecideBeforeCreate(context.Context, RunCreationDecision) (RunCreationDecision, error)
 	LoadCreationDecision(context.Context, string) (RunCreationDecision, error)
 	Load(context.Context, string) (Snapshot, error)
-	Apply(context.Context, string, uint64, StoreMutation) (Snapshot, error)
+	// Commit returns the committed snapshot and whether control revoked an owner.
+	Commit(context.Context, string, uint64, StoreMutation, CommitAuthority) (Snapshot, bool, error)
 	EventJournal
 	TransitionOutbox
 }

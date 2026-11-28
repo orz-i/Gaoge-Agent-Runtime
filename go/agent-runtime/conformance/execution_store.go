@@ -101,6 +101,17 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if first.Epoch != 2 || first.LeaseID == "" {
 			t.Fatalf("initial lease invalid: %+v", first)
 		}
+		next := created.Run
+		next.Revision++
+		guard := kernel.ControlGuard{Kind: kernel.ControlCancel}
+		_, revoked, commitErr := store.Commit(ctx, next.ID, created.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: next, State: created.State}}, kernel.CommitAuthority{Lease: &first, Control: &guard})
+		if !errors.Is(commitErr, kernel.ErrInvalidInput) || revoked {
+			t.Fatalf("combined write authority accepted: %v %t", commitErr, revoked)
+		}
+		if observed, e := store.Load(ctx, next.ID); e != nil || kernel.ManagedDigest(observed) != kernel.ManagedDigest(created) {
+			t.Fatalf("rejected mixed proof changed original source: %v", e)
+		}
+
 		mutation := func(current kernel.Snapshot, tag string) kernel.Mutation {
 			return kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"tag":` + `"` + tag + `"}`), Events: []kernel.EventDraft{{Type: "agent.step"}}}
 		}

@@ -44,7 +44,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	ctx := t.Context()
 	backing, peerStore, reopen := factory(t)
 	fault := errors.New("original control settlement transport fault")
-	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), mode: "setup", fault: fault}
+	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), mode: "setup", fault: fault}
 	rt, err := kernel.New(kernel.Dependencies{Store: wrapped})
 	if err != nil {
 		t.Fatal(err)

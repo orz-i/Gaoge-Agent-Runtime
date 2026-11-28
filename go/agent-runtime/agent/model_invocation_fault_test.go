@@ -449,29 +449,46 @@ type modelInvocationFaultStore struct {
 	failed      bool
 }
 
-func (store *modelInvocationFaultStore) Apply(
-	ctx context.Context,
-	runID string,
-	expectedRevision uint64,
-	mutation kernel.StoreMutation,
-) (kernel.Snapshot, error) {
-	store.mu.Lock()
-	shouldFail := !store.failed && mutationHasEvent(mutation.Events, store.eventType)
-	if shouldFail {
-		store.failed = true
+func (store *modelInvocationFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		store.mu.Lock()
+		shouldFail := !store.failed && mutationHasEvent(commitMutation.Events, store.eventType)
+		if shouldFail {
+			store.failed = true
+		}
+		store.mu.Unlock()
+		if !shouldFail {
+			return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		}
+		if !store.afterCommit {
+			return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
+		}
+		snapshot, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return snapshot, false, err
+		}
+		return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
 	}
-	store.mu.Unlock()
-	if !shouldFail {
-		return store.Store.Apply(ctx, runID, expectedRevision, mutation)
+	if commitAuth.Recovery != nil || commitAuth.Lease != nil {
+		store.mu.Lock()
+		fail := !store.failed && mutationHasEvent(commitMutation.Events, store.eventType)
+		if fail {
+			store.failed = true
+		}
+		store.mu.Unlock()
+		if fail && !store.afterCommit {
+			return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
+		}
+		out, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return out, false, err
+		}
+		if fail {
+			return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
+		}
+		return out, false, nil
 	}
-	if !store.afterCommit {
-		return kernel.Snapshot{}, errInjectedModelInvocationCrash
-	}
-	snapshot, err := store.Store.Apply(ctx, runID, expectedRevision, mutation)
-	if err != nil {
-		return snapshot, err
-	}
-	return kernel.Snapshot{}, errInjectedModelInvocationCrash
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func mutationHasEvent(events []kernel.EventDraft, eventType string) bool {

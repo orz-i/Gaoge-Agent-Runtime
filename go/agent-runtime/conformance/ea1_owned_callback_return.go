@@ -23,10 +23,15 @@ type ea1OwnedRecoveryCapture struct {
 	permit   kernel.OwnedPhysicalRecovery
 }
 
-func (s *ea1OwnedRecoveryCapture) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	s.mutation = m
-	s.permit = p
-	return s.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
+func (s *ea1OwnedRecoveryCapture) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Recovery != nil {
+		p := commitAuth.Recovery.Permit
+
+		s.mutation = commitMutation
+		s.permit = p
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+	}
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 // RunEA1OwnedCallbackReturn exercises the actual first-party opaque ports,
@@ -154,12 +159,12 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			}
 			// The exact original authority losing only its revision is a normal
 			// CAS conflict; a changed grant is never eligible for that retry class.
-			if _, e = captured.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(t.Context(), g, initial.Run.Revision, captured.mutation, captured.permit); !errors.Is(e, kernel.ErrConflict) {
+			if _, _, e = captured.Store.Commit(t.Context(), (g).ChildRunID, initial.Run.Revision, captured.mutation, kernel.ReceiptCommit(g, captured.permit)); !errors.Is(e, kernel.ErrConflict) {
 				t.Fatalf("pure stale receipt CAS: %v", e)
 			}
 			foreign := g
 			foreign.ExecutionEpoch++
-			if _, e = captured.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(t.Context(), foreign, initial.Run.Revision, captured.mutation, captured.permit); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if _, _, e = captured.Store.Commit(t.Context(), (foreign).ChildRunID, initial.Run.Revision, captured.mutation, kernel.ReceiptCommit(foreign, captured.permit)); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("foreign receipt CAS became retryable: %v", e)
 			}
 			unchanged, e := observer.Load(t.Context(), g.ChildRunID)

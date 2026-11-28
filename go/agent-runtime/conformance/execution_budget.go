@@ -30,7 +30,7 @@ func RunExecutionBudgetSuite(t *testing.T, factory func(*testing.T) ExecutionBud
 	const scope = "scope"
 	atomic := func(f ExecutionBudgetStore, ctx context.Context, lease *kernel.ExecutionLease, guard *kernel.ControlGuard, m kernel.StoreMutation, change func(budget.Coordinator) error) error {
 		if guard != nil {
-			_, _, e := f.Store.(kernel.ControlStore).ApplyControl(ctx, m.Record.Run.ID, m.Record.Run.Revision-1, *guard, m)
+			_, _, e := f.Store.Commit(ctx, m.Record.Run.ID, m.Record.Run.Revision-1, m, kernel.ControlCommit(*guard))
 			return e
 		}
 		original, e := f.Ledger.LoadBudget(ctx, scope)
@@ -43,7 +43,7 @@ func RunExecutionBudgetSuite(t *testing.T, factory func(*testing.T) ExecutionBud
 		}
 		m.Ledger = plan
 		rev := m.Record.Run.Revision - 1
-		_, e = f.Store.(kernel.ExecutionStore).ApplyExecution(ctx, *lease, rev, m)
+		_, _, e = f.Store.Commit(ctx, (*lease).RunID, rev, m, kernel.LeaseCommit(*lease))
 		return e
 	}
 
@@ -376,7 +376,7 @@ func RunExecutionBudgetSuite(t *testing.T, factory func(*testing.T) ExecutionBud
 		}
 		m := mutation(s, kernel.RunStatusRunning, json.RawMessage(`{"phase":"forbidden"}`))
 		m.Ledger = planned
-		if _, e = f.Store.(kernel.ExecutionStore).ApplyExecution(ctx, lease, s.Run.Revision, m); !errors.Is(e, budget.ErrLedgerConflict) {
+		if _, _, e = f.Store.Commit(ctx, (lease).RunID, s.Run.Revision, m, kernel.LeaseCommit(lease)); !errors.Is(e, budget.ErrLedgerConflict) {
 			t.Fatalf("stale plan accepted: %v", e)
 		}
 		after, l := load(t, f)

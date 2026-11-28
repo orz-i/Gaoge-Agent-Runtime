@@ -180,38 +180,24 @@ type summaryCoreFaultStore struct {
 	fired bool
 }
 
-func (s *summaryCoreFaultStore) Apply(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if !s.fired {
-		for _, event := range mutation.Events {
-			if event.Type == s.event {
-				s.fired = true
-				if s.after {
-					if _, err := s.Store.Apply(ctx, id, revision, mutation); err != nil {
-						return kernel.Snapshot{}, err
+func (s *summaryCoreFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil || commitAuth.Lease != nil {
+		if !s.fired {
+			for _, event := range commitMutation.Events {
+				if event.Type == s.event {
+					s.fired = true
+					if s.after {
+						if _, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); err != nil {
+							return kernel.Snapshot{}, false, err
+						}
 					}
+					return kernel.Snapshot{}, false, errSummaryCoreCrash
 				}
-				return kernel.Snapshot{}, errSummaryCoreCrash
 			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.Apply(ctx, id, revision, mutation)
-}
-
-func (s *summaryCoreFaultStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if !s.fired {
-		for _, event := range mutation.Events {
-			if event.Type == s.event {
-				s.fired = true
-				if s.after {
-					if _, err := s.Store.ApplyExecution(ctx, lease, revision, mutation); err != nil {
-						return kernel.Snapshot{}, err
-					}
-				}
-				return kernel.Snapshot{}, errSummaryCoreCrash
-			}
-		}
-	}
-	return s.Store.ApplyExecution(ctx, lease, revision, mutation)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func newSummaryCoreFixture(t *testing.T, store kernel.Store) (*Runner, *kernel.Runtime, *summaryCorePorts, *summaryCoreModel, *modelRetryTestClock, StartRequest) {

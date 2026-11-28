@@ -46,7 +46,6 @@ type PhysicalExecutionStore interface {
 	LookupPhysicalCallbackReturn(context.Context, ChildExecutionGrant) (PhysicalCallbackCompletion, error)
 	BeginPhysicalExecution(context.Context, PhysicalAdmission) (PhysicalAdmissionResult, error)
 	CheckOwnedPhysicalEntry(context.Context, ChildExecutionGrant, ExecutionLease, Snapshot) (OwnedPhysicalEntryWindow, error)
-	ApplyOwnedPhysicalRecovery(context.Context, ChildExecutionGrant, uint64, StoreMutation, OwnedPhysicalRecovery) (Snapshot, error)
 }
 
 // PhysicalAdmission binds the original source proof to one private
@@ -411,8 +410,7 @@ func (r *Runtime) applyOwnedPhysicalPurpose(ctx context.Context, g ChildExecutio
 	if r == nil || ctx == nil || revision == 0 || (evidence && m.Ledger != nil) || hasReservedApplyEvidence(m.Events) {
 		return Snapshot{}, ErrInvalidInput
 	}
-	store, ok := r.store.(PhysicalExecutionStore)
-	if !ok {
+	if !r.SupportsPhysicalExecution() {
 		return Snapshot{}, ErrExecutionRequired
 	}
 	s, e := r.Load(ctx, g.ChildRunID)
@@ -435,5 +433,6 @@ func (r *Runtime) applyOwnedPhysicalPurpose(ctx context.Context, g ChildExecutio
 	if !p.Matches(g, s, proposed) {
 		return Snapshot{}, ErrExecutionConflict
 	}
-	return store.ApplyOwnedPhysicalRecovery(ctx, g, revision, proposed, p)
+	out, _, err := r.store.Commit(ctx, g.ChildRunID, revision, proposed, ReceiptCommit(g, p))
+	return out, err
 }

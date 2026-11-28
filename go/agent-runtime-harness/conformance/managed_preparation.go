@@ -38,32 +38,37 @@ type preparationCut struct {
 	renewed   kernel.ExecutionLease
 }
 
-func (s *preparationCut) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	hit := false
-	for _, e := range m.Events {
-		if e.Type == s.event {
-			s.remaining--
-			hit = s.remaining == 0
-		}
-	}
-	if hit && !s.after {
-		// Force the real Store renewal after the previous safe point was
-		// committed, before the next intent can commit. The original bearer
-		// is unchanged; its persisted expiry now exceeds the historical one.
-		if s.renewal > 0 {
-			renewed, err := s.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: l, LeaseDuration: s.renewal})
-			if err != nil {
-				return kernel.Snapshot{}, err
+func (s *preparationCut) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		l := *commitAuth.Lease
+
+		hit := false
+		for _, e := range commitMutation.Events {
+			if e.Type == s.event {
+				s.remaining--
+				hit = s.remaining == 0
 			}
-			s.renewed = renewed
 		}
-		panic(preparationInterrupted{})
+		if hit && !s.after {
+			// Force the real Store renewal after the previous safe point was
+			// committed, before the next intent can commit. The original bearer
+			// is unchanged; its persisted expiry now exceeds the historical one.
+			if s.renewal > 0 {
+				renewed, err := s.RenewExecution(commitCtx, kernel.ExecutionRenewRequest{Lease: l, LeaseDuration: s.renewal})
+				if err != nil {
+					return kernel.Snapshot{}, false, err
+				}
+				s.renewed = renewed
+			}
+			panic(preparationInterrupted{})
+		}
+		next, _, err := s.preparationKernelPorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && hit {
+			panic(preparationInterrupted{})
+		}
+		return next, false, err
 	}
-	next, err := s.preparationKernelPorts.ApplyExecution(ctx, l, rev, m)
-	if err == nil && hit {
-		panic(preparationInterrupted{})
-	}
-	return next, err
+	return s.preparationKernelPorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 // The positive recovery fixtures are not timeout tests. These two
@@ -87,20 +92,23 @@ func ManagedFixtureExecutionPolicy() (agent.ExecutionPolicy, time.Duration) {
 
 type slowPreparationDispatch struct{ preparationKernelPorts }
 
-func (s slowPreparationDispatch) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	for _, e := range m.Events {
-		if e.Type == "agent.model_invocation.dispatch_intent" {
-			timer := time.NewTimer(preparationSlowIO)
-			defer timer.Stop()
-			select {
-			case <-timer.C:
-			case <-ctx.Done():
-				return kernel.Snapshot{}, ctx.Err()
+func (s slowPreparationDispatch) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		for _, e := range commitMutation.Events {
+			if e.Type == "agent.model_invocation.dispatch_intent" {
+				timer := time.NewTimer(preparationSlowIO)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+				case <-commitCtx.Done():
+					return kernel.Snapshot{}, false, commitCtx.Err()
+				}
+				break
 			}
-			break
 		}
+		return s.preparationKernelPorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.preparationKernelPorts.ApplyExecution(ctx, l, rev, m)
+	return s.preparationKernelPorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type preparationSummaryModel struct {

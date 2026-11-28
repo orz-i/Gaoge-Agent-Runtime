@@ -36,12 +36,12 @@ func (store *realCancelledRequestKernelStore) Load(ctx context.Context, runID st
 	return store.KernelStore.Load(ctx, runID)
 }
 
-func (store *realCancelledRequestKernelStore) ApplyControl(
-	ctx context.Context, runID string, revision uint64,
-	guard kernel.ControlGuard, mutation kernel.StoreMutation,
-) (kernel.Snapshot, bool, error) {
-	store.controlCalls.Add(1)
-	return store.KernelStore.ApplyControl(ctx, runID, revision, guard, mutation)
+func (store *realCancelledRequestKernelStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		store.controlCalls.Add(1)
+		return store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+	}
+	return store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func newRealCancelledRequestHost(

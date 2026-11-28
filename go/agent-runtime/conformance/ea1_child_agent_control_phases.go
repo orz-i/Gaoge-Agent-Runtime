@@ -41,18 +41,21 @@ type ea1ChildControlStore struct {
 	failures int
 }
 
-func (s *ea1ChildControlStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.fault != nil && s.failures == 0 && id == s.faultRun && m.Record.Run.ID == id &&
-		m.Record.Run.Status == kernel.RunStatusCompleted && m.Record.Result != nil &&
-		m.Record.Result.ContentType == "application/json" {
-		for _, e := range m.Events {
-			if e.Type == "tool.completed" {
-				s.failures++
-				return kernel.Snapshot{}, s.fault
+func (s *ea1ChildControlStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		if s.fault != nil && s.failures == 0 && commitID == s.faultRun && commitMutation.Record.Run.ID == commitID &&
+			commitMutation.Record.Run.Status == kernel.RunStatusCompleted && commitMutation.Record.Result != nil &&
+			commitMutation.Record.Result.ContentType == "application/json" {
+			for _, e := range commitMutation.Events {
+				if e.Type == "tool.completed" {
+					s.failures++
+					return kernel.Snapshot{}, false, s.fault
+				}
 			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.Apply(ctx, id, rev, m)
+	return s.ea1ChildStartStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type ea1ChildControlFixture struct {

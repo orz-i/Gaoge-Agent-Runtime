@@ -30,21 +30,24 @@ type managedFrontierProcessStore struct {
 	before bool
 }
 
-func (s *managedFrontierProcessStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	hit := false
-	for _, e := range m.Events {
-		if e.Type == s.event {
-			hit = true
+func (s *managedFrontierProcessStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		hit := false
+		for _, e := range commitMutation.Events {
+			if e.Type == s.event {
+				hit = true
+			}
 		}
+		if hit && s.before {
+			os.Exit(managedRecoveryCrashExit)
+		}
+		out, _, err := s.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && hit {
+			os.Exit(managedRecoveryCrashExit)
+		}
+		return out, false, err
 	}
-	if hit && s.before {
-		os.Exit(managedRecoveryCrashExit)
-	}
-	out, err := s.KernelStore.ApplyExecution(ctx, lease, revision, m)
-	if err == nil && hit {
-		os.Exit(managedRecoveryCrashExit)
-	}
-	return out, err
+	return s.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type managedFrontierProcessModel struct {

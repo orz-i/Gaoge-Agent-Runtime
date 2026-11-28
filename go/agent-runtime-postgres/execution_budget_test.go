@@ -101,7 +101,7 @@ func TestRealPostgresExecutionBudgetExpiryDuringLedgerLock(t *testing.T) {
 	run.UpdatedAt = time.Now().UTC()
 	done := make(chan error, 1)
 	go func() {
-		_, e := s.ApplyExecution(ctx, lease, original.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: json.RawMessage(`{"phase":"prepared"}`)}, Ledger: plan})
+		_, _, e := s.Commit(ctx, (lease).RunID, original.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: json.RawMessage(`{"phase":"prepared"}`)}, Ledger: plan}, kernel.LeaseCommit(lease))
 		done <- e
 	}()
 	// Confirm the actual writer is blocked by this transaction before expiry.

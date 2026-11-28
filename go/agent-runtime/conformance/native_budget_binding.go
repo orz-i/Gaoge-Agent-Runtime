@@ -242,11 +242,11 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 				run := root.Run
 				run.Revision++
 				run.UpdatedAt = time.Now().UTC()
-				if _, e = f.Store.(kernel.ExecutionStore).ApplyExecution(ctx, lease, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}, Ledger: plan}); !errors.Is(e, budget.ErrLedgerConflict) {
+				if _, _, e = f.Store.Commit(ctx, (lease).RunID, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}, Ledger: plan}, kernel.LeaseCommit(lease)); !errors.Is(e, budget.ErrLedgerConflict) {
 					t.Fatalf("foreign ledger accepted: %v", e)
 				}
 				run.BudgetScopeID = "other"
-				if _, e = f.Store.(kernel.ExecutionStore).ApplyExecution(ctx, lease, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}}); e == nil {
+				if _, _, e = f.Store.Commit(ctx, (lease).RunID, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}}, kernel.LeaseCommit(lease)); e == nil {
 					t.Fatal("mutable scope")
 				}
 				if !reflect.DeepEqual(other, load("other")) {
@@ -295,7 +295,7 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 					run.Status = kernel.RunStatusCompleted
 					run.UpdatedAt = time.Now().UTC()
 					run.EndedAt = &run.UpdatedAt
-					if _, e = f.Store.(kernel.ExecutionStore).ApplyExecution(ctx, lease, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}}); e != nil {
+					if _, _, e = f.Store.Commit(ctx, (lease).RunID, root.Run.Revision, kernel.StoreMutation{Record: kernel.Record{Run: run, State: root.State}}, kernel.LeaseCommit(lease)); e != nil {
 						t.Fatal(e)
 					}
 				}

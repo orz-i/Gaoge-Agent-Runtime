@@ -25,16 +25,21 @@ type namedOutcomeFaultStore struct {
 	fired        bool
 }
 
-func (s *namedOutcomeFaultStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if l.RunID == s.child && !s.fired {
-		for _, e := range m.Events {
-			if e.Type == s.event {
-				s.fired = true
-				return kernel.Snapshot{}, s.cut
+func (s *namedOutcomeFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		l := *commitAuth.Lease
+
+		if l.RunID == s.child && !s.fired {
+			for _, e := range commitMutation.Events {
+				if e.Type == s.event {
+					s.fired = true
+					return kernel.Snapshot{}, false, s.cut
+				}
 			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.ApplyExecution(ctx, l, revision, m)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 // An original locally deferred Named Agent remains a native Root with a

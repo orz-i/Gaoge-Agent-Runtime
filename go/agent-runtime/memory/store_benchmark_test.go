@@ -47,9 +47,9 @@ func benchmarkStoreWithEvents(b *testing.B, eventCount int) *memory.Store {
 	for index := 1; index < eventCount; index++ {
 		record.Run.Revision++
 		record.Run.UpdatedAt = now.Add(time.Duration(index) * time.Microsecond)
-		current, err = store.Apply(context.Background(), record.Run.ID, current.Run.Revision, kernel.StoreMutation{
+		current, _, err = store.Commit(context.Background(), record.Run.ID, current.Run.Revision, kernel.StoreMutation{
 			Record: record, Events: []kernel.EventDraft{{Type: "event"}},
-		})
+		}, kernel.CommitAuthority{})
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -42,37 +42,40 @@ func (f *unsentRecoveryFault) CheckExecution(ctx context.Context, id string, lea
 	return f.ExecutionStore.CheckExecution(ctx, id, lease)
 }
 
-func (f *unsentRecoveryFault) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	for _, ev := range m.Events {
-		if f.beforeCount > 0 && ev.Type == f.beforeEvent {
-			f.beforeCount--
-			f.hits++
-			return kernel.Snapshot{}, f.injected
-		}
-		if f.ackAction != nil && ev.Type == "tool.dispatch_intent" {
-			action := f.ackAction
-			f.ackAction = nil
-			next, err := f.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-			if err == nil {
+func (f *unsentRecoveryFault) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		for _, ev := range commitMutation.Events {
+			if f.beforeCount > 0 && ev.Type == f.beforeEvent {
+				f.beforeCount--
 				f.hits++
-				action()
+				return kernel.Snapshot{}, false, f.injected
 			}
-			return next, err
-		}
-		if f.ackDispatch && ev.Type == "tool.dispatch_intent" {
-			f.ackDispatch = false
-			f.hits++
-			if _, err := f.ExecutionStore.ApplyExecution(ctx, l, rev, m); err != nil {
-				return kernel.Snapshot{}, err
+			if f.ackAction != nil && ev.Type == "tool.dispatch_intent" {
+				action := f.ackAction
+				f.ackAction = nil
+				next, _, err := f.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+				if err == nil {
+					f.hits++
+					action()
+				}
+				return next, false, err
 			}
-			// Both immediate ACK disambiguation and the live no-send
-			// cleanup read fail. The original callback return still knows
-			// the native chain was never entered.
-			f.readCuts = 2
-			return kernel.Snapshot{}, f.injected
+			if f.ackDispatch && ev.Type == "tool.dispatch_intent" {
+				f.ackDispatch = false
+				f.hits++
+				if _, _, err := f.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); err != nil {
+					return kernel.Snapshot{}, false, err
+				}
+				// Both immediate ACK disambiguation and the live no-send
+				// cleanup read fail. The original callback return still knows
+				// the native chain was never entered.
+				f.readCuts = 2
+				return kernel.Snapshot{}, false, f.injected
+			}
 		}
+		return f.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return f.ExecutionStore.ApplyExecution(ctx, l, rev, m)
+	return f.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type unsentLedgerFault struct {
@@ -227,7 +230,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				return r
 			}
 			faultFor := func(s kernel.Store) *unsentRecoveryFault {
-				return &unsentRecoveryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: s, ExecutionStore: s.(kernel.ExecutionStore), ControlStore: s.(kernel.ControlStore), ExecutionQuarantineStore: s.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: s.(kernel.PhysicalExecutionStore), injected: cut}}
+				return &unsentRecoveryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: s, ExecutionStore: s.(kernel.ExecutionStore), ExecutionQuarantineStore: s.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: s.(kernel.PhysicalExecutionStore), injected: cut}}
 			}
 			req := agent.StartRequest{ID: root, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"read"}}
 			ks := base

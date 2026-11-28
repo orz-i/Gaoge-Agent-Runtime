@@ -114,9 +114,9 @@ func testCASAndEvents(t *testing.T, store kernel.Store) {
 	next.Run.Revision = 2
 	next.Run.UpdatedAt = next.Run.UpdatedAt.Add(time.Second)
 	next.State = json.RawMessage(`{"value":2}`)
-	applied, err := store.Apply(context.Background(), record.Run.ID, created.Run.Revision, kernel.StoreMutation{
+	applied, _, err := store.Commit(context.Background(), record.Run.ID, created.Run.Revision, kernel.StoreMutation{
 		Record: next, Events: []kernel.EventDraft{{Type: "two"}, {Type: "three"}},
-	})
+	}, kernel.CommitAuthority{})
 	if err != nil {
 		t.Fatalf("apply record: %v", err)
 	}
@@ -149,7 +149,7 @@ func assertStaleApplyDoesNotMutate(t *testing.T, store kernel.Store, record kern
 	stale := next
 	stale.Run.Revision = 3
 	stale.State = json.RawMessage(`{"value":3}`)
-	if _, err := store.Apply(context.Background(), record.Run.ID, 1, kernel.StoreMutation{Record: stale}); !errors.Is(err, kernel.ErrConflict) {
+	if _, _, err := store.Commit(context.Background(), record.Run.ID, 1, kernel.StoreMutation{Record: stale}, kernel.CommitAuthority{}); !errors.Is(err, kernel.ErrConflict) {
 		t.Fatalf("expected stale conflict, got %v", err)
 	}
 	loaded, err := store.Load(context.Background(), record.Run.ID)
@@ -174,9 +174,9 @@ func testConcurrentCAS(t *testing.T, store kernel.Store) {
 			next := record
 			next.Run.Revision = 2
 			next.State = json.RawMessage(`{"winner":true}`)
-			_, err := store.Apply(context.Background(), record.Run.ID, 1, kernel.StoreMutation{
+			_, _, err := store.Commit(context.Background(), record.Run.ID, 1, kernel.StoreMutation{
 				Record: next, Events: []kernel.EventDraft{{Type: "winner"}},
-			})
+			}, kernel.CommitAuthority{})
 			results <- err
 		}()
 	}

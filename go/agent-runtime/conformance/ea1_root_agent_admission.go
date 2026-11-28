@@ -479,7 +479,6 @@ func (m *ea1AdmissionModel) Generate(context.Context, model.Request) (model.Resp
 type ea1AgentAdmissionStore struct {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
 
 	kernel.ExecutionQuarantineStore
 	kernel.PhysicalExecutionStore
@@ -501,10 +500,7 @@ func ea1AgentAdmissionWrap(t *testing.T, s kernel.Store) *ea1AgentAdmissionStore
 	if !ok {
 		t.Fatal("missing authoritative ExecutionStore")
 	}
-	control, ok := s.(kernel.ControlStore)
-	if !ok {
-		t.Fatal("missing actual ControlStore")
-	}
+
 	quarantine, ok := s.(kernel.ExecutionQuarantineStore)
 	if !ok {
 		t.Fatal("missing quarantine Store")
@@ -513,7 +509,7 @@ func ea1AgentAdmissionWrap(t *testing.T, s kernel.Store) *ea1AgentAdmissionStore
 	if !ok {
 		t.Fatal("missing owned physical Store")
 	}
-	return &ea1AgentAdmissionStore{PhysicalExecutionStore: owned, Store: s, ExecutionStore: execution, ControlStore: control, ExecutionQuarantineStore: quarantine}
+	return &ea1AgentAdmissionStore{PhysicalExecutionStore: owned, Store: s, ExecutionStore: execution, ExecutionQuarantineStore: quarantine}
 }
 func (s *ea1AgentAdmissionStore) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
 	v, e := s.Store.Create(ctx, r, events)

@@ -201,21 +201,25 @@ type modelPreparedCutStore struct {
 	target, seen int
 }
 
-func (s *modelPreparedCutStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	out, e := s.Store.ApplyExecution(ctx, l, r, m)
-	if e != nil {
-		return out, e
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if mutationHasEvent(m.Events, "agent.model_invocation.pending") {
-		s.seen++
-		if s.seen == s.target {
-			return kernel.Snapshot{}, errInjectedModelInvocationCrash
+func (s *modelPreparedCutStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		out, _, e := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if e != nil {
+			return out, false, e
 		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if mutationHasEvent(commitMutation.Events, "agent.model_invocation.pending") {
+			s.seen++
+			if s.seen == s.target {
+				return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
+			}
+		}
+		return out, false, nil
 	}
-	return out, nil
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func newModelPreparedCutRuntime(t *testing.T, target int) *kernel.Runtime {
 	t.Helper()
 	return newModelInvocationRuntime(t, &modelPreparedCutStore{Store: memory.NewStore(), target: target})

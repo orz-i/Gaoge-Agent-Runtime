@@ -549,19 +549,22 @@ type managedRecoveryCrashStore struct {
 	modelIntents int
 }
 
-func (store *managedRecoveryCrashStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	snapshot, err := store.KernelStore.ApplyExecution(ctx, lease, revision, mutation)
-	if err == nil {
-		for _, event := range mutation.Events {
-			if event.Type == "agent.model_invocation.pending" {
-				store.modelIntents++
-				if store.modelIntents == 2 {
-					os.Exit(managedRecoveryCrashExit)
+func (store *managedRecoveryCrashStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		snapshot, _, err := store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil {
+			for _, event := range commitMutation.Events {
+				if event.Type == "agent.model_invocation.pending" {
+					store.modelIntents++
+					if store.modelIntents == 2 {
+						os.Exit(managedRecoveryCrashExit)
+					}
 				}
 			}
 		}
+		return snapshot, false, err
 	}
-	return snapshot, err
+	return store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type managedRecoveryRetirementCrashStore struct {

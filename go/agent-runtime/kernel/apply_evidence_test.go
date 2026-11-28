@@ -21,19 +21,22 @@ type applyResponseFaultStore struct {
 	failed       bool
 }
 
-func (store *applyResponseFaultStore) Apply(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if store.failed {
-		return store.Store.Apply(ctx, id, revision, mutation)
+func (store *applyResponseFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		if store.failed {
+			return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		}
+		store.failed = true
+		if store.beforeCommit {
+			return kernel.Snapshot{}, false, errInjectedApplyNeverCommitted
+		}
+		committed, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return committed, false, err
+		}
+		return kernel.Snapshot{}, false, errInjectedApplyResponseLost
 	}
-	store.failed = true
-	if store.beforeCommit {
-		return kernel.Snapshot{}, errInjectedApplyNeverCommitted
-	}
-	committed, err := store.Store.Apply(ctx, id, revision, mutation)
-	if err != nil {
-		return committed, err
-	}
-	return kernel.Snapshot{}, errInjectedApplyResponseLost
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type unavailableJournalStore struct{ kernel.Store }

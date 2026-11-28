@@ -11,8 +11,11 @@ import (
 
 type panickingCancellationStore struct{ *memory.Store }
 
-func (*panickingCancellationStore) ApplyControl(context.Context, string, uint64, kernel.ControlGuard, kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	panic("write-capable cancellation callback interrupted")
+func (receiver *panickingCancellationStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		panic("write-capable cancellation callback interrupted")
+	}
+	return receiver.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestCancellationPanicCannotMintSuccessfulSettlement(t *testing.T) {

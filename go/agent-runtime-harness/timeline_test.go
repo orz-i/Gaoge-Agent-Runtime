@@ -160,17 +160,20 @@ type timelineReceiptACKFaultStore struct {
 	fired bool
 }
 
-func (s *timelineReceiptACKFaultStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	out, err := s.Store.ApplyExecution(ctx, lease, revision, m)
-	if err == nil && !s.fired {
-		for _, e := range m.Events {
-			if e.Type == "agent.model_invocation.completed" {
-				s.fired = true
-				return kernel.Snapshot{}, errTimelineProjection
+func (s *timelineReceiptACKFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		out, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && !s.fired {
+			for _, e := range commitMutation.Events {
+				if e.Type == "agent.model_invocation.completed" {
+					s.fired = true
+					return kernel.Snapshot{}, false, errTimelineProjection
+				}
 			}
 		}
+		return out, false, err
 	}
-	return out, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestModelTimelineRepairsOriginalReceiptAfterProjectionFailure(t *testing.T) {

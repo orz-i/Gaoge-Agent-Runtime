@@ -40,7 +40,7 @@ func ea1AgentUnknownReceipts(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 			injected := errors.New("test-only physical response received but original receipt not committed")
 			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: native, PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore),
-				ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), event: event, injected: injected}
+				ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), event: event, injected: injected}
 			rt, err := kernel.New(kernel.Dependencies{Store: fault})
 			if err != nil {
 				t.Fatal(err)
@@ -188,7 +188,6 @@ func ea1AgentUnknownReceipts(t *testing.T, factory func(*testing.T) (kernel.Stor
 type ea1AgentReceiptFault struct {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
 
 	kernel.ExecutionQuarantineStore
 	kernel.PhysicalExecutionStore
@@ -200,18 +199,24 @@ type ea1AgentReceiptFault struct {
 	renewals ea1LeaseRenewals
 }
 
-func (s *ea1AgentReceiptFault) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	s.mu.Lock()
-	s.lease = lease
-	s.mu.Unlock()
-	for _, event := range mutation.Events {
-		if event.Type == s.event && s.failures == 0 {
-			s.failures++
-			return kernel.Snapshot{}, s.injected
+func (s *ea1AgentReceiptFault) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		lease := *commitAuth.Lease
+
+		s.mu.Lock()
+		s.lease = lease
+		s.mu.Unlock()
+		for _, event := range commitMutation.Events {
+			if event.Type == s.event && s.failures == 0 {
+				s.failures++
+				return kernel.Snapshot{}, false, s.injected
+			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.ExecutionStore.ApplyExecution(ctx, lease, revision, mutation)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func (s *ea1AgentReceiptFault) RenewExecution(ctx context.Context, req kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
 	renewed, err := s.ExecutionStore.RenewExecution(ctx, req)
 	if err == nil {

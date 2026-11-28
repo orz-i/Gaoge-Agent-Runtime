@@ -27,7 +27,6 @@ type ManagedRecoveryStoreFixture struct {
 type managedStorePorts interface {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
 
 	kernel.PhysicalExecutionStore
 
@@ -304,7 +303,7 @@ func CancelManagedFixture(ctx context.Context, rt *kernel.Runtime, p kernel.Mana
 
 func cancelManagedStoreFixture(ctx context.Context, store managedStorePorts, p kernel.ManagedAdmissionProof) (kernel.ManagedTransfer, error) {
 	point := p.Point()
-	if _, _, err := store.ApplyControl(ctx, point.Host.RunID, point.Source.Run.Revision, p.CancellationGuard(), kernel.StoreMutation{}); err != nil {
+	if _, _, err := store.Commit(ctx, point.Host.RunID, point.Source.Run.Revision, kernel.StoreMutation{}, kernel.ControlCommit(p.CancellationGuard())); err != nil {
 		return kernel.ManagedTransfer{}, err
 	}
 	return store.LoadManagedRecoveryByID(ctx, point.ID)
@@ -617,14 +616,28 @@ type managedStoreACK struct {
 	hits int
 }
 
-func (s *managedStoreACK) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	value, e := s.managedStorePorts.ApplyExecution(ctx, l, r, m)
-	if e == nil && s.mode == "t0" && m.ManagedSafePoint.Present() {
-		s.hits++
-		return kernel.Snapshot{}, errManagedStoreACK
+func (s *managedStoreACK) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		value, _, e := s.managedStorePorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if e == nil && s.mode == "t0" && commitMutation.ManagedSafePoint.Present() {
+			s.hits++
+			return kernel.Snapshot{}, false, errManagedStoreACK
+		}
+		return value, false, e
 	}
-	return value, e
+	if commitAuth.Control != nil {
+		g := *commitAuth.Control
+
+		v, revoke, e := s.managedStorePorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if _, managed, _ := g.ManagedCancellation(commitID, commitRev, commitMutation); e == nil && s.mode == "cancel" && managed {
+			s.hits++
+			return kernel.Snapshot{}, false, errManagedStoreACK
+		}
+		return v, revoke, e
+	}
+	return s.managedStorePorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func (s *managedStoreACK) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	v, e := s.managedStorePorts.BeginPhysicalExecution(ctx, p)
 	if e == nil && s.mode == "enable" && p.IsManagedRecovery() {
@@ -633,14 +646,7 @@ func (s *managedStoreACK) BeginPhysicalExecution(ctx context.Context, p kernel.P
 	}
 	return v, e
 }
-func (s *managedStoreACK) ApplyControl(ctx context.Context, id string, rev uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	v, revoke, e := s.managedStorePorts.ApplyControl(ctx, id, rev, g, m)
-	if _, managed, _ := g.ManagedCancellation(id, rev, m); e == nil && s.mode == "cancel" && managed {
-		s.hits++
-		return kernel.Snapshot{}, false, errManagedStoreACK
-	}
-	return v, revoke, e
-}
+
 func runManagedStoreTransactionACK(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	for _, mode := range []string{"t0", "enable", "cancel"} {
 		t.Run(mode, func(t *testing.T) {

@@ -263,10 +263,10 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 	record := kernel.Record{Run: before.Run, State: before.State, Checkpoint: before.Checkpoint, Result: before.Result}
 	record.Run.Revision++
 	mutation := kernel.StoreMutation{Record: record}
-	if _, err = s.Apply(t.Context(), "root", before.Run.Revision, mutation); !errors.Is(err, kernel.ErrExecutionRequired) {
+	if _, _, err = s.Commit(t.Context(), "root", before.Run.Revision, mutation, kernel.CommitAuthority{}); !errors.Is(err, kernel.ErrExecutionRequired) {
 		t.Fatalf("direct Store.Apply authority precedence: %v", err)
 	}
-	if _, err = s.ApplyExecution(t.Context(), lease, before.Run.Revision, mutation); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+	if _, _, err = s.Commit(t.Context(), (lease).RunID, before.Run.Revision, mutation, kernel.LeaseCommit(lease)); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("native lease without physical permit: %v", err)
 	}
 	unchanged, err := s.Load(t.Context(), "root")
@@ -334,7 +334,7 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 		}
 		next := kernel.Record{Run: snap.Run, State: snap.State, Checkpoint: snap.Checkpoint, Result: snap.Result}
 		next.Run.Revision++
-		if _, err = s.ApplyExecution(t.Context(), candidate, snap.Run.Revision, kernel.StoreMutation{Record: next}); !errors.Is(err, expected) {
+		if _, _, err = s.Commit(t.Context(), (candidate).RunID, snap.Run.Revision, kernel.StoreMutation{Record: next}, kernel.LeaseCommit(candidate)); !errors.Is(err, expected) {
 			t.Fatalf("waiting %s authority precedence: %v want %v", scenario, err, expected)
 		}
 		after, e := s.Load(t.Context(), "root")
@@ -459,7 +459,7 @@ func TestOwnedRecoveryPropagatesNonNotFoundAndRejectsCorruptSelfScope(t *testing
 	mutation := kernel.StoreMutation{Record: record}
 
 	// Missing callback return (callback_return_revision = 0) yields ErrExecutionConflict.
-	if _, err = s.ApplyOwnedPhysicalRecovery(ctx, g, before.Run.Revision, mutation, kernel.OwnedPhysicalRecovery{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, _, err = s.Commit(ctx, (g).ChildRunID, before.Run.Revision, mutation, kernel.ReceiptCommit(g, kernel.OwnedPhysicalRecovery{})); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("missing callback return got %v, want ErrExecutionConflict", err)
 	}
 
@@ -468,7 +468,7 @@ func TestOwnedRecoveryPropagatesNonNotFoundAndRejectsCorruptSelfScope(t *testing
 	if _, err = s.db.Exec(`UPDATE runtime_child_effect_grants SET callback_return_revision='corrupt' WHERE grant_id=?`, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.ApplyOwnedPhysicalRecovery(ctx, g, before.Run.Revision, mutation, kernel.OwnedPhysicalRecovery{}); err == nil || errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, _, err = s.Commit(ctx, (g).ChildRunID, before.Run.Revision, mutation, kernel.ReceiptCommit(g, kernel.OwnedPhysicalRecovery{})); err == nil || errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("corrupt callback return scan error was masked: %v", err)
 	}
 

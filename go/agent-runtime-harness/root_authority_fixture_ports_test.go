@@ -21,22 +21,6 @@ func (s *resumeTurnFaultStore) ReleaseExecution(ctx context.Context, l kernel.Ex
 func (s *resumeTurnFaultStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
 	return s.Store.(kernel.ExecutionStore).CheckExecution(ctx, id, l)
 }
-func (s *resumeTurnFaultStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-
-	for _, event := range m.Events {
-		if event.Type == "agent.model_invocation.pending" && s.failed.CompareAndSwap(false, true) {
-			if _, err := s.Store.(kernel.ExecutionStore).ApplyExecution(ctx, l, r, m); err != nil {
-				return kernel.Snapshot{}, err
-			}
-			return kernel.Snapshot{}, errResumeTurnInterrupted
-		}
-	}
-	return s.Store.(kernel.ExecutionStore).ApplyExecution(ctx, l, r, m)
-
-}
-func (s *resumeTurnFaultStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
-}
 
 func (s *resumeTurnFaultStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
 	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
@@ -52,19 +36,6 @@ func (s *resumeTurnFaultStore) CheckOwnedPhysicalEntry(ctx context.Context, g ke
 	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
-func (s *resumeTurnFaultStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-
-	for _, event := range m.Events {
-		if event.Type == "agent.model_invocation.pending" && s.failed.CompareAndSwap(false, true) {
-			if _, err := s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p); err != nil {
-				return kernel.Snapshot{}, err
-			}
-			return kernel.Snapshot{}, errResumeTurnInterrupted
-		}
-	}
-	return s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
-
-}
 func (s *resumeTurnFaultStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	return s.Store.(kernel.PhysicalExecutionStore).RecordPhysicalCallbackReturn(ctx, g, r, o, p)
 }
@@ -89,12 +60,6 @@ func (s *preDispatchReadFaultStore) ReleaseExecution(ctx context.Context, l kern
 func (s *preDispatchReadFaultStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
 	return s.Store.(kernel.ExecutionStore).CheckExecution(ctx, id, l)
 }
-func (s *preDispatchReadFaultStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	return s.Store.(kernel.ExecutionStore).ApplyExecution(ctx, l, r, m)
-}
-func (s *preDispatchReadFaultStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
-}
 
 func (s *preDispatchReadFaultStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
 	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
@@ -110,9 +75,6 @@ func (s *preDispatchReadFaultStore) CheckOwnedPhysicalEntry(ctx context.Context,
 	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
-func (s *preDispatchReadFaultStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	return s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
-}
 func (s *preDispatchReadFaultStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	return s.Store.(kernel.PhysicalExecutionStore).RecordPhysicalCallbackReturn(ctx, g, r, o, p)
 }
@@ -137,19 +99,6 @@ func (s *beforeModelIntentStore) ReleaseExecution(ctx context.Context, l kernel.
 func (s *beforeModelIntentStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
 	return s.Store.(kernel.ExecutionStore).CheckExecution(ctx, id, l)
 }
-func (s *beforeModelIntentStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-
-	for _, event := range m.Events {
-		if event.Type == "agent.model_invocation.pending" && s.failed.CompareAndSwap(false, true) {
-			return kernel.Snapshot{}, errBeforeModelIntentCommit
-		}
-	}
-	return s.Store.(kernel.ExecutionStore).ApplyExecution(ctx, l, r, m)
-
-}
-func (s *beforeModelIntentStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
-}
 
 func (s *beforeModelIntentStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
 	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
@@ -165,16 +114,6 @@ func (s *beforeModelIntentStore) CheckOwnedPhysicalEntry(ctx context.Context, g 
 	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
-func (s *beforeModelIntentStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-
-	for _, event := range m.Events {
-		if event.Type == "agent.model_invocation.pending" && s.failed.CompareAndSwap(false, true) {
-			return kernel.Snapshot{}, errBeforeModelIntentCommit
-		}
-	}
-	return s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
-
-}
 func (s *beforeModelIntentStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	return s.Store.(kernel.PhysicalExecutionStore).RecordPhysicalCallbackReturn(ctx, g, r, o, p)
 }

@@ -70,14 +70,18 @@ type auditPromptCommitFence struct {
 	release   chan struct{}
 }
 
-func (s *auditPromptCommitFence) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, rev, m)
-	if err == nil && rev == 3 && strings.Contains(string(m.Record.State), "\"promptPending\":true") {
-		s.committed <- snap
-		<-s.release
+func (s *auditPromptCommitFence) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && commitRev == 3 && strings.Contains(string(commitMutation.Record.State), "\"promptPending\":true") {
+			s.committed <- snap
+			<-s.release
+		}
+		return snap, false, err
 	}
-	return snap, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func TestPR151ACPCancelBeforePhysicalPrompt(t *testing.T) {
 	f := &fakeClient{}
 	s := &auditPromptCommitFence{Store: memory.NewStore(), committed: make(chan kernel.Snapshot, 1), release: make(chan struct{})}

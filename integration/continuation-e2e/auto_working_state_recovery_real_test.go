@@ -388,26 +388,29 @@ type autoSummaryCrashKernelStore struct {
 	returnError bool
 }
 
-func (store *autoSummaryCrashKernelStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	proposed := kernel.Snapshot{Run: mutation.Record.Run, State: mutation.Record.State, Checkpoint: mutation.Record.Checkpoint, Result: mutation.Record.Result}
-	next, found := findAutoSummaryInvocation(proposed)
-	if found && store.mode == autoSummaryUnknown && next.Status == agent.ModelInvocationCompleted {
-		os.Exit(autoSummaryCrashExit)
-	}
-	consume := false
-	if store.mode == autoSummaryConsumeACK {
-		for _, event := range mutation.Events {
-			consume = consume || event.Type == agent.EventContextSummaryConsumed
+func (store *autoSummaryCrashKernelStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		proposed := kernel.Snapshot{Run: commitMutation.Record.Run, State: commitMutation.Record.State, Checkpoint: commitMutation.Record.Checkpoint, Result: commitMutation.Record.Result}
+		next, found := findAutoSummaryInvocation(proposed)
+		if found && store.mode == autoSummaryUnknown && next.Status == agent.ModelInvocationCompleted {
+			os.Exit(autoSummaryCrashExit)
 		}
-	}
-	snapshot, err := store.KernelStore.ApplyExecution(ctx, lease, revision, mutation)
-	if err == nil && consume {
-		if store.returnError {
-			return kernel.Snapshot{}, errAutoSummaryReturnedACK
+		consume := false
+		if store.mode == autoSummaryConsumeACK {
+			for _, event := range commitMutation.Events {
+				consume = consume || event.Type == agent.EventContextSummaryConsumed
+			}
 		}
-		os.Exit(autoSummaryCrashExit)
+		snapshot, _, err := store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && consume {
+			if store.returnError {
+				return kernel.Snapshot{}, false, errAutoSummaryReturnedACK
+			}
+			os.Exit(autoSummaryCrashExit)
+		}
+		return snapshot, false, err
 	}
-	return snapshot, err
+	return store.KernelStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type autoSummaryCrashHostStore struct {

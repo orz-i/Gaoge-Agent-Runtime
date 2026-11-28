@@ -48,21 +48,24 @@ type sharedSummaryReceiptFaultStore struct {
 	armed, after, fired bool
 }
 
-func (s *sharedSummaryReceiptFaultStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.armed && !s.fired {
-		for _, event := range mutation.Events {
-			if event.Type == "agent.model_invocation.completed" {
-				s.fired = true
-				if s.after {
-					if _, err := s.Store.ApplyExecution(ctx, lease, revision, mutation); err != nil {
-						return kernel.Snapshot{}, err
+func (s *sharedSummaryReceiptFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		if s.armed && !s.fired {
+			for _, event := range commitMutation.Events {
+				if event.Type == "agent.model_invocation.completed" {
+					s.fired = true
+					if s.after {
+						if _, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); err != nil {
+							return kernel.Snapshot{}, false, err
+						}
 					}
+					return kernel.Snapshot{}, false, errSharedSummaryReceiptCut
 				}
-				return kernel.Snapshot{}, errSharedSummaryReceiptCut
 			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.ApplyExecution(ctx, lease, revision, mutation)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing.T) {

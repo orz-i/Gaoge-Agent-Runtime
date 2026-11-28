@@ -20,12 +20,6 @@ func (s *claimantAfterCreateStore) ReleaseExecution(ctx context.Context, l kerne
 func (s *claimantAfterCreateStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
 	return s.Store.(kernel.ExecutionStore).CheckExecution(ctx, id, l)
 }
-func (s *claimantAfterCreateStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	return s.Store.(kernel.ExecutionStore).ApplyExecution(ctx, l, r, m)
-}
-func (s *claimantAfterCreateStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
-}
 
 func (s *claimantAfterCreateStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
 	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
@@ -41,9 +35,6 @@ func (s *claimantAfterCreateStore) CheckOwnedPhysicalEntry(ctx context.Context, 
 	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
-func (s *claimantAfterCreateStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	return s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
-}
 func (s *claimantAfterCreateStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	return s.Store.(kernel.PhysicalExecutionStore).RecordPhysicalCallbackReturn(ctx, g, r, o, p)
 }

@@ -114,7 +114,7 @@ type ea1ControlFixture struct {
 func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), external bool) *ea1ControlFixture {
 	backing, peer, reopen := factory(t)
 	s := ea1AgentAdmissionWrap(t, backing)
-	fault := &ea1AgentReceiptFault{Store: s, ExecutionStore: s, ControlStore: s, ExecutionQuarantineStore: s, PhysicalExecutionStore: s}
+	fault := &ea1AgentReceiptFault{Store: s, ExecutionStore: s, ExecutionQuarantineStore: s, PhysicalExecutionStore: s}
 	rt := ea1StartRuntime(t, fault)
 	approvals, e := interaction.New(rt)
 	if e != nil {

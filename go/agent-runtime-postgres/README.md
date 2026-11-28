@@ -24,7 +24,7 @@ The new `ExecutionStore` port uses PostgreSQL row locking and
 `clock_timestamp()` for authoritative epoch/expiry CAS. A real PostgreSQL
 16 test is available via `TEST_POSTGRES_DSN`, while ordinary GORM SQLite
 unit tests do **not** certify PostgreSQL fencing. The experimental
-Stage 2 Phase 2A adds `ControlStore.ApplyControl` for trusted,
+Stage 2 Phase 2A adds `Store.Commit with ControlCommit` for trusted,
 Feature-validated approval, budget, cancellation and deadline CAS.
 It atomically invalidates prior Run ownership with the control state,
 journal and outbox. [Phase 2A security remediation](../../docs/audits/2026-10-16-stage2-phase2a-code-review-remediation.md)

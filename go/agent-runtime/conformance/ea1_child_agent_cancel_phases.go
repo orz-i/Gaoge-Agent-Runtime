@@ -70,28 +70,37 @@ func (s *ea1ChildCancelStore) matched(id string, m kernel.StoreMutation, event s
 	}
 	return false
 }
-func (s *ea1ChildCancelStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.matched(id, m, s.event) {
-		s.applyHits++
-		return kernel.Snapshot{}, s.fault
+
+func (s *ea1ChildCancelStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		if s.matched(commitID, commitMutation, s.event) {
+			s.applyHits++
+			return kernel.Snapshot{}, false, s.fault
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.Apply(ctx, id, rev, m)
-}
-func (s *ea1ChildCancelStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.matched(l.RunID, m, s.event) {
-		s.nativeHits++
-		return kernel.Snapshot{}, s.fault
+	if commitAuth.Lease != nil {
+		l := *commitAuth.Lease
+
+		if s.matched(l.RunID, commitMutation, s.event) {
+			s.nativeHits++
+			return kernel.Snapshot{}, false, s.fault
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-}
-func (s *ea1ChildCancelStore) ApplyControl(ctx context.Context, id string, rev uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	out, revoked, e := s.ControlStore.ApplyControl(ctx, id, rev, g, m)
-	if e == nil && s.mode == "cancel-ack" && g.Kind == kernel.ControlCancel && s.matched(id, m, "run.cancelled") {
-		s.controlHits++
-		return kernel.Snapshot{}, false, s.fault
+	if commitAuth.Control != nil {
+		g := *commitAuth.Control
+
+		out, revoked, e := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if e == nil && s.mode == "cancel-ack" && g.Kind == kernel.ControlCancel && s.matched(commitID, commitMutation, "run.cancelled") {
+			s.controlHits++
+			return kernel.Snapshot{}, false, s.fault
+		}
+		return out, revoked, e
 	}
-	return out, revoked, e
+	return s.ea1AgentAdmissionStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func (s *ea1ChildCancelStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if g.IsOwned() {
 		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)

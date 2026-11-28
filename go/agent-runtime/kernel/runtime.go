@@ -304,14 +304,8 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 		}
 		proposed.ManagedSafePoint = ManagedSafePointProof{point: candidate, proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision, "managed_safe_point", runtime.physicalGrant.ID, current.State, candidate)}
 	}
-	if runtime.execution != nil {
-		store, ok := runtime.store.(ExecutionStore)
-		if !ok {
-			return Snapshot{}, ErrExecutionRequired
-		}
-		return store.ApplyExecution(ctx, *runtime.execution, expectedRevision, proposed)
-	}
-	return runtime.store.Apply(ctx, runID, expectedRevision, proposed)
+	out, _, err := runtime.store.Commit(ctx, runID, expectedRevision, proposed, CommitAuthority{Lease: runtime.execution})
+	return out, err
 }
 
 // makeStoreMutation is the common validated replacement builder used by

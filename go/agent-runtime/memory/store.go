@@ -198,25 +198,6 @@ func (store *Store) Load(_ context.Context, runID string) (kernel.Snapshot, erro
 	return cloneSnapshot(snapshot), nil
 }
 
-// Apply performs one revision-checked atomic replacement and event append.
-func (store *Store) Apply(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if store.runs[runID].execution.epoch > 0 {
-		return kernel.Snapshot{}, kernel.ErrExecutionRequired
-	}
-	if mutation.Ledger != nil {
-		current, ok := store.snapshotLocked(runID)
-		if !ok || current.Run.ParentRunID == "" || !mutation.PhysicalPermit.IsPresent() {
-			return kernel.Snapshot{}, kernel.ErrExecutionRequired
-		}
-		if _, err := store.validateLiveRunOwners(ctx, current.Run); err != nil {
-			return kernel.Snapshot{}, err
-		}
-	}
-	return store.applyLocked(ctx, runID, expectedRevision, mutation, false, nil)
-}
-
 // applyLocked is reached only after ordinary or fenced eligibility checks.
 func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation, control bool, consumed *kernel.ChildExecutionGrant) (kernel.Snapshot, error) {
 	if consumed == nil {

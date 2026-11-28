@@ -274,63 +274,6 @@ func pgAdvanceOwnedEntryEpoch(tx *gorm.DB, g kernel.ChildExecutionGrant) error {
 	return nil
 }
 
-// ApplyOwnedPhysicalRecovery is a receipt-only exact-CAS capability. It cannot
-// mint an epoch, renew the original lease, enter middleware or authorize send.
-func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant kernel.ChildExecutionGrant, expectedRevision uint64, mutation kernel.StoreMutation, permit kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	if store == nil || store.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalRecoveryRequest(grant, expectedRevision, mutation) != nil {
-		return kernel.Snapshot{}, kernel.ErrInvalidInput
-	}
-	var result kernel.Snapshot
-	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		current, err := lockKernelRun(tx, grant.ChildRunID)
-		if err != nil {
-			return err
-		}
-		if e := pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
-			return e
-		}
-		snapshot, err := kernelSnapshotFrom(current)
-		if err != nil {
-			return err
-		}
-		row, err := pgLoadOwnedPhysicalGrant(tx, grant)
-		if errors.Is(err, kernel.ErrNotFound) {
-			return kernel.ErrExecutionConflict
-		}
-		if err != nil {
-			return err
-		}
-		if err = kernel.ValidateOwnedPhysicalRecovery(grant, snapshot, pgManagedLease(current), expectedRevision, mutation, permit, pgCallbackCompletion(row), row.SettledRevision); err != nil {
-			return err
-		}
-		var active int64
-		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ?", grant.ChildRunID).Count(&active).Error; err != nil {
-			return translateKernelError(err)
-		}
-		if active != 1 {
-			return kernel.ErrChildExecutionBusy
-		}
-		accounting := sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}
-		ledger, e := kernel.PlanRunBudgetMutation(ctx, accounting, snapshot.Run, mutation, false)
-		if e != nil {
-			return e
-		}
-		if e = accounting.Apply(ctx, grant.ChildRunID, ledger); e != nil {
-			return e
-		}
-		updated, err := kernelRunRecordFrom(mutation.Record, 0)
-		if err != nil {
-			return err
-		}
-		if _, err = pgManagedMutation(tx, snapshot, mutation, nil); err != nil {
-			return err
-		}
-		result, err = store.applyKernelMutation(tx, grant.ChildRunID, expectedRevision, updated, mutation, nil, false, true, false)
-		return err
-	})
-	return result, err
-}
-
 func pgCallbackCompletion(row models.KernelChildEffectGrantRecord) kernel.PhysicalCallbackCompletion {
 	c := kernel.PhysicalCallbackCompletion{ReturnRevision: row.CallbackReturnRevision, ReturnSourceHash: row.CallbackReturnSourceHash, HostCompleted: row.CallbackHostCompleted, LeaseOwned: row.CallbackLeaseOwned, ControlCustody: kernel.OwnedCallbackCustody(row.CallbackControlCustody), ToolReturns: kernel.OwnedToolReturns(row.CallbackToolReturns)}
 	if c != (kernel.PhysicalCallbackCompletion{}) {

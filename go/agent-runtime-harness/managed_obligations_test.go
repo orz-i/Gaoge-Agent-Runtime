@@ -34,28 +34,32 @@ type managedObligationStore struct {
 	allEvents bool
 }
 
-func (s *managedObligationStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	hit := false
-	if s.allEvents || m.ManagedSafePoint.Present() {
-		for _, e := range m.Events {
-			if e.Type == s.event {
-				s.count--
-				hit = s.count == 0
+func (s *managedObligationStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		hit := false
+		if s.allEvents || commitMutation.ManagedSafePoint.Present() {
+			for _, e := range commitMutation.Events {
+				if e.Type == s.event {
+					s.count--
+					hit = s.count == 0
+				}
 			}
 		}
+		if hit && s.before {
+			s.hit = true
+			panic(managedObligationCrash{})
+		}
+		out, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && hit {
+			s.hit = true
+			// Deliberately no original callback return/retirement.
+			panic(managedObligationCrash{})
+		}
+		return out, false, err
 	}
-	if hit && s.before {
-		s.hit = true
-		panic(managedObligationCrash{})
-	}
-	out, err := s.Store.ApplyExecution(ctx, lease, revision, m)
-	if err == nil && hit {
-		s.hit = true
-		// Deliberately no original callback return/retirement.
-		panic(managedObligationCrash{})
-	}
-	return out, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func crashManagedObligation(t *testing.T, f func()) {
 	t.Helper()
 	defer func() {

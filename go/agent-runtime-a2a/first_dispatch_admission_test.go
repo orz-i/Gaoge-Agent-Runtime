@@ -70,14 +70,17 @@ type independentA2AClaimAckFence struct {
 	release   chan struct{}
 }
 
-func (s *independentA2AClaimAckFence) Apply(ctx context.Context, id string, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, revision, m)
-	if err == nil && revision == 1 && len(m.Events) != 0 &&
-		m.Events[0].Type == "a2a.remote_first_dispatch_admitted" {
-		s.committed <- snap
-		<-s.release
+func (s *independentA2AClaimAckFence) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && commitRev == 1 && len(commitMutation.Events) != 0 &&
+			commitMutation.Events[0].Type == "a2a.remote_first_dispatch_admitted" {
+			s.committed <- snap
+			<-s.release
+		}
+		return snap, false, err
 	}
-	return snap, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestPR151A2AFirstDispatchClaimAckAfterCallerCancellation(t *testing.T) {

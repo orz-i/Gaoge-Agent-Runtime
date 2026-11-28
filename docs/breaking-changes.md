@@ -37,6 +37,8 @@
 
 - Managed cancellation is now an ordinary `ApplyControl` transaction carrying the original authorized recovery selection through its `CancellationGuard`. Removed the standalone `CommitManagedCancellation` Runtime/Store API, `ManagedCancelRequest` and separate managed budget cancellation reducer. The Store qualifies the exact expired predecessor and descendant/ledger facts, consumes its Effect, commits the common native cancellation, revokes the owner and records the actual resulting selection in the same transaction. Exact ACK replay returns the committed snapshot; no second terminal snapshot is constructed before commit.
 
+- The Kernel Store now exposes one Run write transaction, `Commit(ctx, runID, revision, mutation, authority)`. Removed Store `Apply`, `ApplyExecution`, `ApplyControl`, `ApplyOwnedPhysicalRecovery` and `ControlStore`; existing Runtime feature methods submit that same command. Original lease, control or receipt proof are transient mutually exclusive authority inputs (zero is an unclaimed/ancestor-fenced write), not selectable execution modes. The same native transaction qualifies source, commits Run/accounting/journal and returns the actual committed snapshot and owner-revocation result. Store implementations and fault fixtures must use the new method; no fallback write port is retained.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

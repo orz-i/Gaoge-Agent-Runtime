@@ -167,12 +167,6 @@ func (s *Store) ReleaseExecution(ctx context.Context, lease kernel.ExecutionLeas
 	}
 	return tx.Commit()
 }
-func (s *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if !validSQLiteExecutionLease(lease) || mutation.Record.Run.ID != lease.RunID || expectedRevision == 0 {
-		return kernel.Snapshot{}, kernel.ErrInvalidInput
-	}
-	return s.applyWithExecution(ctx, &lease, nil, nil, lease.RunID, expectedRevision, mutation)
-}
 
 // CheckExecution consults a single SQLite snapshot using SQLite engine time,
 // not the host's clock or the caller's informational expiry.

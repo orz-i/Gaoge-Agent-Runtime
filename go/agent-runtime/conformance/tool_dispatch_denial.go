@@ -45,22 +45,19 @@ func (s *toolDispatchDenialStore) arm(m kernel.StoreMutation, err error) {
 		}
 	}
 }
-func (s *toolDispatchDenialStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.cut(m) {
-		return kernel.Snapshot{}, s.injected
+
+func (s *toolDispatchDenialStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil || commitAuth.Lease != nil {
+		if s.cut(commitMutation) {
+			return kernel.Snapshot{}, false, s.injected
+		}
+		next, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		s.arm(commitMutation, err)
+		return next, false, err
 	}
-	next, err := s.Store.Apply(ctx, id, rev, m)
-	s.arm(m, err)
-	return next, err
+	return s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
-func (s *toolDispatchDenialStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.cut(m) {
-		return kernel.Snapshot{}, s.injected
-	}
-	next, err := s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-	s.arm(m, err)
-	return next, err
-}
+
 func (s *toolDispatchDenialStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
 	err := s.ExecutionStore.CheckExecution(ctx, id, l)
 	if err == nil && s.checkPending && s.afterCheck != nil {
@@ -123,7 +120,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			coord := budget.Coordinator{Store: ledger}
 			cut := errors.New("native no-send closure CAS failed")
 			store := &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{
-				Store: base, ExecutionStore: base.(kernel.ExecutionStore), ControlStore: base.(kernel.ControlStore), ExecutionQuarantineStore: base.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: base.(kernel.PhysicalExecutionStore), injected: cut,
+				Store: base, ExecutionStore: base.(kernel.ExecutionStore), ExecutionQuarantineStore: base.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: base.(kernel.PhysicalExecutionStore), injected: cut,
 			}}
 			cancelled := mode != "dispatch-write-before" && mode != "dispatch-write-ack" && mode != "actual-handler-error"
 			if cancelled {

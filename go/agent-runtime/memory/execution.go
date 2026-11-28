@@ -138,44 +138,6 @@ func (store *Store) ReleaseExecution(ctx context.Context, lease kernel.Execution
 	store.setExecutionLocked(lease.RunID, state)
 	return nil
 }
-func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if store == nil || ctx == nil || !validMemoryLease(lease) || expectedRevision == 0 || mutation.Record.Run.ID != lease.RunID || mutation.Record.Run.Revision != expectedRevision+1 {
-		return kernel.Snapshot{}, kernel.ErrInvalidInput
-	}
-	if err := ctx.Err(); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if err := store.nativeEntryGateLocked(lease.RunID); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	state := store.runs[lease.RunID].execution
-	if g, ok := store.ownedGrantLocked(lease.RunID); ok && !g.grant.MatchesExecution(lease) {
-		return kernel.Snapshot{}, kernel.ErrExecutionConflict
-	}
-	if state.quarantineRev != 0 {
-		return kernel.Snapshot{}, kernel.ErrExecutionQuarantined
-	}
-	if !activeMemoryLease(state, lease, store.currentExecutionTime()) {
-		return kernel.Snapshot{}, kernel.ErrExecutionConflict
-	}
-	current, ok := store.snapshotLocked(lease.RunID)
-	if !ok {
-		return kernel.Snapshot{}, kernel.ErrNotFound
-	}
-	if mutation.Ledger != nil && current.Run.ParentRunID != "" {
-		if _, err := store.validateLiveRunOwners(ctx, current.Run); err != nil {
-			return kernel.Snapshot{}, err
-		}
-	}
-	if current.Run.Status != kernel.RunStatusRunning {
-		// Even the incumbent owner cannot lift a manual approval/budget gate.
-		// Only a Feature-validated ApplyControl can release it.
-		return kernel.Snapshot{}, kernel.ErrExecutionRequired
-	}
-	return store.applyLocked(ctx, lease.RunID, expectedRevision, mutation, false, nil)
-}
 
 // CheckExecution obtains the Store-owned clock under the same mutex as epoch
 // changes. An informational client ExpiresAt cannot revive a stale token.

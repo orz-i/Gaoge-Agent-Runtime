@@ -106,7 +106,7 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 	}
 	record := kernel.Record{Run: original.Run, State: original.State, Checkpoint: original.Checkpoint, Result: original.Result}
 	record.Run.Revision++
-	_, e = store.Apply(ctx, original.Run.ID, original.Run.Revision, kernel.StoreMutation{Record: record})
+	_, _, e = store.Commit(ctx, original.Run.ID, original.Run.Revision, kernel.StoreMutation{Record: record}, kernel.CommitAuthority{})
 	if !errors.Is(e, kernel.ErrExecutionRequired) {
 		t.Fatalf("direct Store.Apply authority precedence: %v", e)
 	}
@@ -155,7 +155,7 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 		}
 		next := kernel.Record{Run: snap.Run, State: snap.State, Checkpoint: snap.Checkpoint, Result: snap.Result}
 		next.Run.Revision++
-		if _, e = store.ApplyExecution(ctx, candidate, snap.Run.Revision, kernel.StoreMutation{Record: next}); !errors.Is(e, expected) {
+		if _, _, e = store.Commit(ctx, (candidate).RunID, snap.Run.Revision, kernel.StoreMutation{Record: next}, kernel.LeaseCommit(candidate)); !errors.Is(e, expected) {
 			t.Fatalf("waiting %s authority precedence: %v want %v", scenario, e, expected)
 		}
 		assertOwnedKernelRecord(t, db, authoritative)

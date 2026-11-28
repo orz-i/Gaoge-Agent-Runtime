@@ -217,12 +217,12 @@ execution epoch, owner, opaque lease ID, Store-owned expiry and Run
 revision are all checked in the same write transaction. `Epoch > 0`
 retains the fence without a separate `execution_fenced` column;
 renewal does not rotate the token, so a bound Runtime keeps working
-across heartbeats. Plain `Apply` is permanently fenced off
+across heartbeats. An unbound `Commit` is permanently fenced off
 for that Run after the first claim. A fresh process can safely claim
 an expired segment under a higher epoch without changing Run Revision.
 
 **Stage 2 Phase 2A:** the adapter now supports a narrow
-`ControlStore.ApplyControl` for exact approval Checkpoint, blocked
+`Store.Commit with ControlCommit` for exact approval Checkpoint, blocked
 allowance dimension, cancellation and Store-time deadline expiration.
 Control CAS revokes the former Epoch and returns whether an old owner
 was revoked. After the [Phase 2A security remediation](../../docs/audits/2026-10-16-stage2-phase2a-code-review-remediation.md),

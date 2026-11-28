@@ -36,7 +36,6 @@ func RunEA1RootAgentStartSettlementSuite(t *testing.T, factory func(*testing.T) 
 type ea1StartSettlementStore struct {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
 
 	kernel.PhysicalExecutionStore
 	mode                                  string
@@ -167,7 +166,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	if operation == "resume" {
 		initialMode = "setup"
 	}
-	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), mode: initialMode, fault: fault}
+	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), mode: initialMode, fault: fault}
 	rt, err := kernel.New(kernel.Dependencies{Store: wrapped})
 	if err != nil {
 		t.Fatal(err)

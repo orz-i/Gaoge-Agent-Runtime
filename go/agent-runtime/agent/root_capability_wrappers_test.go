@@ -15,26 +15,6 @@ func (s *modelInvocationFaultStore) CheckOwnedPhysicalEntry(ctx context.Context,
 	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
-func (s *modelInvocationFaultStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	s.mu.Lock()
-	fail := !s.failed && mutationHasEvent(m.Events, s.eventType)
-	if fail {
-		s.failed = true
-	}
-	s.mu.Unlock()
-	if fail && !s.afterCommit {
-		return kernel.Snapshot{}, errInjectedModelInvocationCrash
-	}
-	out, err := s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
-	if err != nil {
-		return out, err
-	}
-	if fail {
-		return kernel.Snapshot{}, errInjectedModelInvocationCrash
-	}
-	return out, nil
-}
-
 func (s *modelInvocationFaultStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
 	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
 }
@@ -42,9 +22,7 @@ func (s *modelInvocationFaultStore) LookupChildExecution(ctx context.Context, id
 func (s *modelInvocationFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.PhysicalExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *modelInvocationFaultStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
-}
+
 func (s *modelInvocationFaultStore) QuarantineExecution(ctx context.Context, q kernel.ExecutionQuarantine) error {
 	return s.Store.(kernel.ExecutionQuarantineStore).QuarantineExecution(ctx, q)
 }
@@ -58,10 +36,6 @@ func (s *lostCreateResponseStore) CheckOwnedPhysicalEntry(ctx context.Context, g
 	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
-func (s *lostCreateResponseStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	return s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
-}
-
 func (s *lostCreateResponseStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
 	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
 }
@@ -69,9 +43,7 @@ func (s *lostCreateResponseStore) LookupChildExecution(ctx context.Context, id s
 func (s *lostCreateResponseStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.PhysicalExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *lostCreateResponseStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
-}
+
 func (s *lostCreateResponseStore) QuarantineExecution(ctx context.Context, q kernel.ExecutionQuarantine) error {
 	return s.Store.(kernel.ExecutionQuarantineStore).QuarantineExecution(ctx, q)
 }
@@ -85,10 +57,6 @@ func (s *stealerOnCreateStore) CheckOwnedPhysicalEntry(ctx context.Context, g ke
 	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
-func (s *stealerOnCreateStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	return s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
-}
-
 func (s *stealerOnCreateStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
 	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
 }
@@ -96,9 +64,7 @@ func (s *stealerOnCreateStore) LookupChildExecution(ctx context.Context, id stri
 func (s *stealerOnCreateStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.PhysicalExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *stealerOnCreateStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
-}
+
 func (s *stealerOnCreateStore) QuarantineExecution(ctx context.Context, q kernel.ExecutionQuarantine) error {
 	return s.Store.(kernel.ExecutionQuarantineStore).QuarantineExecution(ctx, q)
 }
@@ -116,25 +82,6 @@ func (s *modelInvocationFaultStore) ReleaseExecution(ctx context.Context, l kern
 }
 func (s *modelInvocationFaultStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
 	return s.Store.(kernel.ExecutionStore).CheckExecution(ctx, id, l)
-}
-func (s *modelInvocationFaultStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	s.mu.Lock()
-	fail := !s.failed && mutationHasEvent(m.Events, s.eventType)
-	if fail {
-		s.failed = true
-	}
-	s.mu.Unlock()
-	if fail && !s.afterCommit {
-		return kernel.Snapshot{}, errInjectedModelInvocationCrash
-	}
-	out, err := s.Store.(kernel.ExecutionStore).ApplyExecution(ctx, l, r, m)
-	if err != nil {
-		return out, err
-	}
-	if fail {
-		return kernel.Snapshot{}, errInjectedModelInvocationCrash
-	}
-	return out, nil
 }
 
 func (s *modelInvocationFaultStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {

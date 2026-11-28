@@ -26,23 +26,24 @@ type pausedA2AAdmissionStore struct {
 	once       sync.Once
 }
 
-func (s *pausedA2AAdmissionStore) Apply(
-	ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation,
-) (kernel.Snapshot, error) {
-	committed, err := s.Store.Apply(ctx, id, revision, mutation)
-	if err == nil {
-		for _, event := range mutation.Events {
-			if event.Type == s.pauseEvent {
-				s.once.Do(func() { close(s.admitted) })
-				select {
-				case <-s.release:
-				case <-ctx.Done():
-					return committed, ctx.Err()
+func (s *pausedA2AAdmissionStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		committed, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil {
+			for _, event := range commitMutation.Events {
+				if event.Type == s.pauseEvent {
+					s.once.Do(func() { close(s.admitted) })
+					select {
+					case <-s.release:
+					case <-commitCtx.Done():
+						return committed, false, commitCtx.Err()
+					}
 				}
 			}
 		}
+		return committed, false, err
 	}
-	return committed, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func a2aControlFixture(t *testing.T, store kernel.Store, client RemoteClient, resolverBlock *atomic.Bool, resolverGate, resolverRelease chan struct{}) (
@@ -296,17 +297,20 @@ type a2aControlLostStoreACK struct {
 
 var errA2AControlLostStoreACK = errors.New("test: Store write committed but reply lost")
 
-func (s *a2aControlLostStoreACK) Apply(ctx context.Context, id string, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	committed, err := s.Store.Apply(ctx, id, revision, m)
-	if err != nil {
-		return committed, err
-	}
-	for _, event := range m.Events {
-		if event.Type == s.event && s.hits.Add(1) == 1 {
-			return committed, errA2AControlLostStoreACK
+func (s *a2aControlLostStoreACK) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		committed, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return committed, false, err
 		}
+		for _, event := range commitMutation.Events {
+			if event.Type == s.event && s.hits.Add(1) == 1 {
+				return committed, false, errA2AControlLostStoreACK
+			}
+		}
+		return committed, false, nil
 	}
-	return committed, nil
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestPR113ControlStoreCommittedLostACKPreservesPhysicalFence(t *testing.T) {

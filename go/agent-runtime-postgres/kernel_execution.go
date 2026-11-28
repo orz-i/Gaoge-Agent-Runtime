@@ -220,16 +220,6 @@ func (store *KernelStore) ReleaseExecution(ctx context.Context, lease kernel.Exe
 	})
 }
 
-// ApplyExecution uses the same transaction-local journal/outbox persistence
-// as plain Apply, but with an extra atomic epoch/owner/expiry predicate.
-func (store *KernelStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease,
-	expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if !pgExecutionLeaseValid(lease) || mutation.Record.Run.ID != lease.RunID || expectedRevision == 0 {
-		return kernel.Snapshot{}, kernel.ErrInvalidInput
-	}
-	return store.applyWithExecution(ctx, &lease, nil, nil, lease.RunID, expectedRevision, mutation)
-}
-
 func (store *KernelStore) executionCommitConflict(tx *gorm.DB, runID string, lease *kernel.ExecutionLease) error {
 	current, err := lockKernelRun(tx, runID)
 	if err != nil {

@@ -163,33 +163,6 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 	return window, err
 }
 
-func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	if s == nil || ctx == nil || kernel.ValidateOwnedPhysicalRecoveryRequest(g, revision, m) != nil {
-		return kernel.Snapshot{}, kernel.ErrInvalidInput
-	}
-	if e := ctx.Err(); e != nil {
-		return kernel.Snapshot{}, e
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.nativeEntryGateLocked(g.ChildRunID); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	current, ok := s.snapshotLocked(g.ChildRunID)
-	if !ok {
-		return kernel.Snapshot{}, kernel.ErrNotFound
-	}
-	original, err := s.loadOwnedPhysicalGrantLocked(g)
-	if err != nil {
-		return kernel.Snapshot{}, kernel.ErrExecutionConflict
-	}
-	if err := kernel.ValidateOwnedPhysicalRecovery(g, current, s.runs[g.ChildRunID].execution.lease, revision, m, p, original.completion, 0); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	m.PhysicalPermit = p.PhysicalPermit(g, current, m)
-	return s.applyLocked(ctx, g.ChildRunID, revision, m, false, nil)
-}
-
 // RecordPhysicalCallbackReturn changes only the original physical scope,
 // never the Run projection, wakeup revision, checkpoint or lease epoch.
 func (s *Store) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {

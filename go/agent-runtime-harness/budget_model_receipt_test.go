@@ -134,19 +134,22 @@ type receiptFaultStore struct {
 	afterCommit, fired bool
 }
 
-func (store *receiptFaultStore) Apply(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	for _, event := range mutation.Events {
-		if !store.fired && event.Type == "agent.model_invocation.completed" {
-			store.fired = true
-			if store.afterCommit {
-				if _, err := store.Store.Apply(ctx, id, revision, mutation); err != nil {
-					return kernel.Snapshot{}, err
+func (store *receiptFaultStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control == nil {
+		for _, event := range commitMutation.Events {
+			if !store.fired && event.Type == "agent.model_invocation.completed" {
+				store.fired = true
+				if store.afterCommit {
+					if _, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); err != nil {
+						return kernel.Snapshot{}, false, err
+					}
 				}
+				return kernel.Snapshot{}, false, errBudgetResponseRejected
 			}
-			return kernel.Snapshot{}, errBudgetResponseRejected
 		}
+		return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return store.Store.Apply(ctx, id, revision, mutation)
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {

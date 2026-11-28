@@ -19,9 +19,9 @@ import (
 // GOWORK=off, first against the local coordinated cohort and then against
 // immutable published module tags with NO filesystem replace directives.
 var (
-	_ kernel.Store                    = (*sqlite.Store)(nil)
-	_ kernel.ExecutionStore           = (*sqlite.Store)(nil)
-	_ kernel.ControlStore             = (*sqlite.Store)(nil)
+	_ kernel.Store          = (*sqlite.Store)(nil)
+	_ kernel.ExecutionStore = (*sqlite.Store)(nil)
+
 	_ runrelation.Store               = (*sqlite.RunRelationStore)(nil)
 	_ runrelation.ReconciliationPager = (*sqlite.RunRelationStore)(nil)
 )

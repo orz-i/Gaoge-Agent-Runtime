@@ -402,13 +402,9 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 		record.Run.Revision++
 		record.Run.Status = kernel.RunStatusRunning
 		record.Run.UpdatedAt = now
-		direct, ok := store.(kernel.ControlStore)
-		if !ok {
-			t.Fatal("Store is not ControlStore")
-		}
-		_, revoked, err := direct.ApplyControl(ctx, pending.Run.ID, pending.Run.Revision,
-			kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: cp.ID},
-			kernel.StoreMutation{Record: record})
+
+		direct := store
+		_, revoked, err := direct.Commit(ctx, pending.Run.ID, pending.Run.Revision, kernel.StoreMutation{Record: record}, kernel.ControlCommit(kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: cp.ID}))
 		if !errors.Is(err, kernel.ErrInvalidInput) || revoked {
 			t.Fatalf("unsealed direct Store call bypassed approval: revoked=%v err=%v", revoked, err)
 		}

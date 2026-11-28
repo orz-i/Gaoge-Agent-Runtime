@@ -83,24 +83,28 @@ func (store *measuredStore) Create(ctx context.Context, record kernel.Record, ev
 }
 
 // The native Runner uses this fenced port, not the unfenced Store.Apply port.
-func (store *measuredStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	result, err := store.Store.ApplyExecution(ctx, lease, revision, mutation)
-	if err != nil {
-		return result, err
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	store.observe(result)
-	for _, event := range mutation.Events {
-		if event.Type == "tool.completed" {
-			store.completed++
-			if store.completed == store.faultAfter && !store.faulted {
-				store.faulted = true
-				return kernel.Snapshot{}, errCommittedReceiptACKLost
+
+func (store *measuredStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		result, _, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return result, false, err
+		}
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		store.observe(result)
+		for _, event := range commitMutation.Events {
+			if event.Type == "tool.completed" {
+				store.completed++
+				if store.completed == store.faultAfter && !store.faulted {
+					store.faulted = true
+					return kernel.Snapshot{}, false, errCommittedReceiptACKLost
+				}
 			}
 		}
+		return result, false, nil
 	}
-	return result, nil
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func main() {

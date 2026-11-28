@@ -169,23 +169,41 @@ type nativeDispatchCancelKernelStore struct {
 	cutGrant       kernel.ChildExecutionGrant
 }
 
-func (s *nativeDispatchCancelKernelStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	for _, event := range m.Events {
-		if event.Type == "tool.admission_unsent" && s.closureCuts > 0 {
-			s.closureCuts--
-			s.cuts++
-			return kernel.Snapshot{}, errors.New("native unsent closure cut")
-		}
-	}
-	next, err := s.Store.ApplyExecution(ctx, l, rev, m)
-	if err == nil && s.action != nil {
-		for _, e := range m.Events {
-			if e.Type == "tool.dispatch_intent" {
-				s.pending = true
+func (s *nativeDispatchCancelKernelStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		for _, event := range commitMutation.Events {
+			if event.Type == "tool.admission_unsent" && s.closureCuts > 0 {
+				s.closureCuts--
+				s.cuts++
+				return kernel.Snapshot{}, false, errors.New("native unsent closure cut")
 			}
 		}
+		next, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.action != nil {
+			for _, e := range commitMutation.Events {
+				if e.Type == "tool.dispatch_intent" {
+					s.pending = true
+				}
+			}
+		}
+		return next, false, err
 	}
-	return next, err
+	if commitAuth.Recovery != nil {
+		g := commitAuth.Recovery.Grant
+
+		if s.interrupted {
+			return kernel.Snapshot{}, false, errOriginalRetirementCut
+		}
+		if s.retirementCut == "recovery-before" {
+			return kernel.Snapshot{}, false, s.interrupt(g)
+		}
+		next, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.retirementCut == "recovery-ack" {
+			return kernel.Snapshot{}, false, s.interrupt(g)
+		}
+		return next, false, err
+	}
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 var errOriginalRetirementCut = errors.New("original native receipt/retirement interrupted")
@@ -197,19 +215,7 @@ func (s *nativeDispatchCancelKernelStore) interrupt(g kernel.ChildExecutionGrant
 	s.cutGrant = g
 	return errOriginalRetirementCut
 }
-func (s *nativeDispatchCancelKernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	if s.interrupted {
-		return kernel.Snapshot{}, errOriginalRetirementCut
-	}
-	if s.retirementCut == "recovery-before" {
-		return kernel.Snapshot{}, s.interrupt(g)
-	}
-	next, err := s.Store.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
-	if err == nil && s.retirementCut == "recovery-ack" {
-		return kernel.Snapshot{}, s.interrupt(g)
-	}
-	return next, err
-}
+
 func (s *nativeDispatchCancelKernelStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.interrupted {
 		return errOriginalRetirementCut

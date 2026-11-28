@@ -30,19 +30,23 @@ type ea1CancelControlStore struct {
 	commits int
 }
 
-func (s *ea1CancelControlStore) ApplyControl(ctx context.Context, id string, revision uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	if s.before != nil {
-		s.before()
-	}
-	out, revoked, e := s.ControlStore.ApplyControl(ctx, id, revision, g, m)
-	if e == nil {
-		s.commits++
-		if s.fault != nil {
-			return kernel.Snapshot{}, false, s.fault
+func (s *ea1CancelControlStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		if s.before != nil {
+			s.before()
 		}
+		out, revoked, e := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if e == nil {
+			s.commits++
+			if s.fault != nil {
+				return kernel.Snapshot{}, false, s.fault
+			}
+		}
+		return out, revoked, e
 	}
-	return out, revoked, e
+	return s.ea1AgentAdmissionStore.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func ea1RootCancelACK(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	f := ea1NewResumeFixture(t, factory, false)
 	lease, e := f.observer.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: f.request.ID, OwnerID: "original-cancel-owner", LeaseDuration: 2 * time.Second})

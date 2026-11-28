@@ -255,14 +255,15 @@ type lostAllowanceACKStore struct {
 	armed atomic.Bool
 }
 
-func (store *lostAllowanceACKStore) ApplyControl(
-	ctx context.Context, runID string, revision uint64, guard kernel.ControlGuard, change kernel.StoreMutation,
-) (kernel.Snapshot, bool, error) {
-	snapshot, revoked, err := store.Store.ApplyControl(ctx, runID, revision, guard, change)
-	if err == nil && store.armed.CompareAndSwap(true, false) {
-		return kernel.Snapshot{}, revoked, errControlLostACK
+func (store *lostAllowanceACKStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		snapshot, revoked, err := store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && store.armed.CompareAndSwap(true, false) {
+			return kernel.Snapshot{}, revoked, errControlLostACK
+		}
+		return snapshot, revoked, err
 	}
-	return snapshot, revoked, err
+	return store.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {

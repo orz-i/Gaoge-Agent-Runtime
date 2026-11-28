@@ -35,15 +35,21 @@ func (s *returnedDispatchKernelCut) CheckOwnedPhysicalEntry(ctx context.Context,
 	}
 	return s.noEntryKernelPorts.CheckOwnedPhysicalEntry(ctx, g, l, v)
 }
-func (s *returnedDispatchKernelCut) ApplyControl(ctx context.Context, id string, rev uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	if g.Kind == kernel.ControlApproval && s.cut == "approval-control-before" {
-		return kernel.Snapshot{}, false, errApprovalControlCut
+
+func (s *returnedDispatchKernelCut) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		g := *commitAuth.Control
+
+		if g.Kind == kernel.ControlApproval && s.cut == "approval-control-before" {
+			return kernel.Snapshot{}, false, errApprovalControlCut
+		}
+		v, revoked, err := s.noEntryKernelPorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && g.Kind == kernel.ControlApproval && s.cut == "approval-control-after" {
+			return kernel.Snapshot{}, false, errApprovalControlCut
+		}
+		return v, revoked, err
 	}
-	v, revoked, err := s.noEntryKernelPorts.ApplyControl(ctx, id, rev, g, m)
-	if err == nil && g.Kind == kernel.ControlApproval && s.cut == "approval-control-after" {
-		return kernel.Snapshot{}, false, errApprovalControlCut
-	}
-	return v, revoked, err
+	return s.noEntryKernelPorts.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type substitutedApprovalHandler struct{ plugin.ApprovalHandler }

@@ -86,7 +86,7 @@ type ea1ChildStartFixture struct {
 
 func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), withTool, deadline bool) *ea1ChildStartFixture {
 	backing, peer, reopen := factory(t)
-	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("original child receipt unavailable")}
+	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("original child receipt unavailable")}
 	f := &ea1ChildStartFixture{t: t, store: &ea1ChildStartStore{ea1ElectionStore: &ea1ElectionStore{ea1AgentReceiptFault: fault}}, peer: ea1StartRuntime(t, peer), peerStore: peer, reopen: reopen}
 	f.rt = ea1StartRuntime(t, f.store)
 	f.request = agent.StartRequest{ID: "actual-start-child", ParentRunID: "middle", OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child"}`)), RequestID: "original-child-effect", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original Child Start", Instructions: "Preserve child source", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}

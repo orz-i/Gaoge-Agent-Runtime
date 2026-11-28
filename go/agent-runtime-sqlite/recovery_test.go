@@ -67,20 +67,15 @@ func (s failAfterCommitStore) Create(ctx context.Context, record kernel.Record, 
 	return snap, err
 }
 
-func (s failAfterCommitStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, rev, m)
-	if err != nil {
-		return snap, err
+func (s failAfterCommitStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil || commitAuth.Lease != nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err != nil {
+			return snap, false, err
+		}
+		return s.afterApply(snap, commitMutation), false, nil
 	}
-	return s.afterApply(snap, m), nil
-}
-
-func (s failAfterCommitStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.ApplyExecution(ctx, lease, rev, m)
-	if err != nil {
-		return snap, err
-	}
-	return s.afterApply(snap, m), nil
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func (s failAfterCommitStore) afterApply(snap kernel.Snapshot, m kernel.StoreMutation) kernel.Snapshot {

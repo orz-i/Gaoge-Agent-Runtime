@@ -290,13 +290,16 @@ type sessionApplyFenceStore struct {
 	release   chan struct{}
 }
 
-func (s *sessionApplyFenceStore) Apply(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, revision, mutation)
-	if err == nil && revision == 2 && strings.Contains(string(mutation.Record.State), `"sessionID":"session-1"`) {
-		s.committed <- snap
-		<-s.release
+func (s *sessionApplyFenceStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && commitRev == 2 && strings.Contains(string(commitMutation.Record.State), `"sessionID":"session-1"`) {
+			s.committed <- snap
+			<-s.release
+		}
+		return snap, false, err
 	}
-	return snap, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestACPCancelBeatsPromptAdmissionWithoutLatePhysicalSend(t *testing.T) {

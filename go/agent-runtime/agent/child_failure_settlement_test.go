@@ -78,12 +78,16 @@ type childFailureStore struct {
 	marks, finishes int
 }
 
-func (s *childFailureStore) Apply(ctx context.Context, id string, rev uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if mutation.Record.Run.Status == kernel.RunStatusFailed && s.fault == "failure-cas" {
-		return kernel.Snapshot{}, errChildFailureFixture
+func (s *childFailureStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		if commitMutation.Record.Run.Status == kernel.RunStatusFailed && s.fault == "failure-cas" {
+			return kernel.Snapshot{}, false, errChildFailureFixture
+		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.Apply(ctx, id, rev, mutation)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func (s *childFailureStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if g.IsOwned() {
 		return s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)

@@ -203,9 +203,9 @@ func TestFencedApprovalProcessChild(t *testing.T) {
 	}
 	forgedRun := resolved.Run
 	forgedRun.Revision++
-	_, err = store.ApplyExecution(ctx, firstLease, resolved.Run.Revision, kernel.StoreMutation{
+	_, _, err = store.Commit(ctx, (firstLease).RunID, resolved.Run.Revision, kernel.StoreMutation{
 		Record: kernel.Record{Run: forgedRun, State: resolved.State},
-	})
+	}, kernel.LeaseCommit(firstLease))
 	if !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("revoked execution owner committed after %s control: %v", phase, err)
 	}

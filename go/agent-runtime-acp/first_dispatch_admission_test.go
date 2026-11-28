@@ -175,13 +175,16 @@ type independentOpenAdmissionACKFence struct {
 	release   chan struct{}
 }
 
-func (s *independentOpenAdmissionACKFence) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	snap, err := s.Store.Apply(ctx, id, rev, m)
-	if err == nil && rev == 1 && len(m.Events) != 0 && m.Events[0].Type == "acp.remote_open_dispatch_admitted" {
-		s.committed <- snap
-		<-s.release
+func (s *independentOpenAdmissionACKFence) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease == nil && commitAuth.Control == nil && commitAuth.Recovery == nil {
+		snap, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && commitRev == 1 && len(commitMutation.Events) != 0 && commitMutation.Events[0].Type == "acp.remote_open_dispatch_admitted" {
+			s.committed <- snap
+			<-s.release
+		}
+		return snap, false, err
 	}
-	return snap, err
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 func TestPR151ACPDelayedFirstDispatchClaimCannotOutliveCancel(t *testing.T) {

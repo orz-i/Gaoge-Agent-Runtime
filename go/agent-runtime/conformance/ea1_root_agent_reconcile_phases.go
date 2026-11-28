@@ -41,15 +41,21 @@ type ea1RootRecoveryFault struct {
 	heldSource    kernel.Snapshot
 }
 
-func (s *ea1RootRecoveryFault) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	out, err := s.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
-	if err == nil && s.phase == "P3" && s.cuts == 0 {
-		s.cuts++
-		s.recoveryGrant = g
-		return kernel.Snapshot{}, s.injected
+func (s *ea1RootRecoveryFault) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Recovery != nil {
+		g := commitAuth.Recovery.Grant
+
+		out, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.phase == "P3" && s.cuts == 0 {
+			s.cuts++
+			s.recoveryGrant = g
+			return kernel.Snapshot{}, false, s.injected
+		}
+		return out, false, err
 	}
-	return out, err
+	return s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
+
 func (s *ea1RootRecoveryFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.phase == "P4" && s.cuts == 0 {
 		s.cuts++
@@ -95,7 +101,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if kind == "tool" {
 		event = "tool.completed"
 	}
-	initial := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: event, injected: injected}
+	initial := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: event, injected: injected}
 	fault := &ea1RootRecoveryFault{ea1AgentReceiptFault: initial}
 	rt := ea1StartRuntime(t, fault)
 	competitor := ea1StartRuntime(t, peer)

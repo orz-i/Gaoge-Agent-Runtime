@@ -73,23 +73,26 @@ func (s *ea1ElectionStore) BeginPhysicalExecution(ctx context.Context, a kernel.
 	return v, e
 }
 
-func (s *ea1ElectionStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	out, err := s.ea1AgentReceiptFault.ApplyExecution(ctx, lease, revision, m)
-	if err == nil && s.afterApply != nil {
-		s.afterApply(m)
+func (s *ea1ElectionStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		out, _, err := s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.afterApply != nil {
+			s.afterApply(commitMutation)
+		}
+		return out, false, err
 	}
-	return out, err
+	if commitAuth.Recovery != nil {
+		out, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+		if err == nil && s.receiptCommitted != nil {
+			s.receiptCommitted(out)
+		}
+		return out, false, err
+	}
+	return s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 // Observe only an actual successful Store receipt CAS, before later terminal
 // consumption removes its internal replay record. Never mint or alter proof.
-func (s *ea1ElectionStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	out, err := s.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
-	if err == nil && s.receiptCommitted != nil {
-		s.receiptCommitted(out)
-	}
-	return out, err
-}
 
 func (s *ea1ElectionStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
 	window, err := s.PhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
@@ -136,7 +139,7 @@ type ea1ElectionFixture struct {
 
 func ea1NewElection(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), withTool bool) *ea1ElectionFixture {
 	backing, peer, reopen := factory(t)
-	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("original physical receipt not committed")}
+	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("original physical receipt not committed")}
 	f := &ea1ElectionFixture{t: t, store: &ea1ElectionStore{ea1AgentReceiptFault: fault}, peer: ea1StartRuntime(t, peer), peerStore: peer, reopen: reopen}
 	f.rt = ea1StartRuntime(t, f.store)
 	f.physical = &ea1ElectionPhysical{ea1StartSettlementPhysical: &ea1StartSettlementPhysical{rt: f.rt, tool: withTool}}
@@ -454,7 +457,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	// The peer has its own Store/connection; observe its winning CAS through
 	// the same faithful port, not through a fabricated post-hoc receipt.
 	originalPeer := f.peerStore
-	peerObserver := &ea1ElectionStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: originalPeer, ExecutionStore: originalPeer.(kernel.ExecutionStore), ControlStore: originalPeer.(kernel.ControlStore), ExecutionQuarantineStore: originalPeer.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: originalPeer.(kernel.PhysicalExecutionStore)}, receiptCommitted: observeReceipt}
+	peerObserver := &ea1ElectionStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: originalPeer, ExecutionStore: originalPeer.(kernel.ExecutionStore), ExecutionQuarantineStore: originalPeer.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: originalPeer.(kernel.PhysicalExecutionStore)}, receiptCommitted: observeReceipt}
 	f.peer = ea1StartRuntime(t, peerObserver)
 	available := mode != "unknown-ttl"
 	lookups := 0

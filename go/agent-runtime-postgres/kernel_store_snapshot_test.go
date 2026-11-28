@@ -49,16 +49,14 @@ func testKernelStoreApplyOwnSnapshot(t *testing.T, db *gorm.DB) {
 
 	applyA := make(chan snapshotResult, 1)
 	go func() {
-		result, err := store.Apply(context.WithValue(context.Background(), ownSnapshotQueryKey{}, true),
-			record.Run.ID, 1, snapshotMutation(record, 2, `{"worker":"A"}`))
+		result, _, err := store.Commit(context.WithValue(context.Background(), ownSnapshotQueryKey{}, true), record.Run.ID, 1, snapshotMutation(record, 2, `{"worker":"A"}`), kernel.CommitAuthority{})
 		applyA <- snapshotResult{result, err}
 	}()
 	var own snapshotResult
 	select {
 	case <-aboutToRead:
 		// A has already committed r2. B commits r3 before the old post-commit Load.
-		if _, err := store.Apply(t.Context(), record.Run.ID, 2,
-			snapshotMutation(record, 3, `{"worker":"B"}`)); err != nil {
+		if _, _, err := store.Commit(t.Context(), record.Run.ID, 2, snapshotMutation(record, 3, `{"worker":"B"}`), kernel.CommitAuthority{}); err != nil {
 			close(releaseRead)
 			t.Fatalf("concurrent worker B: %v", err)
 		}
@@ -66,8 +64,7 @@ func testKernelStoreApplyOwnSnapshot(t *testing.T, db *gorm.DB) {
 		own = <-applyA
 	case own = <-applyA:
 		// A returned its own snapshot before B committed.
-		if _, err := store.Apply(t.Context(), record.Run.ID, 2,
-			snapshotMutation(record, 3, `{"worker":"B"}`)); err != nil {
+		if _, _, err := store.Commit(t.Context(), record.Run.ID, 2, snapshotMutation(record, 3, `{"worker":"B"}`), kernel.CommitAuthority{}); err != nil {
 			t.Fatalf("subsequent worker B: %v", err)
 		}
 	case <-time.After(10 * time.Second):
@@ -112,16 +109,14 @@ func testKernelStoreCreateOwnSnapshot(t *testing.T, db *gorm.DB) {
 	var own snapshotResult
 	select {
 	case <-aboutToRead:
-		if _, err := store.Apply(t.Context(), record.Run.ID, 1,
-			snapshotMutation(record, 2, `{"worker":"B"}`)); err != nil {
+		if _, _, err := store.Commit(t.Context(), record.Run.ID, 1, snapshotMutation(record, 2, `{"worker":"B"}`), kernel.CommitAuthority{}); err != nil {
 			close(releaseRead)
 			t.Fatal(err)
 		}
 		close(releaseRead)
 		own = <-createdCh
 	case own = <-createdCh:
-		if _, err := store.Apply(t.Context(), record.Run.ID, 1,
-			snapshotMutation(record, 2, `{"worker":"B"}`)); err != nil {
+		if _, _, err := store.Commit(t.Context(), record.Run.ID, 1, snapshotMutation(record, 2, `{"worker":"B"}`), kernel.CommitAuthority{}); err != nil {
 			t.Fatal(err)
 		}
 	case <-time.After(10 * time.Second):

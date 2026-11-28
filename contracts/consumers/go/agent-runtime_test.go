@@ -21,7 +21,7 @@ type storeContract interface {
 	DecideBeforeCreate(context.Context, kernel.RunCreationDecision) (kernel.RunCreationDecision, error)
 	LoadCreationDecision(context.Context, string) (kernel.RunCreationDecision, error)
 	Load(context.Context, string) (kernel.Snapshot, error)
-	Apply(context.Context, string, uint64, kernel.StoreMutation) (kernel.Snapshot, error)
+	Commit(context.Context, string, uint64, kernel.StoreMutation, kernel.CommitAuthority) (kernel.Snapshot, bool, error)
 	ListEvents(context.Context, string, int64, int) ([]kernel.Event, error)
 	ClaimTransitions(context.Context, kernel.TransitionClaimRequest) ([]kernel.TransitionClaim, error)
 	AckTransition(context.Context, kernel.TransitionLeaseRequest) error
@@ -102,7 +102,6 @@ type childPhysicalStoreContract interface {
 	RecordPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.PhysicalCallbackOutcome, kernel.PhysicalCallbackReturn) error
 	LookupPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error)
 	CheckOwnedPhysicalEntry(context.Context, kernel.ChildExecutionGrant, kernel.ExecutionLease, kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error)
-	ApplyOwnedPhysicalRecovery(context.Context, kernel.ChildExecutionGrant, uint64, kernel.StoreMutation, kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error)
 	FinishChildExecution(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
 }
 

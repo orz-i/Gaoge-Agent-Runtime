@@ -33,9 +33,12 @@ type ea1CancelControlStore struct {
 	calls atomic.Int32
 }
 
-func (s *ea1CancelControlStore) ApplyControl(ctx context.Context, id string, rev uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
-	s.calls.Add(1)
-	return s.Store.ApplyControl(ctx, id, rev, g, m)
+func (s *ea1CancelControlStore) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Control != nil {
+		s.calls.Add(1)
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+	}
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type ea1CancelHostCut struct {
@@ -195,7 +198,24 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 	if _, _, err = f.host.CreateTurn(t.Context(), harness.Turn{ID: tid, SessionID: sid, HostTurn: hostTurn, ConfigSnapshotID: config.ID, Status: harness.TurnRunning, Revision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	initial, err := rt.Create(t.Context(), kernel.CreateRequest{ID: rid, Kind: agent.RunKind, Actor: actor, Thread: thread, RequestID: "parent", Goal: "coordinate", State: json.RawMessage(`{}`)})
+	// Encode a real Agent start state using an isolated fixture Runtime.
+	// This test intentionally seeds a live pre-prepare Run, with no native
+	// prepared retirement proof. Do not transfer the fixture's execution
+	// lease or retirement: those would permit resuming the original election.
+	provider := &ea1CancelForbiddenModel{}
+	seed, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: ea1CancelClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedAgent, err := agent.NewRunner(agent.Dependencies{Runtime: seed, Model: provider, Clock: ea1CancelClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := preparedAgent.PrepareRun(t.Context(), agent.StartRequest{ID: rid, Actor: actor, Thread: thread, RequestID: "parent", Goal: "coordinate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := rt.Create(t.Context(), kernel.CreateRequest{ID: rid, Kind: agent.RunKind, Actor: actor, Thread: thread, RequestID: "parent", Goal: "coordinate", State: prepared.State})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +267,6 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := &ea1CancelForbiddenModel{}
 	makeRunner := func(h harness.Store, l budget.LedgerStore) *harness.Runner {
 		ag, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider})
 		if e != nil {

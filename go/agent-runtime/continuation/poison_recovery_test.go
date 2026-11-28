@@ -77,9 +77,9 @@ func TestRunSemanticPoisonNACKDoesNotStarveHealthyRun(t *testing.T) {
 				damaged.Status = kernel.RunStatus("unexpected_status")
 				damaged.Revision++
 				var storeErr error
-				poison, storeErr = store.Apply(t.Context(), damaged.ID, damaged.Revision-1, kernel.StoreMutation{
+				poison, _, storeErr = store.Commit(t.Context(), damaged.ID, damaged.Revision-1, kernel.StoreMutation{
 					Record: kernel.Record{Run: damaged, State: poison.State},
-				})
+				}, kernel.CommitAuthority{})
 				if storeErr != nil {
 					t.Fatal(storeErr)
 				}

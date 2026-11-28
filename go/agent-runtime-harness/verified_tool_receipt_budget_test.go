@@ -20,14 +20,17 @@ type heldToolRecoveryFault struct {
 	fired bool
 }
 
-func (s *heldToolRecoveryFault) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	for _, ev := range m.Events {
-		if ev.Type == "tool.receipt_recovered" && !s.fired {
-			s.fired = true
-			return kernel.Snapshot{}, s.cut
+func (s *heldToolRecoveryFault) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Recovery != nil {
+		for _, ev := range commitMutation.Events {
+			if ev.Type == "tool.receipt_recovered" && !s.fired {
+				s.fired = true
+				return kernel.Snapshot{}, false, s.cut
+			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.Store.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
+	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type heldToolRecoveryModel struct{ requests []model.Request }

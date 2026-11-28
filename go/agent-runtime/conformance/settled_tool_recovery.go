@@ -82,7 +82,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 				event = "tool.completed"
 			}
 			injected := errors.New("settled Tool result CAS cut")
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: event, injected: injected}
+			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: event, injected: injected}
 			rt := ea1StartRuntime(t, fault)
 			observer := ea1StartRuntime(t, peer)
 			m := &settledToolModel{strict: variant == "strict-rejection"}
@@ -219,7 +219,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			if variant == "lost-recovery-ack" {
 				// A committed recovery CAS may lose its response. Re-open at
 				// the Store's actual new revision, never replay the old intent.
-				under := &ea1AgentReceiptFault{Store: freshStore, ExecutionStore: freshStore.(kernel.ExecutionStore), ControlStore: freshStore.(kernel.ControlStore), ExecutionQuarantineStore: freshStore.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: freshStore.(kernel.PhysicalExecutionStore), injected: injected}
+				under := &ea1AgentReceiptFault{Store: freshStore, ExecutionStore: freshStore.(kernel.ExecutionStore), ExecutionQuarantineStore: freshStore.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: freshStore.(kernel.PhysicalExecutionStore), injected: injected}
 				recovery := &ea1RootRecoveryFault{ea1AgentReceiptFault: under, phase: "P3"}
 				r = makeRunner(ea1StartRuntime(t, recovery), freshLedger, "original-ledger", true)
 				if _, err = r.ReconcileToolOutcome(ctx, request.ID, before.Run.Revision, original.Call.ID); !errors.Is(err, injected) {

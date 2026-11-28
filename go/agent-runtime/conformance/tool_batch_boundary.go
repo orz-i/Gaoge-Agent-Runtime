@@ -40,21 +40,24 @@ type batchBoundaryFault struct {
 	hits       int
 }
 
-func (s *batchBoundaryFault) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if (s.hits == 0 || s.persistent) && bytes.Contains(m.Record.State, []byte(`"phase":"required"`)) {
-		for _, ev := range m.Events {
-			if ev.Type == agent.EventToolPending && ev.Message == "child_batch" {
-				s.hits++
-				if s.after {
-					if _, err := s.ExecutionStore.ApplyExecution(ctx, l, r, m); err != nil {
-						return kernel.Snapshot{}, err
+func (s *batchBoundaryFault) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if commitAuth.Lease != nil {
+		if (s.hits == 0 || s.persistent) && bytes.Contains(commitMutation.Record.State, []byte(`"phase":"required"`)) {
+			for _, ev := range commitMutation.Events {
+				if ev.Type == agent.EventToolPending && ev.Message == "child_batch" {
+					s.hits++
+					if s.after {
+						if _, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); err != nil {
+							return kernel.Snapshot{}, false, err
+						}
 					}
+					return kernel.Snapshot{}, false, s.injected
 				}
-				return kernel.Snapshot{}, s.injected
 			}
 		}
+		return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 	}
-	return s.ExecutionStore.ApplyExecution(ctx, l, r, m)
+	return s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
 type batchUnsentCancelPorts struct {
@@ -159,12 +162,12 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			var fault *batchBoundaryFault
 			initial := backing
 			if mode == "approval-frontier-before" || mode == "approval-frontier-ack" || mode == "approval-frontier-persistent" {
-				fault = &batchBoundaryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch frontier commit fault")}, after: mode == "approval-frontier-ack", persistent: mode == "approval-frontier-persistent"}
+				fault = &batchBoundaryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch frontier commit fault")}, after: mode == "approval-frontier-ack", persistent: mode == "approval-frontier-persistent"}
 				initial = fault
 			}
 			var denialFault *toolDispatchDenialStore
 			if actualDenial {
-				denialFault = &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch no-send CAS cut")}, afterCallID: "next-call"}
+				denialFault = &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch no-send CAS cut")}, afterCallID: "next-call"}
 				denialFault.afterCheck = func() {
 					if _, err := (budget.Coordinator{Store: ledger}).CancelRoot(ctx, "original-ledger", "batch-boundary"); err != nil {
 						t.Fatal(err)

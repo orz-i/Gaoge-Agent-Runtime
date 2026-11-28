@@ -14,7 +14,6 @@ import (
 type noEntryKernelPorts interface {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ControlStore
 
 	kernel.PhysicalExecutionStore
 
