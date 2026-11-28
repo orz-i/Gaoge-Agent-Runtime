@@ -50,6 +50,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 			// transaction did not burn an otherwise unused Grant ID.
 			dispatchID := "atomic-original"
 			if mode == "physical-child" {
+				q.LeaseDuration = 5 * time.Second
 				dispatchID = ""
 				foreign, e := peer.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: ancestors[0].Run.ID, OwnerID: "foreign-parent", LeaseDuration: time.Minute})
 				if e != nil {
