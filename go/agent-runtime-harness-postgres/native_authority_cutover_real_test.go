@@ -16,38 +16,45 @@ import (
 )
 
 func TestRealPostgresNativeAuthorityCutover(t *testing.T) {
+	conformance.NativeAuthorityCutover(t, nativeAuthorityPostgresFixture)
+}
+
+func TestPostgresRejectedHostedReceiptPreservesOriginalQuota(t *testing.T) {
+	conformance.RejectedHostedReceiptPreservesOriginalQuota(t, nativeAuthorityPostgresFixture)
+}
+
+func nativeAuthorityPostgresFixture(t *testing.T) conformance.NativeAuthorityFixture {
+	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured")
 	}
-	conformance.NativeAuthorityCutover(t, func(t *testing.T) conformance.NativeAuthorityFixture {
-		db, isolated := openIsolatedHarnessPostgres(t, dsn)
-		if e := kernelpostgres.Migrate(db); e != nil {
-			t.Fatal(e)
-		}
-		if e := harnesspostgres.Migrate(db); e != nil {
-			t.Fatal(e)
-		}
-		h, e := harnesspostgres.New(db)
+	db, isolated := openIsolatedHarnessPostgres(t, dsn)
+	if e := kernelpostgres.Migrate(db); e != nil {
+		t.Fatal(e)
+	}
+	if e := harnesspostgres.Migrate(db); e != nil {
+		t.Fatal(e)
+	}
+	h, e := harnesspostgres.New(db)
+	if e != nil {
+		t.Fatal(e)
+	}
+	reopen := func() (kernel.Store, harness.Store, runrelation.Store) {
+		next, e := gorm.Open(postgres.Open(isolated), realHarnessPostgresTestConfig())
 		if e != nil {
 			t.Fatal(e)
 		}
-		reopen := func() (kernel.Store, harness.Store, runrelation.Store) {
-			next, e := gorm.Open(postgres.Open(isolated), realHarnessPostgresTestConfig())
-			if e != nil {
-				t.Fatal(e)
-			}
-			sql, e := next.DB()
-			if e != nil {
-				t.Fatal(e)
-			}
-			t.Cleanup(func() { _ = sql.Close() })
-			host, e := harnesspostgres.New(next)
-			if e != nil {
-				t.Fatal(e)
-			}
-			return kernelpostgres.NewKernelStore(next), host, kernelpostgres.NewRunRelationStore(next)
+		sql, e := next.DB()
+		if e != nil {
+			t.Fatal(e)
 		}
-		return conformance.NativeAuthorityFixture{Kernel: kernelpostgres.NewKernelStore(db), Host: h, Relations: kernelpostgres.NewRunRelationStore(db), Reopen: reopen, SharedTable: true}
-	})
+		t.Cleanup(func() { _ = sql.Close() })
+		host, e := harnesspostgres.New(next)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return kernelpostgres.NewKernelStore(next), host, kernelpostgres.NewRunRelationStore(next)
+	}
+	return conformance.NativeAuthorityFixture{Kernel: kernelpostgres.NewKernelStore(db), Host: h, Relations: kernelpostgres.NewRunRelationStore(db), Reopen: reopen, SharedTable: true}
 }

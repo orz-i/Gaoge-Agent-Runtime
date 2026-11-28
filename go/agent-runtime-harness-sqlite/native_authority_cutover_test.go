@@ -14,36 +14,43 @@ import (
 )
 
 func TestNativeAuthorityCutoverSQLite(t *testing.T) {
-	conformance.NativeAuthorityCutover(t, func(t *testing.T) conformance.NativeAuthorityFixture {
-		ctx := t.Context()
-		dir := testprofile.Dir(t)
-		hp, kp := filepath.Join(dir, "host.sqlite"), filepath.Join(dir, "kernel.sqlite")
-		h, e := harnesssqlite.CreateNew(ctx, hp)
+	conformance.NativeAuthorityCutover(t, nativeAuthoritySQLiteFixture)
+}
+
+func TestSQLiteRejectedHostedReceiptPreservesOriginalQuota(t *testing.T) {
+	conformance.RejectedHostedReceiptPreservesOriginalQuota(t, nativeAuthoritySQLiteFixture)
+}
+
+func nativeAuthoritySQLiteFixture(t *testing.T) conformance.NativeAuthorityFixture {
+	t.Helper()
+	ctx := t.Context()
+	dir := testprofile.Dir(t)
+	hp, kp := filepath.Join(dir, "host.sqlite"), filepath.Join(dir, "kernel.sqlite")
+	h, e := harnesssqlite.CreateNew(ctx, hp)
+	if e != nil {
+		t.Fatal(e)
+	}
+	k, e := kernelsqlite.CreateNew(ctx, kp)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _ = h.Close(); _ = k.Close() })
+	reopen := func() (kernel.Store, harness.Store, runrelation.Store) {
+		if e := h.Close(); e != nil {
+			t.Fatal(e)
+		}
+		if e := k.Close(); e != nil {
+			t.Fatal(e)
+		}
+		h, e = harnesssqlite.OpenExisting(ctx, hp)
 		if e != nil {
 			t.Fatal(e)
 		}
-		k, e := kernelsqlite.CreateNew(ctx, kp)
+		k, e = kernelsqlite.OpenExisting(ctx, kp)
 		if e != nil {
 			t.Fatal(e)
 		}
-		t.Cleanup(func() { _ = h.Close(); _ = k.Close() })
-		reopen := func() (kernel.Store, harness.Store, runrelation.Store) {
-			if e := h.Close(); e != nil {
-				t.Fatal(e)
-			}
-			if e := k.Close(); e != nil {
-				t.Fatal(e)
-			}
-			h, e = harnesssqlite.OpenExisting(ctx, hp)
-			if e != nil {
-				t.Fatal(e)
-			}
-			k, e = kernelsqlite.OpenExisting(ctx, kp)
-			if e != nil {
-				t.Fatal(e)
-			}
-			return k, h, kernelsqlite.NewRunRelationStore(k)
-		}
-		return conformance.NativeAuthorityFixture{Kernel: k, Host: h, Relations: kernelsqlite.NewRunRelationStore(k), Reopen: reopen}
-	})
+		return k, h, kernelsqlite.NewRunRelationStore(k)
+	}
+	return conformance.NativeAuthorityFixture{Kernel: k, Host: h, Relations: kernelsqlite.NewRunRelationStore(k), Reopen: reopen}
 }
