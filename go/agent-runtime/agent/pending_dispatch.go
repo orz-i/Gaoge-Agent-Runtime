@@ -26,7 +26,7 @@ func frozenToolWait(snapshot kernel.Snapshot, kind tools.PendingKind) (tools.Cal
 	if err != nil {
 		return tools.Call{}, tools.PendingExecution{}, false, err
 	}
-	wait := state.ToolWait
+	wait := state.toolWait()
 	if state.ToolDispatchID == "" || (wait == nil && kind != "") || (wait != nil && wait.Kind != kind) {
 		return tools.Call{}, tools.PendingExecution{}, false, nil
 	}

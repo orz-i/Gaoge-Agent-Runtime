@@ -166,7 +166,7 @@ func nativePendingToolReceipt(t *testing.T, parented bool) {
 		t.Fatalf("unverified result was accepted: %v effects=%d", e, effects)
 	}
 	if parented {
-		if e = deps.Runtime.RequireExecution(t.Context(), first.Run.ID); e != nil || verifyCalls != 1 {
+		if e = deps.Runtime.RequireExecution(t.Context(), first.Run.ID); e != nil || verifyCalls != 0 {
 			t.Fatalf("read-only lookup released borrowed lease: %v calls=%d", e, verifyCalls)
 		}
 		if retained, e := rt.LookupChildExecution(t.Context(), first.Run.ID); e != nil || retained != grant {
@@ -177,8 +177,8 @@ func nativePendingToolReceipt(t *testing.T, parented bool) {
 		}
 		return
 	}
-	// Failed and mismatched provider verifications must each release the
-	// read-only reconciliation lease; no Tool reentry is permitted.
+	// Failed and mismatched provider verifications preserve the exact original
+	// lease and callback; recovery never acquires an independent owner.
 	if _, e = runner.ReconcileToolOutcome(t.Context(), first.Run.ID, first.Run.Revision, "late-call"); !errors.Is(e, agent.ErrToolReceiptMismatch) || effects != 1 {
 		t.Fatalf("wrong provider receipt was committed: err=%v effects=%d", e, effects)
 	}

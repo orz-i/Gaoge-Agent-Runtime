@@ -120,7 +120,7 @@ func TestNativeRootCancellationReplaysEveryDurablePhase(t *testing.T) {
 					// Reconstruct the Harness/controller over the persisted original
 					// route and Store. No remembered phase or fresh intent is used.
 					shared := cut.budget
-					route, err := handoff.NewDeferredAgent(native)
+					route, err := handoff.New(handoff.Config{Local: native, PrepareLocal: true})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -187,7 +187,7 @@ func TestRootPhaseRecoveryDoesNotBorrowCustomCancellerAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			custom := &uncertainPhaseCanceller{}
-			route, err := handoff.NewDeferredAgent(native)
+			route, err := handoff.New(handoff.Config{Local: native, PrepareLocal: true})
 			if err != nil {
 				t.Fatal(err)
 			}

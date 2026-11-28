@@ -69,7 +69,7 @@ func (r *Runner) externalToolDelegationParent(ctx context.Context, owner Invocat
 		return "", ErrRuntimeCancellationUnverified
 	}
 	d, parent, err := r.localHandoffCancellationAuthority(ctx, owner, s)
-	if err != nil || !coordinator.UsesLocalAgentForDelegation(r.runtime, original, d) {
+	if err != nil || d.Remote || original == nil || coordinator.LocalAgent(r.runtime) != original {
 		return "", errors.Join(ErrRuntimeCancellationUnverified, err)
 	}
 	relation, err := r.relationReader.GetByChild(ctx, s.Run.ID)

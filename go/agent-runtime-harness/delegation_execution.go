@@ -119,7 +119,7 @@ func (runner *Runner) nativeLocalDelegation(d handoff.Delegation) *agent.Runner 
 	}
 	native, ok := runner.agent.(*agent.Runner)
 	c, bound := runner.handoffs.(*handoff.Coordinator)
-	if !ok || !bound || !c.UsesEagerLocalAgentForDelegation(runner.runtime, native, d) {
+	if !ok || !bound || d.Remote || c.PreparesLocal() || c.LocalAgent(runner.runtime) != native {
 		return nil
 	}
 	return native
@@ -133,7 +133,7 @@ func (runner *Runner) nativeHandoff(ctx context.Context, turnID string, d handof
 		return nil, nil
 	}
 	native, err := runner.nativeRootCommands(ctx, turnID, true)
-	if err != nil || native == nil || !c.UsesLocalAgentForDelegation(runner.runtime, native, d) {
+	if err != nil || native == nil || c.LocalAgent(runner.runtime) != native {
 		return nil, err
 	}
 	return native, nil

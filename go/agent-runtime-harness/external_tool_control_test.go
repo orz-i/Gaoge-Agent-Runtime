@@ -81,7 +81,7 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 	c.native, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: c.model, Catalog: registry, Executor: registry, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
 		ToolOutcomeVerifier: committed, DelegatedToolResults: delegate, ExternalToolNoEffectVerifier: c.owner, BoundedBudget: bounded})
 	fail(err)
-	route, err := handoff.NewDeferredAgent(c.native)
+	route, err := handoff.New(handoff.Config{Local: c.native, PrepareLocal: true})
 	fail(err)
 	policy := hostSelectedAgentPolicy{MemberID: "researcher", MemberRevision: "v3", Agent: agent.StartRequest{Model: "specialist-model", Instructions: "Find evidence", ToolKeys: []string{roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2}}}
 	c.host, err = harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: c.native, Store: c.store, Clock: fixedClock{}, Handoffs: route, Relations: edges, Budget: shared, DelegationPolicy: policy})

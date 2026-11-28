@@ -41,7 +41,7 @@ func TestPR82HandoffWrongChildRunKeepsDispatchGrant(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newPR82HandoffFixture(t)
 			child := &pr82WrongChildRunner{start: fromStart, id: "unrelated-child-run"}
-			coordinator, err := handoff.New(child)
+			coordinator, err := handoff.New(handoff.Config{Local: child})
 			if err != nil {
 				t.Fatal(err)
 			}

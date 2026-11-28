@@ -124,8 +124,7 @@ var (
 // SubAgent uses the same original Agent loop, not a composite executor.
 var (
 	_ handoff.ChildRunner                                           = (*agent.Runner)(nil)
-	_ func(handoff.ChildRunner) (*handoff.Coordinator, error)       = handoff.New
-	_ func(*agent.Runner) (*handoff.Coordinator, error)             = handoff.NewDeferredAgent
+	_ func(handoff.Config) (*handoff.Coordinator, error)            = handoff.New
 	_ func(*agent.Runner, kernel.Snapshot, agent.StartRequest) bool = (*agent.Runner).VerifyFrozenStartRequest
 	_ func(kernel.Snapshot) bool                                    = agent.TerminalPhysicalEffectsSettled
 	_ func(*agent.Runner, *kernel.Runtime, kernel.Snapshot) bool    = (*agent.Runner).QuiescentApprovalCancellation

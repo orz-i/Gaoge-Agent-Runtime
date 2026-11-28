@@ -124,7 +124,7 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 	native, ok := runner.agent.(*agent.Runner)
 	coordinator, bound := runner.handoffs.(*handoff.Coordinator)
 	nativeOwner := ok && native.ObservesKernelRuntime(runner.runtime)
-	if !bound || !nativeOwner && !terminal || terminal && !coordinator.SupportsLocalDelegationObservation(runner.runtime) {
+	if !bound || !nativeOwner && !terminal || terminal && !coordinator.ObservesLocalKernelRunner(runner.runtime) {
 		return nil
 	}
 	owners, err := runner.store.ListInvocations(ctx, turn.ID)
@@ -192,7 +192,7 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 		if !frozen.NativeLocal && (!valid || phase != "handoff-start" && phase != "resolve-subtask-approval" || terminalInvocationStatus(owner.Status) && phase != "handoff-start") {
 			continue
 		}
-		if !coordinator.UsesLocalAgentForDelegation(runner.runtime, native, frozen) {
+		if frozen.Remote || coordinator.LocalAgent(runner.runtime) != native {
 			if frozen.NativeLocal {
 				return ErrHandoffCancellationUnverified
 			}

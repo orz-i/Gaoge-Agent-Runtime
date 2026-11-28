@@ -122,7 +122,7 @@ func TestACPHandoffNativeProofAndRemoteSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.New(shadow)
+	c, err := handoff.New(handoff.Config{Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return shadow, nil })})
 	if err != nil {
 		t.Fatal(err)
 	}

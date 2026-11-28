@@ -72,13 +72,13 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 	if runner.toolOutcomeVerifier == nil {
 		return snapshot, ErrToolVerificationRequired
 	}
-	if snapshot.Run.ParentRunID == "" && state.ToolDispatchID == "" && len(state.DeferredChildren) > 0 && state.DeferredChildren[0].Call.ID == callID {
-		grant, grantErr := runner.runtime.LookupChildExecution(ctx, runID)
-		if grantErr != nil {
-			return snapshot, grantErr
-		}
-		snapshot, state, err = runner.stageRootDeferredReceipt(ctx, snapshot, state, grant)
-		if err != nil {
+	if snapshot.Run.ParentRunID != "" {
+		// Physical children require the exact original returned snapshot.
+		// A verifier-only lease cannot adopt or rewrite their retained grant.
+		return snapshot, ErrToolOutcomeUnknown
+	}
+	if state.ToolDispatchID == "" && state.deferredToolCount() > 0 {
+		if err := state.activateDeferredChild(); err != nil {
 			return snapshot, err
 		}
 	}
@@ -87,48 +87,15 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 		state.ToolDispatchID != callID || call.ID != callID {
 		return snapshot, ErrToolOutcomeUnknown
 	}
-	if snapshot.Run.ParentRunID == "" {
-		grant, lookupErr := runner.runtime.LookupChildExecution(ctx, runID)
-		if lookupErr == nil {
-			if grant.ExecutionLeaseID == "" {
-				return snapshot, ErrRootOutcomeUnknown
-			}
-			return runner.reconcileRootToolReceipt(ctx, snapshot, state, grant, callID, true)
-		}
-		if !errors.Is(lookupErr, kernel.ErrNotFound) {
-			return snapshot, lookupErr
+	grant, err := runner.runtime.LookupChildExecution(ctx, runID)
+	if err != nil {
+		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+	}
+	repaired, err := runner.reconcileToolReceipt(ctx, snapshot, state, grant, callID)
+	if err == nil && knownRootPhysicalSettlement(repaired) && runner.catalog != nil {
+		if definition, ok := runner.catalog.Resolve(call.ToolKey); ok && definition.Terminal {
+			return runner.Resume(ctx, runID, repaired.Run.Revision)
 		}
 	}
-	// Non-owned or legacy recovery has no original native budget-return
-	// proof. Never consume a metered call through a verifier-only path.
-	if snapshot.Run.BudgetScopeID != "" {
-		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)
-	}
-	return runner.withReceiptOwner(ctx, runID, expectedRevision,
-		func(nextCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-			fresh, freshState, loadErr := scoped.loadState(nextCtx, runID)
-			if loadErr != nil {
-				return kernel.Snapshot{}, loadErr
-			}
-			if fresh.Run.Revision != expectedRevision {
-				return fresh, kernel.ErrConflict
-			}
-			bound, ok := nextPendingCall(freshState)
-			if !ok || freshState.ToolDispatchID != callID || bound.ID != callID {
-				return fresh, ErrToolOutcomeUnknown
-			}
-			execution, _, prepareErr := scoped.preparePendingToolExecution(fresh)
-			if prepareErr != nil {
-				return fresh, prepareErr
-			}
-			// The trusted callback queries the external system by the stable
-			// identity. A missing/failed lookup keeps the intent unresolved.
-			verified, verifyErr := verifyCommittedTool(nextCtx, scoped.toolOutcomeVerifier,
-				tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(bound)})
-			if verifyErr != nil {
-				return fresh, verifyErr
-			}
-			persisted, _, applyErr := scoped.persistToolReturn(nextCtx, fresh, execution, tools.CloneExecutionResult(verified), nil)
-			return persisted, applyErr
-		})
+	return repaired, err
 }

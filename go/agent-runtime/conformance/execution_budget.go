@@ -20,6 +20,20 @@ type ExecutionBudgetStore struct {
 	Reopen func(*testing.T) (kernel.Store, budget.LedgerStore)
 }
 
+// DispatchToolFixture commits an isolated synthetic original obligation using
+// the actual first-party planner. It never invokes a Tool handler.
+func DispatchToolFixture(ctx context.Context, c budget.Coordinator, scope string, q budget.Reservation) error {
+	source, err := c.Store.LoadBudget(ctx, scope)
+	if err != nil {
+		return err
+	}
+	plan, err := budget.PlanDispatch(ctx, source, q, true)
+	if err != nil {
+		return err
+	}
+	return c.Store.SaveBudget(ctx, plan.Next(), plan.ExpectedRevision())
+}
+
 func RunExecutionBudgetSuite(t *testing.T, factory func(*testing.T) ExecutionBudgetStore) {
 	t.Run("native_model", func(t *testing.T) { runNativeModelBudget(t, factory) })
 	t.Run("native_tool", func(t *testing.T) { runNativeToolBudget(t, factory) })
@@ -53,7 +67,7 @@ func RunExecutionBudgetSuite(t *testing.T, factory func(*testing.T) ExecutionBud
 		return func(c budget.Coordinator) error { _, e := c.Reserve(ctx, scope, request, true); return e }
 	}
 	dispatch := func(ctx context.Context) func(budget.Coordinator) error {
-		return func(c budget.Coordinator) error { _, e := c.DispatchTool(ctx, scope, request); return e }
+		return func(c budget.Coordinator) error { return DispatchToolFixture(ctx, c, scope, request) }
 	}
 	settle := func(ctx context.Context) func(budget.Coordinator) error {
 		return func(c budget.Coordinator) error {
@@ -287,8 +301,7 @@ func RunExecutionBudgetSuite(t *testing.T, factory func(*testing.T) ExecutionBud
 			defer wg.Done()
 			<-start
 			de = atomic(f, ctx, &lease, nil, mutation(child, kernel.RunStatusRunning, json.RawMessage(`{"phase":"dispatched"}`)), func(c budget.Coordinator) error {
-				_, e := c.DispatchTool(ctx, scope, childReq)
-				return e
+				return DispatchToolFixture(ctx, c, scope, childReq)
 			})
 		}()
 		go func() {

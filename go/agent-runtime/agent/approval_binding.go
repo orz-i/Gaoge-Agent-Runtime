@@ -78,15 +78,8 @@ func validToolAdmission(state runState) bool {
 			matches++
 		}
 	}
-	for _, child := range state.DeferredChildren {
-		if child.Call.ID == a.CallID {
-			return false
-		}
-	}
-	for _, receipt := range state.RecoveredTools {
-		if receipt.Call.ID == a.CallID {
-			return false
-		}
+	if entry := state.toolReturn(a.CallID); entry != nil && (entry.Outcome != nil || a.CallID != state.ToolDispatchID) {
+		return false
 	}
 	return matches == 1
 }
@@ -101,7 +94,6 @@ func (s *runState) clearToolAdmission(callID string) {
 // of whether its durable outcome is consumed, staged or deferred.
 func (s *runState) clearToolDispatch(callID string) {
 	s.ToolDispatchID = ""
-	s.ToolWait = nil
 	s.clearToolAdmission(callID)
 }
 

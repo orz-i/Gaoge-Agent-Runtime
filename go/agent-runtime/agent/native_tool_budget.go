@@ -41,7 +41,7 @@ func (r *Runner) executeNativeTool(ctx context.Context, source kernel.Snapshot, 
 		}
 		plan, err = budget.PlanDispatch(ctx, ledger, originalToolReservation(q), p.ToolReservationActive(inv))
 		if errors.Is(err, budget.ErrWaiting) || errors.Is(err, budget.ErrExhausted) {
-			if len(e.state.DeferredChildren) != 0 {
+			if e.state.deferredToolCount() != 0 {
 				return r.activateDeferredChild(ctx, source, e.state)
 			}
 			if errors.Is(err, budget.ErrExhausted) {
@@ -100,7 +100,7 @@ func (r *Runner) executeNativeTool(ctx context.Context, source kernel.Snapshot, 
 		return next, nil
 	}, func() {
 		if plan == nil {
-			frame.clearUnsent(q)
+			frame.recordHold(q, "", "")
 		}
 	})
 	accounting := context.WithoutCancel(ctx)
@@ -179,9 +179,7 @@ func (r *Runner) executeNativeTool(ctx context.Context, source kernel.Snapshot, 
 		case terminal && plan != nil:
 			next, err = r.recordBudgetedToolReceipt(accounting, snapshot, state, q, result, receiptErr, settlement)
 		case terminal || pendingKind != "":
-			if plan != nil {
-				frame.recordHold(q, scope, pendingKind)
-			}
+			frame.recordHold(q, scope, pendingKind)
 			e.state, e.ledger = state, settlement
 			writeCtx := ctx
 			if plan != nil {

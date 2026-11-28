@@ -20,18 +20,11 @@ func (r *Runner) expiredRootReceipt(source kernel.Snapshot, frame *nativeRunAdmi
 	local := *r
 	local.observers, local.telemetry = nil, nil
 	if call, ok := nextPendingCall(state); ok {
-		found := false
-		for _, receipt := range state.RecoveredTools {
-			if sameRecoveredCall(receipt.Call, call) {
-				frame.receiptLedger = source.Run.BudgetScopeID
-				if source.Run.BudgetScopeID != "" && r.boundedBudget == nil {
-					return nil, kernel.ErrDeadline
-				}
-				found = true
-				break
-			}
+		if receipt := state.toolReturn(call.ID); receipt == nil || receipt.Outcome == nil {
+			return nil, kernel.ErrDeadline
 		}
-		if !found {
+		frame.receiptLedger = source.Run.BudgetScopeID
+		if frame.receiptLedger != "" && r.boundedBudget == nil {
 			return nil, kernel.ErrDeadline
 		}
 		return func(ctx context.Context) (kernel.Snapshot, error) {

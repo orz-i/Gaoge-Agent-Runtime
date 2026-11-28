@@ -53,7 +53,7 @@ func TestHandoffStartOrLoadRejectsUnverifiedChildSnapshots(t *testing.T) {
 			if tc.fromStart {
 				child.loadErr = kernel.ErrNotFound
 			}
-			coordinator, err := handoff.New(child)
+			coordinator, err := handoff.New(handoff.Config{Local: child})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +87,7 @@ func TestHandoffRefreshRejectsUnverifiedChildSnapshots(t *testing.T) {
 			child := &unverifiedChildRunner{
 				loadSnapshot: kernel.Snapshot{Run: kernel.Run{ID: tc.id, Kind: agent.RunKind, Status: tc.status}},
 			}
-			coordinator, err := handoff.New(child)
+			coordinator, err := handoff.New(handoff.Config{Local: child})
 			if err != nil {
 				t.Fatal(err)
 			}

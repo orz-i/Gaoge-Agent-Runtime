@@ -170,14 +170,14 @@ func (r *Runner) VerifyDeferredToolResults(ctx context.Context, rt *kernel.Runti
 		return false
 	}
 	state, err := decodeState(child.State)
-	return err == nil && len(state.RecoveredTools) == 0 && len(state.DelegatedToolReceipts) > 0 && r.verifyToolHistory(ctx, child.Run.ID, state)
+	return err == nil && state.recoveredToolCount() == 0 && len(state.DelegatedToolReceipts) > 0 && r.verifyToolHistory(ctx, child.Run.ID, state)
 }
 
 func (r *Runner) verifyToolHistory(ctx context.Context, runID string, state runState) bool {
 	if r.delegatedToolResults == nil || len(state.DelegatedToolReceipts) != state.Budget.Usage.ToolCalls {
 		return false
 	}
-	seen := make(map[string]bool, len(state.DelegatedToolReceipts)+len(state.RecoveredTools))
+	seen := make(map[string]bool)
 	verify := func(receipt delegatedToolReceipt) bool {
 		if receipt.Call.ID == "" || seen[receipt.Call.ID] || !validBindingFingerprint(receipt.ResultDigest) {
 			return false
@@ -202,9 +202,13 @@ func (r *Runner) verifyToolHistory(ctx context.Context, runID string, state runS
 	// while the business loop has not incremented local usage. These staged
 	// physical facts must independently qualify too; a zero usage count is
 	// not proof that there are no original Tool obligations.
-	for _, staged := range state.RecoveredTools {
-		receipt, ok := qualifiedOwnerToolReceipt(staged.Call, staged.Outcome.Result, staged.ApprovalDigest)
-		if staged.Outcome.ErrorCode != "" || !ok || !verify(receipt) {
+	for _, staged := range state.ToolReturns {
+		if staged.Outcome == nil {
+			continue
+		}
+		call, found := state.pendingCall(staged.CallID)
+		receipt, ok := qualifiedOwnerToolReceipt(call, staged.Outcome.Result, staged.ApprovalDigest)
+		if !found || staged.Outcome.ErrorCode != "" || !ok || !verify(receipt) {
 			return false
 		}
 	}

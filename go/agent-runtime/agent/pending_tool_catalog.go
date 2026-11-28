@@ -35,7 +35,7 @@ func validPendingToolCatalog(state runState) bool {
 		// Catalog snapshot. Keep that legacy zero-ceiling recovery contract;
 		// newly bounded Runs must never downgrade to it on missing evidence.
 		return state.MaxModelOutputTokens == 0 ||
-			(len(state.PendingCalls) == 0 && len(state.DeferredChildren) == 0 && len(state.RecoveredTools) == 0)
+			len(state.PendingCalls) == 0
 	}
 	for id, fingerprint := range state.PendingToolCatalog {
 		if id == "" || id != strings.TrimSpace(id) || !validBindingFingerprint(fingerprint) {
@@ -48,16 +48,6 @@ func validPendingToolCatalog(state runState) bool {
 	}
 	for _, call := range state.PendingCalls {
 		if !contains(call) {
-			return false
-		}
-	}
-	for _, child := range state.DeferredChildren {
-		if !contains(child.Call) {
-			return false
-		}
-	}
-	for _, receipt := range state.RecoveredTools {
-		if !contains(receipt.Call) {
 			return false
 		}
 	}

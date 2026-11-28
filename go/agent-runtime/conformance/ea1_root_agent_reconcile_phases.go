@@ -367,15 +367,16 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 	} else {
 		var state struct {
-			ToolDispatchID string `json:"toolDispatchID"`
-			RecoveredTools []struct {
-				Call    tools.Call `json:"call"`
+			ToolDispatchID string       `json:"toolDispatchID"`
+			PendingCalls   []tools.Call `json:"pendingCalls"`
+			ToolReturns    []struct {
+				CallID  string `json:"callID"`
 				Outcome struct {
 					Result tools.ExecutionResult `json:"result"`
 				} `json:"outcome"`
-			} `json:"recoveredTools"`
+			} `json:"toolReturns"`
 		}
-		if json.Unmarshal(committed.State, &state) != nil || state.ToolDispatchID != "" || len(state.RecoveredTools) != 1 || !ea1RecoveryJSONEqual(state.RecoveredTools[0].Call, physical.tools[0].Call) || state.RecoveredTools[0].Outcome.Result.Receipt.ExecutionID != "original-tool-call" || state.RecoveredTools[0].Outcome.Result.Receipt.Disposition != "committed" || !ea1RecoveryJSONEqual(tools.CloneExecutionResult(state.RecoveredTools[0].Outcome.Result), tools.CloneExecutionResult(verifiedToolResult)) {
+		if json.Unmarshal(committed.State, &state) != nil || state.ToolDispatchID != "" || len(state.ToolReturns) != 1 || len(state.PendingCalls) == 0 || state.ToolReturns[0].CallID != state.PendingCalls[0].ID || !ea1RecoveryJSONEqual(state.PendingCalls[0], physical.tools[0].Call) || state.ToolReturns[0].Outcome.Result.Receipt.ExecutionID != "original-tool-call" || state.ToolReturns[0].Outcome.Result.Receipt.Disposition != "committed" || !ea1RecoveryJSONEqual(tools.CloneExecutionResult(state.ToolReturns[0].Outcome.Result), tools.CloneExecutionResult(verifiedToolResult)) {
 			t.Fatal("original Tool receipt not durable")
 		}
 	}

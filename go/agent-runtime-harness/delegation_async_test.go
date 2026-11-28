@@ -247,7 +247,7 @@ func (fixture *asyncDelegationFixture) compose(t *testing.T, canceller harness.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(fixture.child)
+	handoffs, err := handoff.New(handoff.Config{Local: fixture.child})
 	if err != nil {
 		t.Fatal(err)
 	}

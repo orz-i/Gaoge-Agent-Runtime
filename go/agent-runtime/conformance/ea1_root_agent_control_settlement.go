@@ -458,20 +458,21 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	}
 	if entry == "toolwait" {
 		var state struct {
-			RecoveredTools []struct {
-				Call    tools.Call         `json:"call"`
+			PendingCalls []tools.Call `json:"pendingCalls"`
+			ToolReturns  []struct {
+				CallID  string             `json:"callID"`
 				Wait    *agent.PendingTool `json:"wait"`
 				Outcome struct {
 					Result tools.ExecutionResult `json:"result"`
 				} `json:"outcome"`
-			} `json:"recoveredTools"`
+			} `json:"toolReturns"`
 		}
-		if err = json.Unmarshal(before.State, &state); err != nil || len(state.RecoveredTools) != 1 {
+		if err = json.Unmarshal(before.State, &state); err != nil || len(state.ToolReturns) != 1 || len(state.PendingCalls) == 0 || state.ToolReturns[0].CallID != state.PendingCalls[0].ID {
 			t.Fatalf("durable original receipt absent: %v", err)
 		}
-		recovered := state.RecoveredTools[0]
+		recovered := state.ToolReturns[0]
 		ea1StartSettlementJSONEqual(t, "full durable Tool receipt", recovered.Outcome.Result, verifiedResult)
-		ea1StartSettlementJSONEqual(t, "full recovered original Call", recovered.Call, pendingRequest.Call)
+		ea1StartSettlementJSONEqual(t, "full recovered original Call", state.PendingCalls[0], pendingRequest.Call)
 		ea1StartSettlementJSONEqual(t, "full recovered original wait", recovered.Wait, wait)
 	}
 	freshStore := reopen()

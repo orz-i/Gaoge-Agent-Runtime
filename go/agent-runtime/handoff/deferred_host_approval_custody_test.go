@@ -64,7 +64,7 @@ func TestDeferredHostApprovalCallbackNeverGrantsNativeCustody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.NewDeferredAgent(r)
+	c, err := handoff.New(handoff.Config{Local: r, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}

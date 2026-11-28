@@ -27,7 +27,7 @@ func TestPR151ACPRevisionSubstitution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.NewRouted(p)
+	c, err := handoff.New(handoff.Config{Remote: p})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestPR151ACPRevisionSubstitution(t *testing.T) {
 	if _, err := p.ResolveChild(t.Context(), d); err == nil {
 		t.Fatal("binding revision substituted")
 	}
-	wrong, err := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return fixed, nil }))
+	wrong, err := handoff.New(handoff.Config{Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return fixed, nil })})
 	if err != nil {
 		t.Fatal(err)
 	}

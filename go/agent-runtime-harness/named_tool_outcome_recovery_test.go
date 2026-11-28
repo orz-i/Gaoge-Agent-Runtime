@@ -114,7 +114,7 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				route, e := handoff.NewDeferredAgent(native)
+				route, e := handoff.New(handoff.Config{Local: native, PrepareLocal: true})
 				if e != nil {
 					t.Fatal(e)
 				}

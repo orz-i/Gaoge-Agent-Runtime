@@ -125,8 +125,8 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if !frozen.NativeLocal && coordinator.ObservesLocalKernelRunner(runner.runtime) &&
-		!coordinator.OwnsLocalKernelRunner(runner.runtime) && !coordinator.SupportsDeferredAgent(runner.runtime) {
+	if original := coordinator.LocalAgent(runner.runtime); original != nil && !frozen.NativeLocal &&
+		!coordinator.PreparesLocal() && !original.OwnsKernelRuntime(runner.runtime) {
 		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)

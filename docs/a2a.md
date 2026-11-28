@@ -29,7 +29,8 @@ agent-runtime kernel
 
 The plugin is statically constructed with `NewPlugin`. It does not scan for
 code, register globally, open a listener, or resolve arbitrary services.
-`handoff.NewRouted` accepts a finite host-owned `ChildRunnerResolver`; only the
+`handoff.New(handoff.Config{Remote: plugin})` accepts the finite host-owned
+`ChildRunnerResolver`; only the
 reserved `a2a:` member prefix may be delegated to this plugin. Unknown or
 malformed reserved targets fail closed.
 
@@ -117,7 +118,8 @@ plugin. Existing direct client use remains available, but product integrations
 should make these changes:
 
 1. Reserve `a2a:<public-id>` for remote handoff routes and use
-   `handoff.NewRouted` with a finite resolver.
+   `handoff.New(handoff.Config{Local: loop, Remote: plugin})`. The Host must
+   freeze `Delegation.Remote` for the selected remote member before dispatch.
 2. Construct `Plugin` with a product-owned `BindingResolver`; persist and
    resolve immutable discovery revisions.
 3. Move credentials, SSRF decisions and remote-agent availability out of

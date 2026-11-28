@@ -115,7 +115,7 @@ func knownRootStatePhysicalSettlement(state runState) bool {
 // A borrowed Grant has no durable owned-return qualification for unconsumed
 // Model receipts or external signals. Its settlement therefore stays strict.
 func knownPhysicalSettlement(state runState, borrowed bool) bool {
-	if state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) || (borrowed && len(state.ExternalSignals) != 0) {
+	if state.ToolDispatchID != "" || state.deferredToolCount() != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) || (borrowed && len(state.ExternalSignals) != 0) {
 		return false
 	}
 	for _, inv := range state.ModelInvocations {
@@ -279,7 +279,7 @@ func (runner *Runner) executeNativeSegment(ctx context.Context, current kernel.S
 		if scopedReturn && pending && (runner.toolOutcomeVerifier != nil || returnedCall) {
 			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
 		}
-		if callErr == nil && hostComplete && (state.ToolDispatchID != "" || len(state.DeferredChildren) != 0) {
+		if callErr == nil && hostComplete && (state.ToolDispatchID != "" || state.deferredToolCount() != 0) {
 			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
 			return latest, nil
 		}

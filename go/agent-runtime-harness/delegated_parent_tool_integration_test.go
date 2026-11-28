@@ -160,7 +160,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(direct)
+	handoffs, err := handoff.New(handoff.Config{Local: direct})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestHostHostedToolUsesInheritedParentModelWithoutParentActivation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(direct)
+	handoffs, err := handoff.New(handoff.Config{Local: direct})
 	if err != nil {
 		t.Fatal(err)
 	}

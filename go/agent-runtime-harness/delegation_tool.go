@@ -123,9 +123,44 @@ func terminalDelegationStatus(status handoff.Status) bool {
 }
 
 func (runner *Runner) delegationToolReceipt(ctx context.Context, request tools.ExecutionRequest, delegation handoff.Delegation, digest string) (tools.ExecutionResult, error) {
-	modelResult, err := runner.delegationModelResult(ctx, delegation)
-	if err != nil {
-		return tools.ExecutionResult{}, err
+	result := tools.ExecutionResult{Receipt: tools.Receipt{
+		ExecutionID: request.Call.ID, Disposition: "committed", OwnerReceiptDigest: digest,
+	}}
+	modelResult := append(json.RawMessage(nil), delegation.Result...)
+	pending := !terminalDelegationStatus(delegation.Status)
+	if pending {
+		result.Receipt.Disposition = tools.ReceiptDispositionPending
+	}
+	// One authenticated observation serves both the neutral wait contract and
+	// local result filtering. Opaque results never borrow a local twin's type.
+	queued := delegation.Status == handoff.StatusQueued && (delegation.NativeLocal || runner.nativeLocalDelegation(delegation) != nil)
+	filter := delegation.Status == handoff.StatusCompleted && len(modelResult) > 0 && modelResult[0] == '{' && !delegation.Remote
+	if queued {
+		result.Pending = &tools.PendingExecution{Kind: tools.PendingChildTerminal, OperationID: delegation.ID, ChildRunID: delegation.ChildRunID}
+	} else if pending || filter {
+		child, frozen, err := runner.delegationObservation(ctx, delegation.ChildRunID)
+		if err != nil && !errors.Is(err, kernel.ErrNotFound) && !errors.Is(err, ErrHandoffCancellationUnverified) {
+			return tools.ExecutionResult{}, err
+		}
+		if err == nil {
+			if pending && sameHandoffFrozenExecution(frozen, delegation) {
+				result.Pending = &tools.PendingExecution{Kind: tools.PendingChildTerminal, OperationID: delegation.ID, ChildRunID: delegation.ChildRunID}
+			}
+			if filter && child.Run.Kind == agent.RunKind {
+				var answer agent.Result
+				if err := json.Unmarshal(modelResult, &answer); err != nil {
+					return tools.ExecutionResult{}, err
+				}
+				for i := range answer.HostedToolCalls {
+					call := &answer.HostedToolCalls[i]
+					call.Input, call.Output, call.Error = nil, nil, nil
+				}
+				modelResult, err = json.Marshal(answer)
+				if err != nil {
+					return tools.ExecutionResult{}, err
+				}
+			}
+		}
 	}
 	content, err := json.Marshal(struct {
 		DelegationID string          `json:"delegationID"`
@@ -143,20 +178,8 @@ func (runner *Runner) delegationToolReceipt(ctx context.Context, request tools.E
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	disposition := "committed"
-	var pending *tools.PendingExecution
-	if !terminalDelegationStatus(delegation.Status) {
-		disposition = tools.ReceiptDispositionPending
-		pending, err = runner.localDelegationWait(ctx, delegation)
-		if err != nil {
-			return tools.ExecutionResult{}, err
-		}
-	}
-	return tools.ExecutionResult{
-		Content: content,
-		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: disposition, OwnerReceiptDigest: digest},
-		Pending: pending,
-	}, nil
+	result.Content = content
+	return result, nil
 }
 
 // VerifyCommittedTool is a trusted, READ-ONLY reconciliation port for an
@@ -253,7 +276,7 @@ func (runner *Runner) delegationObservation(ctx context.Context, runID string) (
 // never from a coincidentally matching local or remote RunID.
 func (runner *Runner) observeDelegation(ctx context.Context, runID string, allowRemote bool) (kernel.Snapshot, handoff.Delegation, error) {
 	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-	if !ok || (!allowRemote && !coordinator.SupportsLocalDelegationObservation(runner.runtime)) {
+	if !ok || (!allowRemote && !coordinator.ObservesLocalKernelRunner(runner.runtime)) {
 		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
 	}
 	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, runID)
@@ -283,7 +306,7 @@ func (runner *Runner) observeDelegation(ctx context.Context, runID string, allow
 // when the reader has Host approval hooks and cannot take physical control.
 func (runner *Runner) observesLocalChild(ctx context.Context, turnID string, coordinator *handoff.Coordinator, frozen handoff.Delegation, child kernel.Snapshot) bool {
 	rt := runner.runtime
-	if (!coordinator.ObservesLocalKernelRunner(rt) && child.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(rt, frozen) {
+	if !coordinator.ObservesLocalDelegation(rt, frozen) {
 		return false
 	}
 	if frozen.NativeLocal && terminalRuntimeStatus(child.Run.Status) {
@@ -304,7 +327,7 @@ func (runner *Runner) observesLocalChild(ctx context.Context, turnID string, coo
 		return rt.VerifyExecutionCustody(ctx, child, kernel.CustodyRetired) == nil ||
 			child.Run.Status == kernel.RunStatusCancelled && (native.VerifiedDeferredRootControl(ctx, rt, child) || errors.Is(e, kernel.ErrNotFound) && child.Run.Revision == 2)
 	}
-	if !terminalRuntimeStatus(child.Run.Status) || !coordinator.IsDeferredLocalDelegation(rt, frozen) {
+	if !terminalRuntimeStatus(child.Run.Status) || !coordinator.PreparesLocal() {
 		return true
 	}
 	if child.Run.Status == kernel.RunStatusCompleted {
@@ -312,36 +335,6 @@ func (runner *Runner) observesLocalChild(ctx context.Context, turnID string, coo
 			coordinator.VerifiedLocalToolResult(ctx, rt, frozen, child))
 	}
 	return coordinator.VerifiedLocalDelegationControl(ctx, rt, frozen, child)
-}
-
-// A local Agent's terminal output includes full native search receipts for
-// auditing. Forward the actual answer, citations and artifact references to
-// its supervisor, plus receipt identities, rather than copying whole web pages
-// into the parent context. The exact receipts remain on the child Run.
-func (runner *Runner) delegationModelResult(ctx context.Context, delegation handoff.Delegation) (json.RawMessage, error) {
-	raw := append(json.RawMessage(nil), delegation.Result...)
-	if delegation.Status != handoff.StatusCompleted || len(raw) == 0 || raw[0] != '{' {
-		return raw, nil
-	}
-	child, _, err := runner.localDelegationObservation(ctx, delegation.ChildRunID)
-	if errors.Is(err, ErrHandoffCancellationUnverified) || errors.Is(err, kernel.ErrNotFound) {
-		return raw, nil // Remote output must not borrow a local twin's type.
-	}
-	if err != nil {
-		return nil, err
-	}
-	if child.Run.Kind != agent.RunKind {
-		return raw, nil
-	}
-	var result agent.Result
-	if err = json.Unmarshal(raw, &result); err != nil {
-		return nil, err
-	}
-	for index := range result.HostedToolCalls {
-		call := &result.HostedToolCalls[index]
-		call.Input, call.Output, call.Error = nil, nil, nil
-	}
-	return json.Marshal(result)
 }
 
 // Error details from a Child Run are untrusted provider text. Return a
@@ -357,30 +350,6 @@ func delegationReceiptErrorCode(status handoff.Status) string {
 	default:
 		return ""
 	}
-}
-
-// Only the local SDK Agent has an autonomous committed-transition contract.
-// Custom/remote runners retain their existing scheduled observation behavior.
-func (runner *Runner) localDelegationWait(ctx context.Context, delegation handoff.Delegation) (*tools.PendingExecution, error) {
-	if delegation.Status == handoff.StatusQueued && (delegation.NativeLocal || runner.nativeLocalDelegation(delegation) != nil) {
-		// The actual original handler just committed its frozen Waiting
-		// selection. The child Run may not yet exist; this wait does not
-		// grant dispatch and keeps the parent's original Tool identity.
-		return &tools.PendingExecution{Kind: tools.PendingChildTerminal, OperationID: delegation.ID, ChildRunID: delegation.ChildRunID}, nil
-	}
-	child, frozen, err := runner.delegationObservation(ctx, delegation.ChildRunID)
-	if errors.Is(err, kernel.ErrNotFound) || errors.Is(err, ErrHandoffCancellationUnverified) {
-		return nil, nil // No local autonomous wait for an unproven route.
-	}
-	if err != nil {
-		return nil, err
-	}
-	if (child.Run.Kind != agent.RunKind && child.Run.Kind != handoff.RemoteAgentRunKind) || !sameHandoffFrozenExecution(frozen, delegation) {
-		return nil, nil
-	}
-	return &tools.PendingExecution{
-		Kind: tools.PendingChildTerminal, OperationID: delegation.ID, ChildRunID: delegation.ChildRunID,
-	}, nil
 }
 
 func (handler *DelegationToolHandler) prepareRequest(

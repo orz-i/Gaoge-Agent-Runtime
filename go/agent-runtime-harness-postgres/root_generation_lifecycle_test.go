@@ -145,7 +145,7 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.NewDeferredAgent(original)
+	c, err := handoff.New(handoff.Config{Local: original, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}

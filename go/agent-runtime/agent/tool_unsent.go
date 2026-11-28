@@ -69,7 +69,7 @@ func (state *runState) markUnsentTool(call tools.Call) error {
 	if state.ToolDispatchID != "" && state.ToolDispatchID != call.ID {
 		return ErrToolOutcomeUnknown
 	}
-	if state.ToolWait != nil {
+	if state.toolWait() != nil {
 		return ErrToolOutcomeUnknown
 	}
 	current, ok := nextPendingCall(*state)
@@ -87,7 +87,7 @@ func (state *runState) markUnsentTool(call tools.Call) error {
 	a.Phase = toolAdmissionUnsent
 	state.ToolAdmission = a
 	state.ToolDispatchID = ""
-	if len(state.DeferredChildren) != 0 {
+	if state.deferredToolCount() != 0 {
 		return state.activateDeferredChild()
 	}
 	return nil
@@ -98,7 +98,7 @@ func (state *runState) markUnsentTool(call tools.Call) error {
 // earlier physical siblings and staged receipts have drained.
 func (r *Runner) finishUnsentTool(ctx context.Context, s kernel.Snapshot, state runState, call tools.Call) (kernel.Snapshot, error) {
 	a := state.ToolAdmission
-	if state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || len(state.RecoveredTools) != 0 || a == nil || !a.matches(call) || a.Phase != toolAdmissionUnsent {
+	if state.ToolDispatchID != "" || len(state.ToolReturns) != 0 || a == nil || !a.matches(call) || a.Phase != toolAdmissionUnsent {
 		return s, ErrToolOutcomeUnknown
 	}
 	if s.Run.BudgetScopeID != a.LedgerID {
@@ -120,7 +120,7 @@ func (r *Runner) settleUnsentTool(ctx context.Context, s kernel.Snapshot, state 
 	if err != nil {
 		return next, err
 	}
-	if decoded.ToolDispatchID != "" || len(decoded.DeferredChildren) != 0 {
+	if decoded.ToolDispatchID != "" || decoded.deferredToolCount() != 0 {
 		return next, nil
 	}
 	return r.finishUnsentTool(ctx, next, decoded, call)

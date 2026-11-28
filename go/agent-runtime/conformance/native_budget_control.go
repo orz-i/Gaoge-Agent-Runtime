@@ -97,7 +97,7 @@ func runNativeBudgetControl(t *testing.T, factory func(*testing.T) ExecutionBudg
 					if _, err = c.Reserve(ctx, "scope", q, true); err != nil {
 						t.Fatal(err)
 					}
-					if _, err = c.DispatchTool(ctx, "scope", q); err != nil {
+					if err = DispatchToolFixture(ctx, c, "scope", q); err != nil {
 						t.Fatal(err)
 					}
 					before, err = f.Ledger.LoadBudget(ctx, "scope")

@@ -141,7 +141,7 @@ func TestAgentSessionDelegatesAuthorizedSubAgentWithoutAnotherInterpreter(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	routes, err := handoff.New(child)
+	routes, err := handoff.New(handoff.Config{Local: child})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestAgentSessionMemberOnlyToolsAreNotOfferedToRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	routes, err := handoff.New(child)
+	routes, err := handoff.New(handoff.Config{Local: child})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestAgentSessionSharedBudgetCoversSelectedSubAgent(t *testing.T) {
 		t.Fatalf("budgeted child restart changed physical execution: status=%s err=%v steps=%d", again.Turn.Status, err, steps)
 	}
 	foreign := options
-	foreign.Handoffs, _ = handoff.New(&unmeteredTestChild{runtime: options.Runtime})
+	foreign.Handoffs, _ = handoff.New(handoff.Config{Local: &unmeteredTestChild{runtime: options.Runtime}})
 	if _, err := harness.OpenAgentSession(foreign); !errors.Is(err, harness.ErrInvalidRequest) {
 		t.Fatalf("unmetered foreign child route admitted: %v", err)
 	}

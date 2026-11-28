@@ -121,7 +121,7 @@ func TestShadowRunnerExistingHandoffCannotAcquireModelOutputCeiling(t *testing.T
 func newShadowCoordinator(t *testing.T, runner *ShadowRunner) *handoff.Coordinator {
 	t.Helper()
 	runner.targetID, runner.revision = "remote-member", "fixture-v1"
-	coordinator, err := handoff.New(runner)
+	coordinator, err := handoff.New(handoff.Config{Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return runner, nil })})
 	if err != nil {
 		t.Fatal(err)
 	}

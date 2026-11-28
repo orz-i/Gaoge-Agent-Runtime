@@ -260,7 +260,7 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 					}
 				}
 				if mode == "unknown-expire" {
-					if _, e = c.DispatchTool(ctx, "scope", res); e != nil {
+					if e = DispatchToolFixture(ctx, c, "scope", res); e != nil {
 						t.Fatal(e)
 					}
 				}

@@ -98,10 +98,10 @@ func (r *Runner) externalControlWait(ctx context.Context, revision uint64, c Ext
 		return out, kernel.ErrConflict
 	}
 	call, waiting, err := FrozenExternalToolCall(s)
-	if err != nil || !waiting || len(state.DeferredChildren) != 0 {
+	if err != nil || !waiting || state.deferredToolCount() != 0 {
 		return out, errors.Join(ErrToolOutcomeUnknown, err)
 	}
-	wait := state.ToolWait
+	wait := state.toolWait()
 	if wait.SignalID != "" || call.ID != c.CallID || wait.OperationID != c.OperationID || wait.InputDigest != c.InputDigest {
 		return out, ErrToolReceiptMismatch
 	}
@@ -168,6 +168,7 @@ func (r *Runner) ReconcileExternalToolNoEffectForControl(ctx context.Context, re
 		}
 	}
 	state.clearToolDispatch(original.request.Call.ID)
+	state.removeToolReturn(original.request.Call.ID)
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ExternalToolCancellation = &externalToolCancellation{Receipt: receipt, Call: tools.CloneCall(original.request.Call), GrantID: original.grant.ID, SourceRevision: revision, SourceHash: original.returnHash}
 	next, err := r.applyExternalControlState(ctx, original.snapshot, original.grant, state, ledger)

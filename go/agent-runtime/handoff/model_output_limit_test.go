@@ -32,7 +32,7 @@ func TestHandoffModelOutputLimitInheritsAndCannotWidenParent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			coordinator, err := handoff.NewDeferredAgent(runner)
+			coordinator, err := handoff.New(handoff.Config{Local: runner, PrepareLocal: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -90,7 +90,7 @@ func TestHandoffModelOutputLimitCannotIgnoreInvalidAgentParentState(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := handoff.NewDeferredAgent(runner)
+	coordinator, err := handoff.New(handoff.Config{Local: runner, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}

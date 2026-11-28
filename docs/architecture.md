@@ -185,14 +185,20 @@ pre-stable release rather than wrapped for compatibility. See
 ## SubAgent composition
 
 A host may execute a standalone Agent without Harness. For durable specialist
-children, compose `agent.NewRunner` with `handoff.New` or
-`handoff.NewDeferredAgent`, a fixed ChildRunner, and an optional Harness Runner
+children, compose `agent.NewRunner` with `handoff.New(handoff.Config{Local: loop,
+Remote: remoteResolver})` and an optional Harness Runner
 that receives `Handoffs` and `Relations` in its dependencies. The Host chooses and authorizes each Named Agent (including its Model,
 Tools, Skills and Instructions) before delegation. Harness freezes the
 resulting execution request and the original MemberID/MemberRevision route;
 Kernel and Handoff enforce Tool scope, budgets, parent/child identity and
 physical dispatch authority. The Runtime never resolves a Role catalog or
 selects an Agent on behalf of the Host.
+
+The frozen `Delegation.Remote` selection chooses the independent remote route;
+local ownership queries never invoke that resolver. `PrepareLocal: true` lets
+the Host schedule `loop.Resume` after the same Agent's `PrepareRun`, without
+another child execution implementation. Custom opaque resolvers use `Opaque`
+instead of `Local` and cannot confer local Kernel authority.
 
 `harness.Runner.Delegate` and `DelegateByExecutionRefID` create or reload a
 stable SubAgent delegation only after the shared Host-owned

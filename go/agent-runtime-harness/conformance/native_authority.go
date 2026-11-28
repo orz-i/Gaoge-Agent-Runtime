@@ -10,6 +10,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	runtimeconformance "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -285,7 +286,7 @@ func nativeAuthorityNamedChildTwoTools(t *testing.T, factory func(*testing.T) Na
 				if _, e = c.Reserve(ctx, pending.Turn.ID, q, true); e != nil {
 					t.Fatal(e)
 				}
-				if _, e = c.DispatchTool(ctx, pending.Turn.ID, q); e != nil {
+				if e = runtimeconformance.DispatchToolFixture(ctx, c, pending.Turn.ID, q); e != nil {
 					t.Fatal(e)
 				}
 				before, e := runs.LoadBudget(ctx, pending.Turn.ID)

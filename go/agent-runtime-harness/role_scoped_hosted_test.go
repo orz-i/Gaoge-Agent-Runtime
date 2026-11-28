@@ -127,7 +127,7 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handoffs, err := handoff.New(direct)
+	handoffs, err := handoff.New(handoff.Config{Local: direct})
 	if err != nil {
 		t.Fatal(err)
 	}

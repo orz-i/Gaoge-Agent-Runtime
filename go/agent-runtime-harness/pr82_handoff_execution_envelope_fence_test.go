@@ -47,7 +47,7 @@ func TestPR82HandoffForeignGoalOrRequestCannotSettleGrant(t *testing.T) {
 				Run:    childRun,
 				Result: &kernel.Result{ContentType: "application/json", Content: []byte(`{"foreign":"result"}`)},
 			}}
-			coordinator, err := handoff.New(foreign)
+			coordinator, err := handoff.New(handoff.Config{Local: foreign})
 			if err != nil {
 				t.Fatal(err)
 			}

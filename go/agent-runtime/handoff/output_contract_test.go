@@ -39,7 +39,7 @@ func TestHandoffFreezesAndVerifiesIndependentChildOutputContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := handoff.NewDeferredAgent(runner)
+	coordinator, err := handoff.New(handoff.Config{Local: runner, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,11 +104,11 @@ func TestHandoffRejectsUnattestableStrictOutputBeforeRemoteEffects(t *testing.T)
 			var coordinator *handoff.Coordinator
 			var err error
 			if routed {
-				coordinator, err = handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
+				coordinator, err = handoff.New(handoff.Config{Opaque: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
 					return remote, nil
-				}))
+				})})
 			} else {
-				coordinator, err = handoff.New(remote)
+				coordinator, err = handoff.New(handoff.Config{Local: remote})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -136,9 +136,7 @@ func TestHandoffRoutedNativeAgentRetainsStrictOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := handoff.NewDeferredAgentWithRouting(native, func(handoff.Delegation) (handoff.DelegationRoute, error) {
-		return handoff.DelegationRouteLocal, nil
-	}, nil)
+	coordinator, err := handoff.New(handoff.Config{Local: native, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}

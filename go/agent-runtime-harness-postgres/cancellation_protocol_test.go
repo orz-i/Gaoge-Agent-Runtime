@@ -56,7 +56,7 @@ func newProtocolFixture(t *testing.T, backend string, cut *protocolCut) protocol
 
 func (f protocolFixture) controller(t *testing.T, c harness.RuntimeCanceller) *harness.Runner {
 	t.Helper()
-	route, err := handoff.NewDeferredAgent(f.agent)
+	route, err := handoff.New(handoff.Config{Local: f.agent, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}

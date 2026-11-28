@@ -52,7 +52,7 @@ func TestDeferredToolReceiptWithUnusedHostApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := handoff.NewDeferredAgent(original)
+	coordinator, err := handoff.New(handoff.Config{Local: original, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +104,7 @@ func TestDeferredRouteProofUsesOriginalFrozenDelegation(t *testing.T) {
 			d.MemberRevision = "v1"
 			if remote {
 				d.MemberID = "remote"
+				d.Remote = true
 			}
 			itemID, err := f.runner.recordDelegationItem(t.Context(), f.turn, f.parent, d, ItemStarted, "")
 			if err != nil {
@@ -112,18 +113,10 @@ func TestDeferredRouteProofUsesOriginalFrozenDelegation(t *testing.T) {
 			if err = f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, d, itemID); err != nil {
 				t.Fatal(err)
 			}
-			c, err := handoff.NewDeferredAgentWithRouting(original, func(v handoff.Delegation) (handoff.DelegationRoute, error) {
-				if v.MemberRevision != "v1" {
-					return 0, ErrConflict
-				}
-				if v.MemberID == "remote" {
-					return handoff.DelegationRouteRemote, nil
-				}
-				return handoff.DelegationRouteLocal, nil
-			}, handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
+			c, err := handoff.New(handoff.Config{Local: original, PrepareLocal: true, Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
 				t.Fatal("observation resolved remote")
 				return nil, nil
-			}))
+			})})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +147,7 @@ func TestDeferredRouteProofUsesOriginalFrozenDelegation(t *testing.T) {
 					t.Fatalf("second Agent accepted: %v", e)
 				}
 				// Corrupt only the already persisted execution tuple; the
-				// classifier must not rescue a source-pair mismatch.
+				// local binding must not rescue a source-pair mismatch.
 				stored, e := f.store.GetItem(t.Context(), itemID)
 				if e != nil {
 					t.Fatal(e)
@@ -196,7 +189,7 @@ func TestDeferredRouteProofRejectsLegacyMissingExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := handoff.NewDeferredAgentWithRouting(original, func(handoff.Delegation) (handoff.DelegationRoute, error) { return handoff.DelegationRouteLocal, nil }, nil)
+	c, err := handoff.New(handoff.Config{Local: original, PrepareLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,10 +212,10 @@ func TestDeferredRouteProofRejectsLegacyMissingExecution(t *testing.T) {
 // Legacy routed compositions still return before reading any Kernel/Store:
 // a missing runtime would panic if the old early-return boundary were lost.
 func TestDeferredRouteLegacyRoutedObservationRemainsUnavailable(t *testing.T) {
-	c, err := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
+	c, err := handoff.New(handoff.Config{Opaque: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
 		t.Fatal("legacy resolver called by observation")
 		return nil, nil
-	}))
+	})})
 	if err != nil {
 		t.Fatal(err)
 	}

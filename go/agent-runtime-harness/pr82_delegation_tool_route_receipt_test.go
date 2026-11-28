@@ -35,9 +35,9 @@ func TestPR82DelegationToolReceiptRequiresRouteAndFrozenIdentity(t *testing.T) {
 				}
 			}
 			child := &pr82BoundKernelChild{runtime: actual}
-			coordinator, err := handoff.New(child)
+			coordinator, err := handoff.New(handoff.Config{Local: child})
 			if mode == "dynamic-local" {
-				coordinator, err = handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return child, nil }))
+				coordinator, err = handoff.New(handoff.Config{Opaque: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return child, nil })})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -56,7 +56,8 @@ func TestPR82DelegationToolReceiptRequiresRouteAndFrozenIdentity(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			pending, waitErr := f.runner.localDelegationWait(t.Context(), d)
+			receipt, waitErr := f.runner.delegationToolReceipt(t.Context(), tools.ExecutionRequest{RunID: f.parent.ExecutionRefID, Call: call}, d, "")
+			pending := receipt.Pending
 			if mode == "fixed-local" {
 				if waitErr != nil || pending == nil {
 					t.Errorf("verified local wait lost: pending=%v err=%v", pending, waitErr)

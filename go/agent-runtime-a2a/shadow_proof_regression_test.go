@@ -36,12 +36,11 @@ func proofShadowFixture(t *testing.T, remote RemoteClient) (*kernel.Runtime, ker
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := handoff.NewDeferredAgentWithRouting(local,
-		func(handoff.Delegation) (handoff.DelegationRoute, error) { return handoff.DelegationRouteRemote, nil },
-		handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
+	coordinator, err := handoff.New(handoff.Config{Local: local, PrepareLocal: true,
+		Remote: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
 			return shadow, nil
 		}),
-	)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

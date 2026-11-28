@@ -565,18 +565,19 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	}
 	if kind == "tool" {
 		var state struct {
-			RecoveredTools []struct {
-				Call    tools.Call `json:"call"`
+			PendingCalls []tools.Call `json:"pendingCalls"`
+			ToolReturns  []struct {
+				CallID  string `json:"callID"`
 				Outcome struct {
 					Result tools.ExecutionResult `json:"result"`
 				} `json:"outcome"`
-			} `json:"recoveredTools"`
+			} `json:"toolReturns"`
 		}
-		if e := json.Unmarshal(receiptWrites[0].State, &state); e != nil || len(state.RecoveredTools) != 1 {
+		if e := json.Unmarshal(receiptWrites[0].State, &state); e != nil || len(state.ToolReturns) != 1 || len(state.PendingCalls) == 0 || state.ToolReturns[0].CallID != state.PendingCalls[0].ID {
 			t.Fatalf("committed original receipt not observed: %v", e)
 		}
-		ea1StartSettlementJSONEqual(t, "full committed Tool receipt before consumption", state.RecoveredTools[0].Outcome.Result, f.physical.receipts[0])
-		ea1StartSettlementJSONEqual(t, "committed original Tool Call", state.RecoveredTools[0].Call, f.physical.toolRequests[0].Call)
+		ea1StartSettlementJSONEqual(t, "full committed Tool receipt before consumption", state.ToolReturns[0].Outcome.Result, f.physical.receipts[0])
+		ea1StartSettlementJSONEqual(t, "committed original Tool Call", state.PendingCalls[0], f.physical.toolRequests[0].Call)
 	}
 	f.originalReceipt(out, true)
 	if kind == "tool" {

@@ -395,7 +395,8 @@ func (runner *Runner) remoteHandoffCancellerOwnsDelegation(
 // Missing/corrupt evidence is unknown remote outcome, never local authority.
 func (runner *Runner) originalHandoffParent(ctx context.Context, child Invocation) (handoff.Delegation, Invocation, error) {
 	c, ok := runner.handoffs.(*handoff.Coordinator)
-	return readOriginalHandoffParent(ctx, runner.store, runner.relationReader, child, !ok || !c.ObservesLocalKernelRunner(runner.runtime))
+	return readOriginalHandoffParent(ctx, runner.store, runner.relationReader, child,
+		!ok || c.LocalAgent(runner.runtime) != nil || !c.ObservesLocalKernelRunner(runner.runtime))
 }
 
 // The native budget binding, negative decision and ordinary child control

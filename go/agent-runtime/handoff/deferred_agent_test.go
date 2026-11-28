@@ -46,7 +46,7 @@ func deferredFixture(t *testing.T, host *deferredHost) (*kernel.Runtime, *agent.
 func TestDeferredAgentPreparesAndOriginalRunnerContinues(t *testing.T) {
 	host := &deferredHost{}
 	rt, r, m := deferredFixture(t, host)
-	c, e := handoff.NewDeferredAgent(r)
+	c, e := handoff.New(handoff.Config{Local: r, PrepareLocal: true})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -68,7 +68,7 @@ func TestDeferredAgentPreparesAndOriginalRunnerContinues(t *testing.T) {
 	if !r.VerifyFrozenStartRequest(before, request) || !handoff.VerifiedChildRun(d, parent.Run, before) {
 		t.Fatal("original frozen request changed")
 	}
-	if !c.ObservesLocalKernelRunner(rt) || !c.UsesLocalAgentRunner(rt, r) || c.OwnsLocalKernelRunner(rt) {
+	if !c.ObservesLocalDelegation(rt, d) || c.LocalAgent(rt) != r || r.OwnsKernelRuntime(rt) {
 		t.Fatal("observation/continuation incorrectly merged with cancellation")
 	}
 	_, e = c.StartOrLoad(t.Context(), parent, d)
@@ -96,7 +96,7 @@ func TestDeferredAgentPreparesAndOriginalRunnerContinues(t *testing.T) {
 }
 func TestDeferredAgentProofsRejectReplacementAndRoutedIdentity(t *testing.T) {
 	rt, r, _ := deferredFixture(t, nil)
-	c, e := handoff.NewDeferredAgent(r)
+	c, e := handoff.New(handoff.Config{Local: r, PrepareLocal: true})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -105,20 +105,20 @@ func TestDeferredAgentProofsRejectReplacementAndRoutedIdentity(t *testing.T) {
 		t.Fatal(e)
 	}
 	foreign, _, _ := deferredFixture(t, nil)
-	if c.UsesLocalAgentRunner(rt, other) || c.UsesLocalAgentRunner(foreign, r) || c.ObservesLocalKernelRunner(foreign) || c.OwnsLocalKernelRunner(foreign) {
+	if c.LocalAgent(rt) == other || c.LocalAgent(foreign) != nil || c.ObservesLocalKernelRunner(foreign) {
 		t.Fatal("replacement authority accepted")
 	}
-	if !c.OwnsLocalKernelRunner(rt) {
+	if !c.LocalAgent(rt).OwnsKernelRuntime(rt) {
 		t.Fatal("bare Agent original ownership lost")
 	}
-	routed, e := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return r, nil }))
+	routed, e := handoff.New(handoff.Config{Opaque: handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return r, nil })})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if routed.UsesLocalAgentRunner(rt, r) || routed.ObservesLocalKernelRunner(rt) || routed.OwnsLocalKernelRunner(rt) {
+	if routed.LocalAgent(rt) != nil || routed.ObservesLocalKernelRunner(rt) {
 		t.Fatal("routed identity promoted to static")
 	}
-	if _, e = handoff.NewDeferredAgent(nil); !errors.Is(e, handoff.ErrInvalidDelegation) {
+	if _, e = handoff.New(handoff.Config{PrepareLocal: true}); !errors.Is(e, handoff.ErrInvalidDelegation) {
 		t.Fatal("nil accepted", e)
 	}
 }

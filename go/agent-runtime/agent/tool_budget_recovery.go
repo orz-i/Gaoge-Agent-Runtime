@@ -44,14 +44,6 @@ func (f *originalToolFrame) recordUnsent(q tools.ExecutionRequest, ledgerID stri
 		f.returns.Store(q.Call.ID, kernel.OwnedToolReturn{CallID: q.Call.ID, RequestDigest: kernel.ManagedDigest(q), LedgerID: ledgerID, Unsent: true})
 	}
 }
-func (f *originalToolFrame) clearUnsent(q tools.ExecutionRequest) {
-	if f != nil && f.runID == q.RunID {
-		if b, ok := f.binding(q); ok && b.Unsent {
-			f.returns.Delete(q.Call.ID)
-		}
-	}
-}
-
 func (f *originalToolFrame) recordSettled(q tools.ExecutionRequest, ledger budget.Ledger) {
 	if f == nil || f.runID != q.RunID {
 		return
@@ -112,8 +104,15 @@ func (f *originalToolFrame) outstanding(s kernel.Snapshot, approvals *approvedTo
 			return "", false, err
 		}
 	}
-	for _, child := range state.DeferredChildren {
-		if err := add(child.Call); err != nil {
+	for _, entry := range state.ToolReturns {
+		if entry.Outcome != nil || entry.Wait == nil || entry.CallID == state.ToolDispatchID {
+			continue
+		}
+		call, ok := state.pendingCall(entry.CallID)
+		if !ok {
+			return "", false, ErrToolReceiptMismatch
+		}
+		if err := add(call); err != nil {
 			return "", false, err
 		}
 	}

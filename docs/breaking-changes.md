@@ -72,6 +72,41 @@ at creation; later accounting reads that binding. Projection follows the
 native commit. Legacy split-store execution state is not migrated or
 requalified; resolve its original obligations with the previous writer.
 
+## Agent-as-Tool composition (AC-05)
+
+Use `handoff.New(handoff.Config{Local: loop, Remote: remoteResolver})` for
+the fixed local Agent and independent remote route. The frozen `Delegation.Remote`
+bit is the only local/remote selector. Removed `NewRouted`, `NewDeferredAgent`,
+`NewAgentWithRemote`, `NewDeferredAgentWithRemote`, `NewDeferredAgentWithRouting`,
+the route classifier and duplicate ownership-query APIs; no aliases remain.
+`PrepareLocal: true` calls the same local Agent's `PrepareRun`; the Host later
+invokes that original Agent's `Resume`. Custom nonremote resolvers use `Opaque`
+and cannot acquire local authority from a resolved Agent or matching Run ID.
+A fixed custom `Local` must explicitly implement `LocalKernelChildRunner` to
+attest Kernel ownership. Native observation uses `LocalAgent` and
+`ObservesLocalDelegation`; physical control still requires the original custody
+proof. Remote authorization, signed shadow receipts and protocol cancellation
+remain independent. This composition change adds no persisted state.
+
+## Unified Tool return frontier and recovery (AC-05)
+
+The private sealed Agent state is now `agent-state-opaque-v5`. Pending Calls
+retain their original identity exactly once. Waits and terminal receipts share
+one CallID-bound return collection, including the original wait evidence when
+available. Root and parented physical Agent admissions use one native leased
+execution and retirement protocol. Receipt-only recovery consumes the original
+returned callback and never opens an independent Tool execution lease. An
+unresolved physical child retains its ancestor fence and must not borrow a
+Root's deferred-control authority.
+
+Removed `budget.Coordinator.DispatchTool` and `ResolveUnsentTool`; native
+Agent accounting uses `PlanDispatch` and the sealed `PlanUnsentToolDispatch`
+in its existing atomic Run transition. Unmetered Tool recovery is also bound
+to the original Call digest and physical callback return. This is not new
+approval custody, provider completion or budget authority. Complete old
+obligations with the previous writer and retain its Profile; use a fresh
+Profile for the new writer. No in-place migration or old-state fallback.
+
 ## Unified Agent call allowance (AC-05)
 
 `agent.StartRequest` and `harness.StartRequest` now accept one
@@ -84,7 +119,7 @@ its nested renewal policy, and rejects legacy separate-policy inputs.
 Removing the independent admission field also changes Config admission hashes
 for requests without an allowance; use only the new writer on a fresh Profile.
 
-The private Agent state evidence version is v4; the single allowance record
+The single allowance record
 contains the ceiling, renewal policy and progress. Older sealed states are
 rejected rather than interpreting a previously automatic policy as manual.
 Finish original obligations with the prior writer and retain its Profile;

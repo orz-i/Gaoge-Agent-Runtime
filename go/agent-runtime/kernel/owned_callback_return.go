@@ -109,7 +109,7 @@ func NewOwnedToolReturns(bindings []OwnedToolReturn) (OwnedToolReturns, error) {
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].CallID < bindings[j].CallID })
 	for i, b := range bindings {
 		if strings.TrimSpace(b.CallID) == "" || b.CallID != strings.TrimSpace(b.CallID) ||
-			b.LedgerID != strings.TrimSpace(b.LedgerID) || (b.LedgerID == "" && b.ApprovalDigest == "" && !b.Unsent) ||
+			b.LedgerID != strings.TrimSpace(b.LedgerID) ||
 			!validToolReceiptDigest(b.RequestDigest) ||
 			(b.ReceiptDigest != "" && (b.LedgerID == "" || !validToolReceiptDigest(b.ReceiptDigest))) ||
 			(b.ApprovalDigest != "" && !validToolReceiptDigest(b.ApprovalDigest)) ||

@@ -99,7 +99,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 		}
 		// Split-store legacy compositions still require independent owner
 		// evidence for a nonempty Tool history.
-		if state.Budget.Usage.ToolCalls == 0 && len(state.DelegatedToolReceipts) == 0 && len(state.RecoveredTools) == 0 {
+		if state.Budget.Usage.ToolCalls == 0 && len(state.DelegatedToolReceipts) == 0 && state.recoveredToolCount() == 0 {
 			return true
 		}
 		return runner.verifyToolHistory(ctx, child.Run.ID, state)

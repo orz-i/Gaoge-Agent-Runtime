@@ -80,7 +80,7 @@ func testDeferredBoundedAgentCancellation(t *testing.T, withHostApprovalPolicy b
 		if e != nil {
 			return nil, nil, e
 		}
-		c, e := handoff.NewDeferredAgent(original)
+		c, e := handoff.New(handoff.Config{Local: original, PrepareLocal: true})
 		if e != nil {
 			return nil, nil, e
 		}

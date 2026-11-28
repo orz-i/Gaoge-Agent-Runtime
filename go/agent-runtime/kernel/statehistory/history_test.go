@@ -10,7 +10,7 @@ import (
 
 func TestExactHistorySelection(t *testing.T) {
 	wire := func(messages, invocations string) json.RawMessage {
-		return json.RawMessage(`{"messages":` + messages + `,"modelInvocations":` + invocations + `,"_originalStateEvidence":{"version":"agent-state-opaque-v4","digest":"fixture"},"untouched":{"raw":"\u003c"}}`)
+		return json.RawMessage(`{"messages":` + messages + `,"modelInvocations":` + invocations + `,"_originalStateEvidence":{"version":"agent-state-opaque-v5","digest":"fixture"},"untouched":{"raw":"\u003c"}}`)
 	}
 	a := wire(`[{"role":"system","content":"one"},{"role":"user","content":"original"}]`, `[{"status":"consumed","id":"first"},{"status":"completed","id":"active"}]`)
 	b := wire(`[{"role":"system","content":"updated"},{"role":"user","content":"original"},{"role":"assistant","content":"answer"}]`, `[{"status":"consumed","id":"first"},{"status":"consumed","id":"active"}]`)
@@ -93,7 +93,7 @@ func TestFrozenRequestSharesOnlyExactOriginalTranscriptBytes(t *testing.T) {
 	projected := `[{"role":"system","content":"different policy"},` + item + `]`
 	other := `[{"role":"user","content":"unrelated projection"}]`
 	wire := func(messages, request, business string) json.RawMessage {
-		return json.RawMessage(`{"messages":` + messages + `,"modelInvocations":[{"id":"one","status":"pending","request":{"messages":` + request + `},"contextSummary":{"businessRequest":{"messages":` + business + `}}}],"_originalStateEvidence":{"version":"agent-state-opaque-v4","digest":"fixture"}}`)
+		return json.RawMessage(`{"messages":` + messages + `,"modelInvocations":[{"id":"one","status":"pending","request":{"messages":` + request + `},"contextSummary":{"businessRequest":{"messages":` + business + `}}}],"_originalStateEvidence":{"version":"agent-state-opaque-v5","digest":"fixture"}}`)
 	}
 	original := wire(transcript, projected, transcript)
 	p := Prepare("agent", nil, original, Manifest{}, 1)

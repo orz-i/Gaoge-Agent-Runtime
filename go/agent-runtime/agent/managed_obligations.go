@@ -54,8 +54,7 @@ func (r *Runner) freezeManagedSource(ctx context.Context, s kernel.Snapshot, sta
 
 func managedObligationsQuiescent(state runState) bool {
 	return len(state.PendingCalls) == 0 && state.PendingApproval == nil && state.ToolAdmission == nil &&
-		state.ToolDispatchID == "" && state.ToolWait == nil && len(state.DeferredChildren) == 0 &&
-		len(state.RecoveredTools) == 0 && len(state.ExternalSignals) == 0 &&
+		state.ToolDispatchID == "" && len(state.ToolReturns) == 0 && len(state.ExternalSignals) == 0 &&
 		state.ExternalToolCancellation == nil
 }
 

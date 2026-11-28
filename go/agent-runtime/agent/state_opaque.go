@@ -9,7 +9,7 @@ import (
 
 // The current seal preserves missing RawMessage values at required JSON
 // positions. Model identity and receipts share the same lossless codec.
-const originalStateEvidenceVersion = "agent-state-opaque-v4"
+const originalStateEvidenceVersion = "agent-state-opaque-v5"
 
 type originalStateEvidence = jsoncontract.OpaqueEvidence
 type originalStateRawField = jsoncontract.OpaqueField

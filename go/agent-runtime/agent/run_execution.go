@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -49,85 +48,6 @@ func safeToolRetryWindow(policy CallPolicy, available time.Duration) bool {
 	}
 	delay := policy.MaxBackoff + policy.MaxBackoff/5
 	return delay <= remainder/(attempts-1)
-}
-
-// withReceiptOwner is only for unmetered verifier-only recovery. Ordinary
-// execution acquires and retires its lease with its physical Grant instead.
-// The observer cannot dispatch and releases only its own acquired lease.
-func (runner *Runner) withReceiptOwner(ctx context.Context, runID string, expectedRevision uint64,
-	execute func(context.Context, *Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
-	source, err := runner.runtime.Load(ctx, runID)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	if source.Run.Revision != expectedRevision || source.Run.BudgetScopeID != "" || runner.activePhysicalGrant != nil {
-		return source, kernel.ErrExecutionConflict
-	}
-	if lease, bound := runner.runtime.BoundExecutionLease(); bound {
-		if lease.RunID != runID {
-			return kernel.Snapshot{}, kernel.ErrExecutionConflict
-		}
-		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
-			return kernel.Snapshot{}, err
-		}
-		scoped := *runner
-		scoped.activeRunLease = &lease
-		scoped.externalRunLease = true
-		return execute(ctx, &scoped)
-	}
-	config := *runner.runExecution
-	lease, err := runner.runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
-		RunID: runID, OwnerID: config.OwnerID, LeaseDuration: config.LeaseDuration,
-	})
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	// Before execute is called there are NO Model/Tool effects from this
-	// newly claimed segment. Always relinquish it on preflight failure,
-	// including a cancelled caller context, so the next recovery is not
-	// blocked for a full TTL by a stale Revision.
-	abortBeforeDispatch := func(snapshot kernel.Snapshot, cause error) (kernel.Snapshot, error) {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		releaseErr := runner.runtime.ReleaseExecution(cleanupCtx, lease)
-		if releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
-			return snapshot, errors.Join(cause, releaseErr)
-		}
-		return snapshot, cause
-	}
-	bound, err := runner.runtime.WithExecution(lease)
-	if err != nil {
-		return abortBeforeDispatch(kernel.Snapshot{}, err)
-	}
-	// The pre-claim snapshot is not a grant. A concurrent valid control
-	// can commit before we acquire, or a Store implementation can
-	// commit before returning Acquire. Re-read under the acquired owner
-	// BEFORE any middleware/Model/Tool sees this snapshot.
-	persisted, err := bound.Load(ctx, runID)
-	if err != nil {
-		return abortBeforeDispatch(kernel.Snapshot{}, err)
-	}
-	if persisted.Run.Revision != expectedRevision {
-		return abortBeforeDispatch(persisted, kernel.ErrConflict)
-	}
-	if persisted.Run.Status != kernel.RunStatusRunning {
-		return abortBeforeDispatch(persisted, kernel.ErrExecutionRequired)
-	}
-	if err = bound.RequireExecution(ctx, runID); err != nil {
-		return abortBeforeDispatch(persisted, err)
-	}
-	scoped := *runner
-	scoped.runtime = bound
-	// The stable bearer identity survives RenewExecution; one lease can span
-	// many internal CAS operations without creating extra work items.
-	scoped.activeRunLease = &lease
-	result, driveErr := execute(ctx, &scoped)
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-	defer cancel()
-	if releaseErr := runner.runtime.ReleaseExecution(cleanup, lease); releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
-		return result, errors.Join(driveErr, releaseErr)
-	}
-	return result, driveErr
 }
 
 // keepRunLeaseAlive renews only near the next bounded provider-call window,
