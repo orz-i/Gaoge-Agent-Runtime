@@ -74,6 +74,29 @@ Actual consumer: Gaoge-Agent-Server `512d3bf3b71c18bcd83052257dcd1da7d6dcc8b8`,
 AC-09 pins the candidate and validates it in an isolated consumer worktree.
 Do not require a downstream facade just to preserve retired SDK internals.
 
+## Local acceptance (2026-11-28 user decision)
+
+GAR-I-1 uses local verification and Qual strict acceptance instead of waiting
+for GitHub Actions. The repository's ordinary PR/main CI, CodeQL, dependency
+review and PR-description workflows are manually paused; release/tag workflows
+remain active. The existing main branch protection is unchanged; resolving its
+remote-check requirement is a separate explicit merge-admission decision.
+
+- AC-01–08: use existing targeted tests, changed-module compilation/static checks
+  and actual Memory/SQLite/PostgreSQL contracts when affected; record exact
+  candidate SHA, commands, results, failures and net code delta in Qual. Do not
+  rerun the full suite at every checkpoint or wait for remote checks.
+- AC-09: on one fixed candidate, reuse `make check-static`, `make ci-consumers`,
+  `make ci-race`, `make ci-coverage`, `make security`, `make integration` and
+  `make integration-otel` locally, plus the existing downstream and Agent-effect
+  acceptance. Use isolated real PostgreSQL/Redis and SQLite reopen tests. Record
+  platform/tool limitations (including Windows and CodeQL) as unverified, not
+  equivalent passes. AC-10/11 independently verify the same SHA and evidence.
+- Preserve the 30% reduction target, behavior/safety assertions, strict
+  per-criterion evidence, distinct Reviewer, and explicit merge authorization.
+  Update still-open Qual acceptance criteria referring to remote CI before
+  execution/acceptance; rebind AC-11 to the current Initiative scope and contract.
+
 ## Measurable gates
 
 Count tracked `go/**/*.go` production files excluding `*_test.go`, `examples/`
@@ -102,7 +125,7 @@ results. Separate exact focused Memory
 `-run '^TestOwnedPhysicalMemory(AdmissionBindingAndTTL|ReceiptOnlyRecovery)$'`
 and Harness `-run '^TestAgentSessionManagedRecoveryRequires(ExactHostStore|ExplicitMatchingStores)$'`
 both passed with `-count=1 -timeout=10s`. No failure conclusion from the broad
-timeout; SQLite reopen, actual PostgreSQL, downstream, full CI, long-history
+timeout; SQLite reopen, actual PostgreSQL, downstream, full local acceptance, long-history
 benchmark and task effectiveness are later AC-03/09 gates. Reuse existing
 behavior and failure fixtures; do not multiply test matrices per card.
 
