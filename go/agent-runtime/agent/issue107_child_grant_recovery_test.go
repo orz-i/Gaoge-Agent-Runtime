@@ -35,7 +35,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 		t.Fatal(err)
 	}
 	q := kernel.ExecutionAcquireRequest{}
-	admissionProof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "", ""), child.State, child)
+	admissionProof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), child.State, child)
 	owned, admission, err := rt.AdmitPhysicalExecution(t.Context(), child, q, admissionProof, "start", "")
 	original := admission.Grant
 	if err != nil {

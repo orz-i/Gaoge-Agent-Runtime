@@ -15,7 +15,7 @@ func TestOwnedAdmissionAttemptBindsCommitAndSource(t *testing.T) {
 	grant.ID = "old-grant"
 	grant.ExpectedRevision = source.Run.Revision
 	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_admission", PhysicalAdmissionSubject(ExecutionAcquireRequest{}, lease, grant.AdmissionOperation, ""), source.State, source)
-	p := PhysicalAdmission{proof: proof, attempt: [32]byte{1}, candidate: PhysicalAdmissionResult{Grant: grant, Lease: lease}}
+	p := PhysicalAdmission{proof: proof, operation: grant.AdmissionOperation, attempt: [32]byte{1}, candidate: PhysicalAdmissionResult{Grant: grant, Lease: lease}}
 	other := p
 	other.attempt = [32]byte{2}
 	grant.AdmissionSourceHash = ownedAdmissionAttemptHash(source, lease, grant.AdmissionOperation, grant.ID, p.attempt)

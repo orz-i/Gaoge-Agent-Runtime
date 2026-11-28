@@ -53,12 +53,12 @@ type PhysicalExecutionStore interface {
 // commitment is retained in the existing AdmissionSourceHash field; the
 // attempt nonce is never exported or reconstructed from a stored Grant.
 type PhysicalAdmission struct {
-	proof      *featurecontrol.Proof
-	attempt    [32]byte
-	dispatchID string
-	acquire    ExecutionAcquireRequest
-	candidate  PhysicalAdmissionResult
-	recovery   ManagedAdmissionProof
+	proof                 *featurecontrol.Proof
+	attempt               [32]byte
+	operation, dispatchID string
+	acquire               ExecutionAcquireRequest
+	candidate             PhysicalAdmissionResult
+	recovery              ManagedAdmissionProof
 }
 
 // PhysicalAdmissionResult is the single admitted native segment.
@@ -126,45 +126,47 @@ func (p PhysicalAdmission) commitUncertain(err error) bool {
 }
 
 func (p PhysicalAdmission) Matches(g ChildExecutionGrant, s Snapshot, l ExecutionLease) bool {
-	if !p.candidate.Grant.IsOwned() {
-		return g == p.candidate.Grant && g.Identity().Valid() && g.ExpectedRevision != 0 &&
-			l == (ExecutionLease{}) && s.Run.ID == g.ChildRunID && s.Run.Revision == g.ExpectedRevision &&
-			s.Run.Kind == "agent" && s.Run.ParentRunID != "" &&
-			(s.Run.Status == RunStatusRunning || s.Run.Status == RunStatusWaitingInput) &&
-			p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", PhysicalAdmissionSubject(ExecutionAcquireRequest{}, ExecutionLease{}, "", ""), s.State, s)
-	}
-
-	candidate := p.candidate
-	if p.attempt == ([32]byte{}) || !g.Identity().Valid() ||
-		g.ID != candidate.Grant.ID || g.ChildRunID != candidate.Grant.ChildRunID || g.ExpectedRevision != candidate.Grant.ExpectedRevision ||
-		g.AdmissionOperation != candidate.Grant.AdmissionOperation || l.OwnerID != candidate.Lease.OwnerID || l.LeaseID != candidate.Lease.LeaseID ||
-		(!p.AcquiresLease() && l.Epoch != candidate.Lease.Epoch) || !g.MatchesExecution(l) {
+	c := p.candidate
+	if !g.Identity().Valid() || g.ExpectedRevision == 0 ||
+		g.ID != c.Grant.ID || g.ChildRunID != c.Grant.ChildRunID || g.ExpectedRevision != c.Grant.ExpectedRevision ||
+		s.Run.Kind != "agent" || s.Run.ID != g.ChildRunID || s.Run.Revision != g.ExpectedRevision ||
+		g.IsOwned() != c.Grant.IsOwned() || g.IsOwned() != (s.Run.ParentRunID == "") ||
+		(s.Run.Status != RunStatusRunning && s.Run.Status != RunStatusWaitingInput) {
 		return false
 	}
-	if p.IsManagedRecovery() {
-		return p.AcquiresLease() && g.AdmissionOperation == "managed_resume" && !strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) &&
-			p.recovery.Matches(p.recovery.transfer, ManagedResume) && ManagedSourceMatches(p.recovery.transfer.SafePoint, s) &&
-			g.AdmissionSourceHash == ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt)
-	}
-	if !ordinaryOwnedOperation(g.AdmissionOperation) {
-		return false
-	}
-	if p.dispatchID != "" {
-		id, e := OwnedPhysicalDispatchGrantID(g.ChildRunID, g.AdmissionOperation, p.dispatchID)
-		if e != nil || g.ID != id {
+	if !g.IsOwned() {
+		if g != c.Grant || l != (ExecutionLease{}) {
 			return false
 		}
-	} else if strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) {
-		return false
+	} else {
+		if p.attempt == ([32]byte{}) || g.AdmissionOperation != c.Grant.AdmissionOperation ||
+			l.OwnerID != c.Lease.OwnerID || l.LeaseID != c.Lease.LeaseID ||
+			(!p.AcquiresLease() && l.Epoch != c.Lease.Epoch) || !g.MatchesExecution(l) ||
+			g.AdmissionSourceHash != ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt) {
+			return false
+		}
+		if p.IsManagedRecovery() {
+			return p.AcquiresLease() && g.AdmissionOperation == "managed_resume" && !strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) &&
+				p.recovery.Matches(p.recovery.transfer, ManagedResume) && ManagedSourceMatches(p.recovery.transfer.SafePoint, s)
+		}
+		if g.AdmissionOperation != p.operation {
+			return false
+		}
+		if p.dispatchID != "" {
+			id, e := OwnedPhysicalDispatchGrantID(g.ChildRunID, g.AdmissionOperation, p.dispatchID)
+			if e != nil || g.ID != id {
+				return false
+			}
+		} else if strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) {
+			return false
+		}
 	}
-	borrowed := candidate.Lease
+	lease := c.Lease
 	if p.AcquiresLease() {
-		borrowed = ExecutionLease{}
+		lease = ExecutionLease{}
 	}
-	return s.Run.Kind == "agent" && s.Run.ParentRunID == "" && s.Run.Revision == g.ExpectedRevision &&
-		(s.Run.Status == RunStatusRunning || s.Run.Status == RunStatusWaitingInput) &&
-		g.AdmissionSourceHash == ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt) &&
-		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", PhysicalAdmissionSubject(p.acquire, borrowed, g.AdmissionOperation, p.dispatchID), s.State, s)
+	return ordinaryOwnedOperation(p.operation) &&
+		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", PhysicalAdmissionSubject(p.acquire, lease, p.operation, p.dispatchID), s.State, s)
 }
 
 func ownedAdmissionAttemptHash(s Snapshot, l ExecutionLease, operation, grantID string, attempt [32]byte) string {
@@ -233,45 +235,52 @@ func (r *Runtime) AdmitPhysicalExecution(ctx context.Context, s Snapshot, q Exec
 	if s.Run.Kind != "agent" {
 		return nil, zero, ErrExecutionRequired
 	}
-	if s.Run.ParentRunID != "" {
-		if q != (ExecutionAcquireRequest{}) || dispatchID != "" ||
-			!proof.Matches(id, rev, "agent_owned_physical_admission", PhysicalAdmissionSubject(q, ExecutionLease{}, "", ""), s.State, s) {
+	l, bound := r.BoundExecutionLease()
+	parented := s.Run.ParentRunID != ""
+	p := PhysicalAdmission{proof: proof, operation: operation, dispatchID: dispatchID, acquire: q}
+	if parented {
+		if q != (ExecutionAcquireRequest{}) || dispatchID != "" {
 			return nil, zero, ErrExecutionConflict
 		}
-		gid, e := r.NewID("childgrant")
-		if e != nil {
-			return nil, zero, e
+		l = ExecutionLease{}
+	} else {
+		if !r.SupportsPhysicalExecution() || !r.SupportsExecution() {
+			return nil, zero, ErrExecutionRequired
 		}
-		p := PhysicalAdmission{proof: proof, candidate: PhysicalAdmissionResult{Grant: ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: rev}}}
-		return r.admitPhysical(ctx, s, p)
+		if bound {
+			if l.RunID != id || q != (ExecutionAcquireRequest{}) {
+				return nil, zero, ErrExecutionConflict
+			}
+		} else if q.RunID != id || !validExecutionAcquireRequest(q) || strings.TrimSpace(q.OwnerID) != q.OwnerID {
+			return nil, zero, ErrInvalidInput
+		}
+	}
+	if !proof.Matches(id, rev, "agent_owned_physical_admission", PhysicalAdmissionSubject(q, l, operation, dispatchID), s.State, s) {
+		return nil, zero, ErrExecutionConflict
 	}
 
-	_, ok := r.store.(PhysicalExecutionStore)
-	if !ok || !r.SupportsExecution() {
-		return nil, zero, ErrExecutionRequired
-	}
-	l, bound := r.BoundExecutionLease()
-	if bound {
-		if l.RunID != id || q != (ExecutionAcquireRequest{}) {
-			return nil, zero, ErrExecutionConflict
-		}
-	} else if q.RunID != id || !validExecutionAcquireRequest(q) || strings.TrimSpace(q.OwnerID) != q.OwnerID {
-		return nil, zero, ErrInvalidInput
-	}
 	var gid string
 	var e error
 	if dispatchID != "" {
 		gid, e = OwnedPhysicalDispatchGrantID(id, operation, dispatchID)
 	} else {
-		gid, e = r.NewID("ownedgrant")
-		if e == nil && strings.HasPrefix(gid, ownedDispatchGrantPrefix) {
+		prefix := "ownedgrant"
+		if parented {
+			prefix = "childgrant"
+		}
+		gid, e = r.NewID(prefix)
+		if e == nil && !parented && strings.HasPrefix(gid, ownedDispatchGrantPrefix) {
 			return nil, zero, ErrInvalidInput
 		}
 	}
 	if e != nil {
 		return nil, zero, e
 	}
-	p := PhysicalAdmission{proof: proof, dispatchID: dispatchID, acquire: q}
+	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: rev}
+	if parented {
+		p.candidate.Grant = g
+		return r.admitPhysical(ctx, s, p)
+	}
 	if _, e = rand.Read(p.attempt[:]); e != nil {
 		return nil, zero, e
 	}
@@ -284,18 +293,11 @@ func (r *Runtime) AdmitPhysicalExecution(ctx context.Context, s Snapshot, q Exec
 		}
 		l = ExecutionLease{RunID: id, OwnerID: q.OwnerID, LeaseID: hex.EncodeToString(token[:])}
 	}
-	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: rev, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionOperation: operation}
+	g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionOperation = l.OwnerID, l.LeaseID, l.Epoch, operation
 	if bound {
 		g.AdmissionSourceHash = ownedAdmissionAttemptHash(s, l, operation, gid, p.attempt)
 	}
 	p.candidate = PhysicalAdmissionResult{Grant: g, Lease: l}
-	borrowed := l
-	if !bound {
-		borrowed = ExecutionLease{}
-	}
-	if !proof.Matches(id, rev, "agent_owned_physical_admission", PhysicalAdmissionSubject(q, borrowed, operation, dispatchID), s.State, s) {
-		return nil, zero, ErrExecutionConflict
-	}
 	return r.admitPhysical(ctx, s, p)
 }
 

@@ -19,7 +19,7 @@ func AdmitChildFixture(ctx context.Context, rt *kernel.Runtime, id string, rev u
 	}
 	source.Run.Revision = rev
 	q := kernel.ExecutionAcquireRequest{}
-	proof := featurecontrol.Seal(id, rev, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "", ""), source.State, source)
+	proof := featurecontrol.Seal(id, rev, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), source.State, source)
 	_, result, err := rt.AdmitPhysicalExecution(ctx, source, q, proof, "start", "")
 	return result.Grant, err
 }
@@ -49,6 +49,11 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		root := newRun("root", "")
 		middle := newRun("middle", root.Run.ID)
 		child := newRun("child", middle.Run.ID)
+		q := kernel.ExecutionAcquireRequest{}
+		proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), child.State, child)
+		if _, _, e := rt.AdmitPhysicalExecution(t.Context(), child, q, proof, "resume", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
+			t.Fatalf("child admission accepted proof for a different operation: %v", e)
+		}
 		grant, err := AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 		if err != nil {
 			t.Fatal(err)

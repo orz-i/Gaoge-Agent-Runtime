@@ -170,9 +170,6 @@ func (runner *Runner) withNativeSegment(ctx context.Context, snapshot kernel.Sna
 		q = kernel.ExecutionAcquireRequest{RunID: snapshot.Run.ID, OwnerID: runner.runExecution.OwnerID, LeaseDuration: runner.runExecution.LeaseDuration}
 	}
 	subject := kernel.PhysicalAdmissionSubject(q, lease, operation, dispatchID)
-	if parented {
-		subject = kernel.PhysicalAdmissionSubject(q, lease, "", "")
-	}
 	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_admission", subject, snapshot.State, snapshot)
 	scopedRT, admitted, err := rt.AdmitPhysicalExecution(ctx, snapshot, q, proof, operation, dispatchID)
 	if err != nil {

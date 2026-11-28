@@ -52,39 +52,34 @@ func ResolvePhysicalAdmission(current Snapshot, persisted ExecutionLease, now ti
 		if current.Run.Kind != "agent" {
 			return zero, ErrExecutionRequired
 		}
-		if !permit.Matches(g, current, ExecutionLease{}) {
+		claimed, persisted = ExecutionLease{}, ExecutionLease{}
+	} else {
+		if permit.attempt == ([32]byte{}) {
 			return zero, ErrExecutionConflict
 		}
-		if quarantined {
-			return zero, ErrExecutionQuarantined
+		if permit.AcquiresLease() {
+			if current.Run.Revision != g.ExpectedRevision {
+				return zero, ErrConflict
+			}
+			if hasGrants {
+				return zero, ErrChildExecutionBusy
+			}
+			lease, e := PlanExecutionAcquire(current.Run, persisted, now, permit.acquire, claimed.LeaseID, quarantined)
+			if e != nil {
+				return zero, e
+			}
+			claimed, persisted = lease, lease
+			g.ExecutionEpoch = lease.Epoch
+			g.AdmissionSourceHash = ownedAdmissionAttemptHash(current, lease, g.AdmissionOperation, g.ID, permit.attempt)
 		}
-		if hasGrants {
-			return zero, ErrChildExecutionBusy
+		if err := ValidatePhysicalAdmissionRequest(g, claimed); err != nil {
+			return zero, err
 		}
-		return PhysicalAdmissionResult{Grant: g}, nil
+		if !g.MatchesExecution(persisted) || !now.Before(persisted.ExpiresAt) {
+			return zero, ErrExecutionConflict
+		}
 	}
-	if permit.attempt == ([32]byte{}) {
-		return zero, ErrExecutionConflict
-	}
-	if permit.AcquiresLease() {
-		if current.Run.Revision != g.ExpectedRevision {
-			return zero, ErrConflict
-		}
-		if hasGrants {
-			return zero, ErrChildExecutionBusy
-		}
-		lease, e := PlanExecutionAcquire(current.Run, persisted, now, permit.acquire, claimed.LeaseID, quarantined)
-		if e != nil {
-			return zero, e
-		}
-		claimed, persisted = lease, lease
-		g.ExecutionEpoch = lease.Epoch
-		g.AdmissionSourceHash = ownedAdmissionAttemptHash(current, lease, g.AdmissionOperation, g.ID, permit.attempt)
-	}
-	if err := ValidatePhysicalAdmissionRequest(g, claimed); err != nil {
-		return zero, err
-	}
-	if !permit.Matches(g, current, claimed) || !g.MatchesExecution(persisted) || !now.Before(persisted.ExpiresAt) {
+	if !permit.Matches(g, current, claimed) {
 		return zero, ErrExecutionConflict
 	}
 	if quarantined {
