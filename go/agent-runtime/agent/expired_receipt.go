@@ -80,7 +80,7 @@ func (r *Runner) expiredRootReceipt(source kernel.Snapshot, frame *nativeRunAdmi
 		if err := local.runtime.RequireExecution(ctx, source.Run.ID); err != nil {
 			return source, err
 		}
-		next, _, err := local.consumeCompletedModel(ctx, source, state, *invocation)
+		next, _, err := local.consumeCompletedModel(ctx, source, state)
 		return next, err
 	}, nil
 }

@@ -115,7 +115,7 @@ func TestModelInvocationKnownRejectionHasOneToolFreeTerminalRepair(t *testing.T)
 				t.Fatalf("known completion usage lost: %+v", view.Budget.Usage)
 			}
 			for _, invocation := range view.ModelInvocations {
-				if invocation.Status != agent.ModelInvocationConsumed || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.Usage == nil || invocation.Response.Usage == nil || invocation.ExecutionLeaseUntil != nil {
+				if invocation.Status != agent.ModelInvocationConsumed || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.Response.Usage == nil || invocation.ExecutionLeaseUntil != nil {
 					t.Fatalf("known completion left pending: %+v", invocation)
 				}
 				if invocation.ErrorCode != "" && (invocation.Response.Content != "" ||
@@ -153,7 +153,7 @@ func TestNamedRejectedResponseWithoutPhysicalIDIsNotBillable(t *testing.T) {
 		state.Budget.Usage.OutputTokens != 0 || len(state.ModelInvocations) != 1 ||
 		state.ModelInvocations[0].Status != agent.ModelInvocationPending ||
 		state.ModelInvocations[0].ProviderResponseID != "" ||
-		state.ModelInvocations[0].Usage != nil || state.ModelInvocations[0].Response.ResponseID != "" ||
+		state.ModelInvocations[0].Response.Usage != nil || state.ModelInvocations[0].Response.ResponseID != "" ||
 		len(state.ModelInvocations[0].Response.ToolCalls) != 0 {
 		t.Fatalf("ID-less unverified completion was persisted/billed: budget=%+v invocations=%+v",
 			state.Budget.Usage, state.ModelInvocations)
@@ -430,9 +430,8 @@ func TestModelInvocationPersistsStreamingResponseMetadata(t *testing.T) {
 	}
 	invocation := view.ModelInvocations[0]
 	if invocation.Provider != "fault-test-provider" || invocation.ProviderResponseID != "resp_stream_1" ||
-		invocation.Response.ResponseID != "resp_stream_1" || invocation.Usage == nil ||
-		invocation.Usage.InputTokens != 7 || invocation.Usage.OutputTokens != 3 ||
-		invocation.Response.Usage == nil || invocation.Response.Usage.InputTokens != 7 {
+		invocation.Response.ResponseID != "resp_stream_1" || invocation.Response.Usage == nil ||
+		invocation.Response.Usage.InputTokens != 7 || invocation.Response.Usage.OutputTokens != 3 {
 		t.Fatalf("durable provider metadata = %#v", invocation)
 	}
 	if invocation.RequestHash == "" || invocation.SourceRevision == 0 || invocation.CreatedAt.IsZero() ||

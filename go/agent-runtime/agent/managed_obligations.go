@@ -247,7 +247,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 	normalized.Status = first.Status
 	normalized.ExecutionAttempt, normalized.DispatchAttempt = first.ExecutionAttempt, first.DispatchAttempt
 	normalized.ExecutionLeaseUntil, normalized.RetryAfter = first.ExecutionLeaseUntil, first.RetryAfter
-	normalized.ProviderResponseID, normalized.Response, normalized.Usage = first.ProviderResponseID, first.Response, first.Usage
+	normalized.ProviderResponseID, normalized.Response = first.ProviderResponseID, first.Response
 	normalized.CompletedAt, normalized.ErrorCode = first.CompletedAt, first.ErrorCode
 	normalized.OutcomeErrorCode, normalized.OutcomeErrorDetail = first.OutcomeErrorCode, first.OutcomeErrorDetail
 	if !sameBoundedValue(normalized, *first) {

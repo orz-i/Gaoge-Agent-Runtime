@@ -173,7 +173,7 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 			for i, invocation := range view.ModelInvocations {
 				if invocation.Status != agent.ModelInvocationConsumed || invocation.ExecutionAttempt != 1 ||
 					invocation.ProviderResponseID != fmt.Sprintf("paid-%d", i+1) ||
-					invocation.Usage == nil || invocation.Usage.InputTokens != 17 || invocation.Usage.OutputTokens != 5 ||
+					invocation.Response.Usage == nil || invocation.Response.Usage.InputTokens != 17 || invocation.Response.Usage.OutputTokens != 5 ||
 					invocation.CompletedAt == nil || invocation.ConsumedAt == nil ||
 					(i == 1 && (invocation.ErrorCode != "model.post_generation_failed" ||
 						len(invocation.Response.ToolCalls) != 0 || invocation.Response.Content != "" ||

@@ -45,7 +45,7 @@ func TestPersistedNamedProviderCompletionNeedsPhysicalIdentity(t *testing.T) {
 						RequestHash: strings.Repeat("b", 64), CreatedAt: now, CompletedAt: &now, ConsumedAt: &now,
 						Provider: tc.provider, ProviderResponseID: tc.persistedID,
 						Response: model.Response{ResponseID: tc.responseID, ToolCalls: []tools.Call{{ID: "call", ToolKey: "lookup"}}, Usage: model.CloneUsage(usage)},
-						Usage:    model.CloneUsage(usage), Status: ModelInvocationConsumed,
+						Status:   ModelInvocationConsumed,
 					}
 					if tc.provider != "" {
 						invocation.BindingFingerprint = strings.Repeat("a", 64)

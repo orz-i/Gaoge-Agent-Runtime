@@ -54,20 +54,20 @@ type ModelInvocation struct {
 	// BindingFingerprint freezes the effective named Provider binding without
 	// persisting endpoint addresses or credentials. Unnamed local Model clients
 	// are not identified as external Provider bindings.
-	BindingFingerprint  string                `json:"bindingFingerprint,omitempty"`
-	Model               string                `json:"model,omitempty"`
-	Status              ModelInvocationStatus `json:"status"`
-	Request             model.Request         `json:"request,omitempty"`
-	SamplingPlan        *SamplingPlan         `json:"samplingPlan,omitempty"`
-	ProviderResponseID  string                `json:"providerResponseID,omitempty"`
-	Response            model.Response        `json:"response,omitempty"`
-	Usage               *model.Usage          `json:"usage,omitempty"`
-	ErrorCode           string                `json:"errorCode,omitempty"`
-	OutcomeErrorCode    string                `json:"outcomeErrorCode,omitempty"`
-	OutcomeErrorDetail  string                `json:"outcomeErrorDetail,omitempty"`
-	DispatchAttempt     uint32                `json:"dispatchAttempt,omitempty"`
-	ExecutionAttempt    uint32                `json:"executionAttempt,omitempty"`
-	ExecutionLeaseUntil *time.Time            `json:"executionLeaseUntil,omitempty"`
+	BindingFingerprint string                `json:"bindingFingerprint,omitempty"`
+	Model              string                `json:"model,omitempty"`
+	Status             ModelInvocationStatus `json:"status"`
+	Request            model.Request         `json:"request,omitzero"`
+	SamplingPlan       *SamplingPlan         `json:"samplingPlan,omitempty"`
+	ProviderResponseID string                `json:"providerResponseID,omitempty"`
+	Response           model.Response        `json:"response,omitempty"`
+
+	ErrorCode           string     `json:"errorCode,omitempty"`
+	OutcomeErrorCode    string     `json:"outcomeErrorCode,omitempty"`
+	OutcomeErrorDetail  string     `json:"outcomeErrorDetail,omitempty"`
+	DispatchAttempt     uint32     `json:"dispatchAttempt,omitempty"`
+	ExecutionAttempt    uint32     `json:"executionAttempt,omitempty"`
+	ExecutionLeaseUntil *time.Time `json:"executionLeaseUntil,omitempty"`
 	// RetryAfter is the Feature-owned ReadyAt gate for a released,
 	// retryable model call. It is not a second execution lease.
 	RetryAfter  *time.Time `json:"retryAfter,omitempty"`
@@ -211,7 +211,6 @@ func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 	value.Request = model.CloneRequest(value.Request)
 	value.CatalogFingerprints = append([]string(nil), value.CatalogFingerprints...)
 	value.Response = model.CloneResponse(value.Response)
-	value.Usage = model.CloneUsage(value.Usage)
 	if value.ExecutionLeaseUntil != nil {
 		leaseUntil := value.ExecutionLeaseUntil.UTC()
 		value.ExecutionLeaseUntil = &leaseUntil
@@ -345,8 +344,7 @@ func validModelInvocationReceipt(invocation ModelInvocation) bool {
 		}
 	}
 	if invocation.ErrorCode != "" {
-		return invocation.Usage != nil && invocation.Response.Usage != nil &&
-			model.ValidUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
+		return invocation.Response.Usage != nil && model.ValidUsage(invocation.Response.Usage)
 	}
 	return model.ValidResponse(invocation.Response)
 }
@@ -966,7 +964,6 @@ func (runner *Runner) executeModelInvocation(
 	invocation.Status = ModelInvocationCompleted
 	invocation.ProviderResponseID = strings.TrimSpace(response.ResponseID)
 	invocation.Response = model.CloneResponse(response)
-	invocation.Usage = model.CloneUsage(response.Usage)
 	if knownRejection {
 		invocation.ErrorCode = model.ClassifiedErrorCode(err)
 		if invocation.ErrorCode == "" {

@@ -397,7 +397,7 @@ func runAcceptanceTask(ctx context.Context, name string, client model.Client, se
 			completeUsage := len(view.ModelInvocations) > 0
 			tokens := view.Budget.Usage.TotalTokens
 			for _, invocation := range view.ModelInvocations {
-				if invocation.Status != agent.ModelInvocationConsumed || invocation.Usage == nil {
+				if invocation.Status != agent.ModelInvocationConsumed || invocation.Response.Usage == nil {
 					completeUsage = false
 					continue
 				}
