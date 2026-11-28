@@ -22,7 +22,9 @@ func selectFirstPartyStages(d *Dependencies) error {
 		}
 		d.BoundedContext = summary.bounded
 	}
-	if d.ManagedRecovery && !validManagedDependencies(*d) {
+	// A registered recovery Host is a persistence identity, not an opt-in mode.
+	// A configured Context must prove its actual first-party store against it.
+	if d.Runtime.HasManagedRecoveryHost() && d.BoundedContext != nil && !validManagedDependencies(*d) {
 		return ErrInvalidRequest
 	}
 	return nil

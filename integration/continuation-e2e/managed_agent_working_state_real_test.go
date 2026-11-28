@@ -64,7 +64,7 @@ func prepareManagedRecoveryWorkingState(t *testing.T, db *gorm.DB, files string)
 		Runtime: runtime, Store: store, Model: managedWorkingStateWarmupModel{},
 		LocalTools: managedRecoverySessionTools(files), Session: options,
 		Context: harness.AgentSessionContextOptions{
-			ManagedRecovery: true, ReadArtifacts: true,
+			ReadArtifacts: true,
 			ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 				return runtimecontext.ModelWindow{ContextTokens: 12000, ReservedOutputTokens: 512}, nil
 			},

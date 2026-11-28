@@ -112,7 +112,7 @@ func ManagedOriginalObligations(t *testing.T, factory func(*testing.T) (kernel.S
 					Transcript: harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
 						return nil, nil
 					})},
-				Context: harness.AgentSessionContextOptions{ManagedRecovery: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+				Context: harness.AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 					return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 				}},
 				Execution:    execution,

@@ -190,7 +190,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				if err != nil {
 					t.Fatal(err)
 				}
-				options.Context.ManagedRecovery = true
+
 			}
 			session, err := harness.OpenAgentSession(options)
 			if err != nil {
@@ -422,17 +422,20 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			options.Runtime, err = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
+			deps := kernel.Dependencies{Store: runs}
+			if !nativeRecovery {
+				deps.ManagedRecoveryHost = store
+			}
+			options.Runtime, err = kernel.New(deps)
 			if err != nil {
 				t.Fatal(err)
 			}
-			options.Context.ManagedRecovery = !nativeRecovery
 			retrospective, err := harness.OpenAgentSession(options)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := retrospective.Resume(t.Context(), "second"); !errors.Is(err, harness.ErrInvalidRequest) || len(client.requests) != before {
-				t.Fatalf("new handle retroactively selected native summary recovery: %v", err)
+				t.Fatalf("replacement store registration changed original recovery authority: %v", err)
 			}
 			retainedNative, err := options.Runtime.Load(t.Context(), root.ExecutionRefID)
 			if err != nil || retainedNative.Run.Revision != originalNative.Run.Revision {
@@ -443,17 +446,18 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 }
 
 func TestAgentSessionSummaryRejectsUnsupportedComposition(t *testing.T) {
-	for _, mode := range []string{"missing managed host binding", "shared native budget", "zero input", "zero bytes"} {
+	for _, mode := range []string{"foreign managed host binding", "zero input", "zero bytes"} {
 		t.Run(mode, func(t *testing.T) {
 			client := &agentSessionModel{}
 			options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
 			options.Session.Config.WorkingStateSummary = summaryTestPolicy()
 			switch mode {
-			case "missing managed host binding":
-				options.Context.ManagedRecovery = true
-			case "shared native budget":
-				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 3}
-				options.Context.ManagedRecovery = true
+			case "foreign managed host binding":
+				var err error
+				options.Runtime, err = kernel.New(kernel.Dependencies{Store: memory.NewStore(), ManagedRecoveryHost: harness.NewMemoryStore()})
+				if err != nil {
+					t.Fatal(err)
+				}
 			case "zero input":
 				options.Session.Config.WorkingStateSummary.MaxInputTokens = 0
 			case "zero bytes":
@@ -475,7 +479,7 @@ func TestAgentSessionManagedRecoveryRequiresExactHostStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options.Context.ManagedRecovery = true
+
 	options.Session.Config.WorkingStateSummary = summaryTestPolicy()
 	if _, err := harness.OpenAgentSession(options); err != nil {
 		t.Fatalf("matching explicit native summary recovery composition rejected: %v", err)
@@ -510,10 +514,6 @@ func TestNativeSummaryValidatesBothConcreteBridgesActualStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			dependencies := agent.Dependencies{Runtime: runtime, Model: &summarySessionModel{}, ContextSummary: summary}
-			if _, err := agent.NewRunner(dependencies); err != nil {
-				t.Fatalf("ordinary adapter construction was unnecessarily restricted: %v", err)
-			}
-			dependencies.ManagedRecovery = true
 			if _, err := agent.NewRunner(dependencies); !errors.Is(err, agent.ErrInvalidRequest) {
 				t.Fatalf("native summary accepted a foreign actual bridge Store: %v", err)
 			}

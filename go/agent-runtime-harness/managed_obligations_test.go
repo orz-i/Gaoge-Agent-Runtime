@@ -94,7 +94,7 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			options.Context.ManagedRecovery = true
+
 			options.Inputs = inputs
 			options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 1}
 			writes := 0

@@ -108,7 +108,7 @@ func TestFirstPartyOwnerSelectionUsesExplicitStages(t *testing.T) {
 		r.prepareModelRequest != nil || !r.receiptOnlyRunChain || r.kernelOwnedStartCancellation || len(r.boundedCallbacks) != 2 {
 		t.Fatalf("fixed stages did not select one original owner: %v", err)
 	}
-	if _, err := NewRunner(Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, BoundedContext: c, ManagedRecovery: true}); !errors.Is(err, ErrInvalidRequest) {
+	if candidate, err := NewRunner(Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, BoundedContext: c}); err != nil || candidate.SupportsManagedRecovery() {
 		t.Fatalf("unregistered custom Context certified managed recovery: %v", err)
 	}
 }

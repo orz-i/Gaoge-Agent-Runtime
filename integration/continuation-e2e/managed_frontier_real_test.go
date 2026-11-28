@@ -130,7 +130,7 @@ func openManagedFrontierProcess(t *testing.T, db *gorm.DB, files, phase string) 
 	session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 		LocalTools: local,
 		Runtime:    rt, Store: host, Model: managedFrontierProcessModel{files: files, phase: phase}, Inputs: managedRecoveryFileInputs{path: filepath.Join(files, "inputs.jsonl")},
-		Session: options, Context: harness.AgentSessionContextOptions{ManagedRecovery: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		Session: options, Context: harness.AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 			return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 		}},
 		Execution:    execution,

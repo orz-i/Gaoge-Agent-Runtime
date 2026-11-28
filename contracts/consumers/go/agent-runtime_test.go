@@ -85,8 +85,8 @@ var (
 	_ func(*agent.WorkingStateSummaryPolicy) *agent.WorkingStateSummaryPolicy                             = agent.CloneWorkingStateSummaryPolicy
 	_ func(*agent.BoundedContextAdapter, agent.ContextSummaryPorts) (*agent.ContextSummaryAdapter, error) = agent.NewContextSummaryAdapter
 	_                                                                                                     = agent.ModelInvocationContextSummary
-	_                                                                                                     = agent.Dependencies{ManagedRecovery: true}
-	_ func(*agent.Runner) bool                                                                            = (*agent.Runner).SupportsManagedRecovery
+
+	_ func(*agent.Runner) bool = (*agent.Runner).SupportsManagedRecovery
 )
 
 // A separately linked Host implements only the narrow, immutable first-party

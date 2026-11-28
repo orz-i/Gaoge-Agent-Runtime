@@ -198,8 +198,8 @@ sampling share the original ledger, physical sampling plan and receipt
 settlement; the summary retains its separate source validation and installation.
 Reopen a budgeted summary Turn with summary support configured. A summary is
 optional and is skipped if the shared ledger cannot admit it while retaining a
-call for business work. The single `Context.ManagedRecovery` choice can
-carry Context, optional Summary, `SharedBudget` and `Inputs` through
+call for business work. The registered recovery store can carry Context,
+optional Summary, `SharedBudget` and `Inputs` through
 the original first-party managed transfer. The ownership unit is an independently admitted native Root execution
 segment, not the lifetime of the Run or its first Start. For an already
 created first-party Run, Resume and scoped root Approval submit the original
@@ -430,13 +430,12 @@ declarations or token ceiling. New invocations use the latest ledger limits.
 Recovery reuses the committed plan without rerunning Context preparation or
 the admission meter.
 
-Ordinary bounded composition is the default. Explicit
-`Context.ManagedRecovery: true` selects the first-party Runtime recovery
-lifecycle for the original Agent, including optional Summary. Before opening, construct the Runtime with its original
-`kernel.Dependencies.ManagedRecoveryHost` bound to that exact Harness Store;
-unsupported or mismatched Stores are rejected. Persistent Kernel and Harness
-Stores plus the original provider/Tool bindings remain Host responsibilities.
-Selecting the flag does not make Memory durable or add a recovery authority.
+The Runtime derives first-party recovery capability from its actual registered
+`kernel.Dependencies.ManagedRecoveryHost` and matching Harness Context,
+Summary and Budget stores. Unsupported or mismatched registered Stores are
+rejected; the original Run cannot change recovery authority on reopen.
+Persistent Kernel and Harness Stores plus original provider/Tool bindings
+remain Host responsibilities.
 Unknown external outcomes continue to require trusted reconciliation.
 
 For mid-task user input, pass the Host's authenticated log as `Inputs` and use
@@ -455,7 +454,7 @@ frozen `WorkingStateSummary` policy. They add a model invocation inside the
 original Run, before the first business call, and preserve exact raw Artifacts.
 See [Automatic WorkingState](automatic-working-state.md) for input/call limits,
 Host-state priority, ordinary recovery and the shared, restricted
-`Context.ManagedRecovery` hard-crash option.
+source-bound hard-crash recovery.
 
 ## Migrating Session callers
 

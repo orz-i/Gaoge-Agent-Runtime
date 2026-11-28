@@ -27,10 +27,6 @@ type AgentSessionContextOptions struct {
 	Accounting    runtimecontext.RequestAccounting
 	// ReadArtifacts explicitly grants the built-in scoped archive reader.
 	ReadArtifacts bool
-	// ManagedRecovery opts the first-party Agent into original-source recovery.
-	// Context, Summary, SharedBudget and Inputs use the same lifecycle.
-	// Runtime must be bound to this exact Harness Store.
-	ManagedRecovery bool
 }
 
 // SessionTool pairs one selected local Tool with its explicit Host policy.
@@ -196,7 +192,7 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 			return nil, ErrInvalidRequest
 		}
 	}
-	if options.Context.ManagedRecovery {
+	if options.Runtime.HasManagedRecoveryHost() {
 		host, ok := options.Store.(kernel.ManagedRecoveryHostStore)
 		if !ok || !options.Runtime.SupportsManagedRecovery() || !options.Runtime.UsesManagedRecoveryHost(host) {
 			return nil, ErrInvalidRequest
@@ -340,7 +336,6 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	if delegation != nil {
 		dependencies.ToolOutcomeVerifier = delegation
 	}
-	dependencies.ManagedRecovery = options.Context.ManagedRecovery
 	if shared == nil || options.Session.Config.WorkingStateSummary != nil {
 		dependencies.ContextSummary, err = NewContextSummaryAdapter(options.Store, options.Runtime, bounded, resolveWindow)
 		if err != nil {

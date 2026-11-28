@@ -59,7 +59,7 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		options.Context.ManagedRecovery = true
+
 	}
 	client.generate = func(req model.Request) (model.Response, error) {
 		if req.Model == "specialist-model" {

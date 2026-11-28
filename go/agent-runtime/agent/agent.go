@@ -285,9 +285,6 @@ type Dependencies struct {
 	// BoundedBudget selects the single Run, Model and Tool accounting owner.
 	// The Runner fixes its order outside generic chains. Atomic budgets reject middleware.
 	BoundedBudget *BoundedBudgetAdapter
-	// ManagedRecovery selects source-bound recovery of the first-party Agent
-	// lifecycle. Context, Summary, Budget and Inputs use their actual stages.
-	ManagedRecovery bool
 	// ContextSummary selects the native optional Summary operation.
 	ContextSummary *ContextSummaryAdapter
 	// NormalizeModelPolicy selects and freezes Host options/route policy before preparation.
@@ -538,6 +535,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if err := selectFirstPartyStages(&dependencies); err != nil {
 		return nil, err
 	}
+	managedRecovery := validManagedDependencies(dependencies)
 	boundedBudget := dependencies.BoundedBudget
 	if boundedBudget != nil && boundedBudget.nativeStore() != nil && !dependencies.Runtime.UsesLedgerStore(boundedBudget.coordinator.Store) {
 		return nil, ErrInvalidRequest
@@ -658,7 +656,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		boundedContext:   dependencies.BoundedContext,
 		boundedBudget:    boundedBudget,
 		contextSummary:   dependencies.ContextSummary,
-		managedRecovery:  dependencies.ManagedRecovery,
+		managedRecovery:  managedRecovery,
 		boundedCallbacks: collectBoundedCallbacks(dependencies),
 		// Native pre-Start cancellation and deferred post-callback custody
 		// share the SAME Host-callback trust decision. Native Start remains
@@ -667,7 +665,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		kernelOwnedStartCancellation: control && dependencies.Inputs == nil && dependencies.BoundedContext == nil && boundedBudget == nil &&
 			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
-			!dependencies.ManagedRecovery,
+			!managedRecovery,
 		prepareModelRequest:            dependencies.PrepareModelRequest,
 		trustedDeferredPreparedControl: trustedDeferredPreparationStack(dependencies),
 		trustedDeferredRootControl:     control,

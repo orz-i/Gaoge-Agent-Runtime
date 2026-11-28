@@ -128,7 +128,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 			execution, leaseDuration := ManagedFixtureExecutionPolicy()
 			effects := 0
-			opts := harness.AgentSessionOptions{Store: h, Model: client, Inputs: inputs, Context: harness.AgentSessionContextOptions{ManagedRecovery: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+			opts := harness.AgentSessionOptions{Store: h, Model: client, Inputs: inputs, Context: harness.AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 				return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 			}},
 				Session: harness.SessionOptions{HostThread: harness.HostRef{Kind: "conversation", ID: "dispatch-frontier"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "operator"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "dispatch-frontier"}, Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", MaxModelOutputTokens: 128}, SharedBudget: &budget.Limits{MaxLLMCalls: 3, MaxToolCalls: 2}}, Transcript: harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {

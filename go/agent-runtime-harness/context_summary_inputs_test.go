@@ -46,7 +46,7 @@ func TestContextSummaryNativeBindsHostInputsWithRealBridges(t *testing.T) {
 	}
 	client := &summarySessionModel{}
 	dependencies := agent.Dependencies{Runtime: runtime, Model: client,
-		ContextSummary: summary, ManagedRecovery: true}
+		ContextSummary: summary}
 	if _, err = agent.NewRunner(dependencies); err != nil {
 		t.Fatalf("the same native composition without Host inputs must be valid: %v", err)
 	}

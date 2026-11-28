@@ -253,7 +253,7 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				if err != nil {
 					t.Fatal(err)
 				}
-				options.Context.ManagedRecovery = true
+
 				options.Session.Config.WorkingStateSummary = &agent.WorkingStateSummaryPolicy{MaxInputTokens: 60000, MaxSerializedBytes: 100000}
 				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2}
 				options.Inputs = inputs

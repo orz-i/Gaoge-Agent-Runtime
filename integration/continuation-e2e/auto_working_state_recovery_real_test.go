@@ -491,7 +491,7 @@ func newAutoSummarySession(t *testing.T, db *gorm.DB, files, phase, mode string,
 		Runtime: runtime, Store: store, Model: autoSummaryInvoiceModel{files: files, warmup: phase == "warmup", invalid: phase == "paired-invalid"},
 		LocalTools: managedRecoverySessionTools(files), Session: options,
 		Context: harness.AgentSessionContextOptions{
-			ManagedRecovery: nativeRecovery, ReadArtifacts: true,
+			ReadArtifacts: true,
 			ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 				return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 512}, nil
 			},

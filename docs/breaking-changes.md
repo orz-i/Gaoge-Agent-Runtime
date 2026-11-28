@@ -20,6 +20,8 @@
   is removed). One owner encloses the fixed Run/Model/Tool stages and any remaining
   split-store generic chain. Atomic Budget plus generic middleware is rejected.
 
+- Removed `agent.Dependencies.ManagedRecovery` and `AgentSessionContextOptions.ManagedRecovery`. Recovery capability is derived from the exact registered Host Store and first-party stage sources; the persisted original capability cannot be changed on reopen.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

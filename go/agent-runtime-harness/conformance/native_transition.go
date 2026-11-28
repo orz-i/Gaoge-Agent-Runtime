@@ -168,7 +168,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 		if e != nil {
 			t.Fatal(e)
 		}
-		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry, ManagedRecovery: true, BoundedContext: bounded, BoundedBudget: b, ModelOutcomeVerifier: authority, Inputs: inputs, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
+		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry, BoundedContext: bounded, BoundedBudget: b, ModelOutcomeVerifier: authority, Inputs: inputs, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
 			Execution:    execution,
 			RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration}})
 		if e != nil {

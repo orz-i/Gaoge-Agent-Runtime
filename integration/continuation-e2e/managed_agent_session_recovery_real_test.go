@@ -601,7 +601,11 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	} else if len(retirementCut) == 1 && retirementCut[0] != "" {
 		kernelStore = &managedRecoveryRetirementCrashStore{KernelStore: postgresadapter.NewKernelStore(db), cut: retirementCut[0]}
 	}
-	runtime, err := kernel.New(kernel.Dependencies{Store: kernelStore, ManagedRecoveryHost: hostStore})
+	deps := kernel.Dependencies{Store: kernelStore}
+	if managed {
+		deps.ManagedRecoveryHost = hostStore
+	}
+	runtime, err := kernel.New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -641,7 +645,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 			Inputs:  inputs,
 			Runtime: runtime, Store: hostStore, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
 			LocalTools: managedRecoverySessionTools(files), Session: options,
-			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ManagedRecovery: managed, ReadArtifacts: true},
+			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ReadArtifacts: true},
 			Execution: execution, RunExecution: runExecution,
 		})
 		if err != nil {
@@ -661,7 +665,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	}
 	dependencies := agent.Dependencies{
 		Runtime: runtime, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
-		Catalog: registry, Executor: registry, BoundedContext: bounded, ManagedRecovery: managed,
+		Catalog: registry, Executor: registry, BoundedContext: bounded,
 		RunExecution: runExecution, Execution: execution,
 	}
 	direct, err := agent.NewRunner(dependencies)

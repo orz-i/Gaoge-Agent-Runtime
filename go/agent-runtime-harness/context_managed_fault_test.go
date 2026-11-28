@@ -167,7 +167,7 @@ func TestManagedPreparationPreservesCommittedContextRollover(t *testing.T) {
 				t.Fatal(err)
 			}
 			opts.Runtime = rt
-			opts.Context.ManagedRecovery = true
+
 			opts.Context.ReadArtifacts = true
 			opts.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2}
 			opts.Session.Config.ContextPolicy = runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 80}
