@@ -52,16 +52,10 @@ func TestDeferredControlCannotBorrowForeignPolicyCallback(t *testing.T) {
 	}
 }
 
-type detachedPrepareMiddleware struct {
-	release  <-chan struct{}
-	finished chan<- struct{}
-}
+type preparationObserver struct{}
 
-func (detachedPrepareMiddleware) Name() string { return "test.detached-prepare" }
-func (m detachedPrepareMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	go func() { <-m.release; close(m.finished) }()
-	return next(ctx)
-}
+func (preparationObserver) Name() string                          { return "test.preparation-observer" }
+func (preparationObserver) Observe(context.Context, plugin.Event) {}
 
 func TestReconstructedControlCannotUpgradeOpaquePreparationHistory(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
@@ -69,9 +63,8 @@ func TestReconstructedControlCannotUpgradeOpaquePreparationHistory(t *testing.T)
 		t.Fatal(err)
 	}
 	client := &deferredOwnedPolicyClient{}
-	release, finished := make(chan struct{}), make(chan struct{})
 	opaque, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client,
-		RunMiddleware: []plugin.RunMiddleware{detachedPrepareMiddleware{release, finished}}})
+		Observers: []plugin.Observer{preparationObserver{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +72,6 @@ func TestReconstructedControlCannotUpgradeOpaquePreparationHistory(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { close(release); <-finished })
 	rebuilt, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client})
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +79,7 @@ func TestReconstructedControlCannotUpgradeOpaquePreparationHistory(t *testing.T)
 	if rebuilt.VerifiedDeferredRootControl(t.Context(), rt, prepared) {
 		t.Fatal("rebuilt observer borrowed opaque Prepare custody")
 	}
-	// Even a genuine later scoped callback cannot settle earlier detached work.
+	// Even a genuine later scoped callback cannot settle earlier opaque preparation.
 	done, err := rebuilt.Resume(t.Context(), prepared.Run.ID, prepared.Run.Revision)
 	if err != nil {
 		t.Fatal(err)

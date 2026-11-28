@@ -11,7 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -46,20 +45,6 @@ func (m lostFrozenReceiptModel) Generate(ctx context.Context, r model.Request) (
 	return model.Response{}, ErrModelOutcomeUnknown
 }
 
-// An opaque layer may narrow a native request before dispatch, but a
-// downstream unknown response cannot certify the Host callback as returned.
-type frozenReceiptNarrowingMiddleware struct{ narrow bool }
-
-func (frozenReceiptNarrowingMiddleware) Name() string { return "test.physical-narrowing" }
-func (m frozenReceiptNarrowingMiddleware) Model(ctx context.Context, r model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	if m.narrow {
-		r.MaxOutputTokens = 64
-		zero := 0
-		r.HostedToolCallLimit = &zero
-	}
-	return next(ctx, r, emit)
-}
-
 func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 	for _, mode := range []struct {
 		name            string
@@ -73,6 +58,9 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				name = "unknown_callback"
 			}
 			t.Run(mode.name+"/"+name, func(t *testing.T) {
+				// An unknown Provider return is not an unknown native Host callback.
+				// A suspended Budget stage still lacks its accounting receipt.
+				hostUnknown := unknown && mode.budget
 				base := memory.NewStore()
 				fault := &summaryCoreFaultStore{Store: base, event: "agent.model_invocation.completed"}
 				var store kernel.Store = fault
@@ -113,9 +101,6 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				if mode.budget {
 					deps.BoundedBudget = shared
 				}
-				if unknown && !mode.budget {
-					deps.ModelMiddleware = []plugin.ModelMiddleware{frozenReceiptNarrowingMiddleware{narrow: !mode.context}}
-				}
 				if mode.context {
 					deps.BoundedContext = bounded
 				}
@@ -133,7 +118,7 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				}
 				inv := v.ModelInvocations[0]
 				wantOutput := int64(512)
-				if mode.budget || (unknown && !mode.context) {
+				if mode.budget {
 					wantOutput = 64
 				}
 				if inv.Status != ModelInvocationPending || inv.SamplingPlan == nil || inv.Request.MaxOutputTokens != 512 || inv.SamplingPlan.MaxOutputTokens != wantOutput ||
@@ -158,7 +143,7 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 					t.Fatal(err)
 				}
 				completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-				if err != nil || completion.HostCompleted == unknown {
+				if err != nil || completion.HostCompleted == hostUnknown {
 					t.Fatalf("wrong callback fault: %+v %v", completion, err)
 				}
 				// Reconstruct the Runner from its original persisted State, not an
@@ -168,8 +153,8 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 					t.Fatal(err)
 				}
 				after, err := runner.ReconcileModelOutcome(t.Context(), before.Run.ID, before.Run.Revision)
-				if after.Run.Revision != before.Run.Revision+1 || (unknown && (!errors.Is(err, ErrRootOutcomeUnknown) || after.EventHead != before.EventHead)) ||
-					(!unknown && err != nil) {
+				if after.Run.Revision != before.Run.Revision+1 || (hostUnknown && (!errors.Is(err, ErrRootOutcomeUnknown) || after.EventHead != before.EventHead)) ||
+					(!hostUnknown && err != nil) {
 					t.Fatalf("original receipt not recovered under correct Host fence: revision=%d err=%v", after.Run.Revision, err)
 				}
 				v, err = ViewState(after)
@@ -180,7 +165,7 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if unknown {
+				if hostUnknown {
 					again, err := runner.ReconcileModelOutcome(t.Context(), after.Run.ID, after.Run.Revision)
 					if !errors.Is(err, ErrRootOutcomeUnknown) || !reflect.DeepEqual(again, after) {
 						t.Fatalf("repeat recovery changed evidence: %v", err)
@@ -194,39 +179,11 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 					t.Fatalf("repeat recovery mutated persisted state: %v", err)
 				}
 				current, err := ledgerStore.LoadBudget(t.Context(), "turn")
-				if (mode.budget && (err != nil || !reflect.DeepEqual(current, ledger))) || (!mode.budget && !errors.Is(err, budget.ErrLedgerNotFound)) || budgetPorts.plans != plans || len(provider.calls()) != 1 || (unknown && verified != 2) || (!unknown && !mode.budget && verified != 1) || (!unknown && mode.budget && verified != 0) {
+				if (mode.budget && (err != nil || !reflect.DeepEqual(current, ledger))) || (!mode.budget && !errors.Is(err, budget.ErrLedgerNotFound)) || budgetPorts.plans != plans || len(provider.calls()) != 1 || (hostUnknown && verified != 2) || (!hostUnknown && !mode.budget && verified != 1) || (!hostUnknown && mode.budget && verified != 0) {
 					t.Fatal("read-only receipt recovery replanned or changed the original ledger")
 				}
 			})
 		}
-	}
-}
-
-func TestContextOnlySamplingRejectsLateNarrowing(t *testing.T) {
-	_, rt, ports, provider, clock, start := newSummaryCoreFixture(t, memory.NewStore())
-	start.WorkingStateSummary = nil
-	ports.reader = false
-	ports.policy.SoftLimitPercent = 80
-	ports.window.ContextTokens = 100000
-	bounded, err := NewBoundedContextAdapter(ports.manager, ports)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, BoundedContext: bounded, ModelMiddleware: []plugin.ModelMiddleware{frozenReceiptNarrowingMiddleware{narrow: true}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	before, err := runner.StartRun(t.Context(), start)
-	if !errors.Is(err, ErrInvalidRequest) || len(provider.calls()) != 0 {
-		t.Fatalf("late mutation reached Provider: %v calls=%d", err, len(provider.calls()))
-	}
-	view, err := ViewState(before)
-	if err != nil || len(view.ModelInvocations) != 1 {
-		t.Fatalf("intent unavailable: %v", err)
-	}
-	inv := view.ModelInvocations[0]
-	if inv.SamplingPlan == nil || inv.SamplingPlan.MaxOutputTokens != 512 || inv.DispatchAttempt != 0 {
-		t.Fatalf("late mutation changed measured intent: %+v", inv)
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // Deterministically hold the shared concurrency limiter before the new
@@ -18,13 +17,8 @@ import (
 func TestModelDispatchGuardRechecksAfterConcurrencyWait(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	chain, err := plugin.NewModelChain()
-	if err != nil {
-		t.Fatal(err)
-	}
 	runner := &Runner{
 		modelLimiter: newCallLimiter(1),
-		modelChain:   chain,
 		execution:    ExecutionPolicy{Model: defaultExecutionPolicy.Model},
 	}
 	release, err := runner.modelLimiter.acquire(ctx)

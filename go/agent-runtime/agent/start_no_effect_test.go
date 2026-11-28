@@ -9,21 +9,18 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-type pr72ForgedStartNoEffectMiddleware struct {
+type pr72ForgedStartNoEffectPreparer struct {
 	runner **agent.Runner
 	calls  atomic.Int32
 }
 
-func (*pr72ForgedStartNoEffectMiddleware) Name() string { return "pr72.malicious-start-error" }
-func (m *pr72ForgedStartNoEffectMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, _ plugin.RunNext) (kernel.Snapshot, error) {
-	m.calls.Add(1) // Represents possible Host effects before middleware rejects.
-	_, err := (*m.runner).StartRun(ctx, agent.StartRequest{
-		ID: "nested-invalid-run", Goal: "nested", RequiredToolKeys: []string{"missing"},
-	})
-	return kernel.Snapshot{}, err
+func (m *pr72ForgedStartNoEffectPreparer) Prepare(ctx context.Context, _ model.Request) (model.Request, error) {
+	m.calls.Add(1)
+	_, err := (*m.runner).StartRun(ctx, agent.StartRequest{ID: "nested-invalid-run", Goal: "nested", RequiredToolKeys: []string{"missing"}})
+	return model.Request{}, err
 }
 
 func TestPR72NativeStartPreCreateFailureIsDirectAndHasNoRun(t *testing.T) {
@@ -59,25 +56,25 @@ func TestPR72NativeStartPreCreateFailureIsDirectAndHasNoRun(t *testing.T) {
 	}
 }
 
-func TestPR72NativeStartRunMiddlewareCannotForwardNestedNoEffectAuthority(t *testing.T) {
+func TestPR72NativeStartPreparerCannotForwardNestedNoEffectAuthority(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var runner *agent.Runner
-	middleware := &pr72ForgedStartNoEffectMiddleware{runner: &runner}
+	preparer := &pr72ForgedStartNoEffectPreparer{runner: &runner}
 	runner, err = agent.NewRunner(agent.Dependencies{
-		Runtime: rt, Model: &nativeLeaseFixtureModel{}, RunMiddleware: []plugin.RunMiddleware{middleware},
+		Runtime: rt, Model: &nativeLeaseFixtureModel{}, PrepareModelRequest: preparer.Prepare,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = runner.StartRun(t.Context(), agent.StartRequest{
-		ID: "pr72-middleware-outer", Goal: "outer", Actor: kernel.ActorRef{TenantID: "t", ActorID: "actor"},
+		ID: "pr72-preparer-outer", Goal: "outer", Actor: kernel.ActorRef{TenantID: "t", ActorID: "actor"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
 	})
-	if !errors.Is(err, agent.ErrInvalidRequest) || agent.IsNativeStartNoEffect(err) || middleware.calls.Load() != 1 {
-		t.Fatalf("Run Middleware forwarded nested preflight proof: calls=%d err=%v", middleware.calls.Load(), err)
+	if !errors.Is(err, agent.ErrInvalidRequest) || agent.IsNativeStartNoEffect(err) || preparer.calls.Load() != 1 {
+		t.Fatalf("Preparer forwarded nested preflight proof: calls=%d err=%v", preparer.calls.Load(), err)
 	}
 }
 
@@ -106,29 +103,28 @@ func TestPR72NativeStartCommittedCreateLostReplyIsNotNoEffect(t *testing.T) {
 	}
 }
 
-// The native proof is minted before ANY Run Middleware is entered. An
-// untrusted middleware may have effects, so even its unchanged forwarding
-// of another native proof cannot authorize Harness to retire a grant.
-func TestPR72NativeStartInvalidInputNeverEntersRunMiddleware(t *testing.T) {
+// The native proof is minted before the preparer is entered. A nested
+// rejection cannot certify that the enclosing, already-created Run had no effect.
+func TestPR72NativeStartInvalidInputNeverEntersPreparer(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var runner *agent.Runner
-	middleware := &pr72ForgedStartNoEffectMiddleware{runner: &runner}
+	preparer := &pr72ForgedStartNoEffectPreparer{runner: &runner}
 	runner, err = agent.NewRunner(agent.Dependencies{
-		Runtime: rt, Model: &nativeLeaseFixtureModel{}, RunMiddleware: []plugin.RunMiddleware{middleware},
+		Runtime: rt, Model: &nativeLeaseFixtureModel{}, PrepareModelRequest: preparer.Prepare,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = runner.StartRun(t.Context(), agent.StartRequest{
-		ID: "pr72-invalid-before-any-middleware", Goal: "missing required local tool",
+		ID: "pr72-invalid-before-any-preparer", Goal: "missing required local tool",
 		Actor:            kernel.ActorRef{TenantID: "t", ActorID: "actor"},
 		Thread:           kernel.ThreadRef{Kind: "conversation", ID: "thread"},
 		RequiredToolKeys: []string{"tool.not.authorized"},
 	})
-	if !errors.Is(err, agent.ErrInvalidRequest) || !agent.IsNativeStartNoEffect(err) || middleware.calls.Load() != 0 {
-		t.Fatalf("preflight entered potentially effectful middleware: calls=%d err=%v", middleware.calls.Load(), err)
+	if !errors.Is(err, agent.ErrInvalidRequest) || !agent.IsNativeStartNoEffect(err) || preparer.calls.Load() != 0 {
+		t.Fatalf("preflight entered potentially effectful preparer: calls=%d err=%v", preparer.calls.Load(), err)
 	}
 }

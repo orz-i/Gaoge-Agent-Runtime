@@ -8,6 +8,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -76,7 +77,7 @@ type unacknowledgedToolLedger struct {
 
 func (s unacknowledgedToolLedger) SaveBudget(ctx context.Context, ledger budget.Ledger, revision uint64) error {
 	for _, res := range ledger.Reservations {
-		if res.Status == budget.ReservationSettled {
+		if res.Status == budget.ReservationSettled && res.Requested.ToolCalls != 0 {
 			return s.fail
 		}
 	}
@@ -92,7 +93,7 @@ func (p toolAccountingPorts) ResolveScope(_ context.Context, run string) (Bounde
 }
 func (p toolAccountingPorts) Project(_ context.Context, ledger budget.Ledger) error {
 	for _, res := range ledger.Reservations {
-		if res.Status == budget.ReservationSettled {
+		if res.Status == budget.ReservationSettled && res.Requested.ToolCalls != 0 {
 			return p.fail
 		}
 	}
@@ -122,20 +123,33 @@ func TestToolRejectionCannotAdvanceWithoutAccountingAcknowledgement(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "original", ToolKey: "read", Arguments: []byte("{}")}}
+
+			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			if err != nil {
+				t.Fatal(err)
+			}
 			count := 0
-			result, err := a.Tool(t.Context(), plugin.ToolInvocation{Run: kernel.Run{ID: "run"}, Request: request}, func(context.Context) (tools.ExecutionResult, error) {
+			registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: []byte(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				count++
 				return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("tool.unavailable", "unavailable", nil))
-			})
-			if !errors.Is(err, failure) || !errors.Is(err, ErrToolOutcomeUnknown) || tools.ValidRecoverableNoEffectReceipt(result, err, request.Call.ID) || count != 1 {
-				t.Fatalf("unqualified result accepted: %+v %v count=%d", result, err, count)
+			})}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := &permitUnsentModel{}
+			runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry, BoundedBudget: a})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := runner.StartRun(t.Context(), StartRequest{ID: "run", Goal: "read", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, ToolKeys: []string{"read"}})
+			if !errors.Is(err, failure) || !errors.Is(err, ErrToolOutcomeUnknown) || count != 1 || provider.calls.Load() != 1 || result.Run.Status == kernel.RunStatusCompleted {
+				t.Fatalf("unqualified refusal advanced Run: %v count=%d model=%d status=%s", err, count, provider.calls.Load(), result.Run.Status)
 			}
 			saved, e := backing.LoadBudget(t.Context(), "turn")
 			if e != nil {
 				t.Fatal(e)
 			}
-			res := saved.Reservations["tool:run:original"]
+			res := saved.Reservations["tool:run:permit-call"]
 			if !res.Dispatched || (cut == "settle" && res.Status != budget.ReservationHeld) || (cut == "project" && res.Status != budget.ReservationSettled) {
 				t.Fatalf("original reservation changed: %+v", res)
 			}

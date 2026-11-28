@@ -8,19 +8,34 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
+type modelEvidenceLedgerFault struct{ budget.LedgerStore }
+
+func (s modelEvidenceLedgerFault) SaveBudget(ctx context.Context, ledger budget.Ledger, revision uint64) error {
+	for _, reservation := range ledger.Reservations {
+		if reservation.Status == budget.ReservationSettled {
+			return errInjectedModelInvocationCrash
+		}
+	}
+	return s.LedgerStore.SaveBudget(ctx, ledger, revision)
+}
+
 func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T) {
 	base := memory.NewStore()
-	fault := &modelInvocationFaultStore{Store: base, eventType: "agent.model_invocation.completed"}
-	rt := newModelInvocationRuntime(t, fault)
+	rt := newModelInvocationRuntime(t, base)
+	bounded, err := agent.NewBoundedBudgetAdapter(modelEvidenceLedgerFault{budget.NewMemoryLedgerStore()}, sharedDimensionBudgetPorts{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	provider := &invocationRecordingModel{}
-	host := &rootCountingRunMiddleware{}
+	host := &rootCountingObserver{}
 	billingOnly, conflicting := true, false
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, RunMiddleware: []plugin.RunMiddleware{host}, ModelOutcomeVerifier: agent.ModelOutcomeVerifierFunc(func(_ context.Context, request model.Request) (model.Response, error) {
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, BoundedBudget: bounded, Observers: []plugin.Observer{host}, ModelOutcomeVerifier: agent.ModelOutcomeVerifierFunc(func(_ context.Context, request model.Request) (model.Response, error) {
 		original := provider.callsCopy()
 		if len(original) != 1 || !reflect.DeepEqual(request, original[0]) {
 			t.Fatal("verifier did not receive exact original request")

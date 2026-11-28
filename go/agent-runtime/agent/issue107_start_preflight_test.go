@@ -8,15 +8,14 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
-type issue107ProbeStartMiddleware struct{ called int }
+type issue107ProbeStartInputs struct{ called int }
 
-func (m *issue107ProbeStartMiddleware) Name() string { return "issue107.probe_untrusted_start" }
-func (m *issue107ProbeStartMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	m.called++
-	return next(ctx)
+func (*issue107ProbeStartInputs) BindingID() string { return "preflight-inputs" }
+func (source *issue107ProbeStartInputs) ReadRunInputs(context.Context, kernel.Run, uint64, int) ([]agent.RunInput, error) {
+	source.called++
+	return nil, nil
 }
 func TestIssue107ParentedStartMustPassPureHostPreflightBeforeCreate(t *testing.T) {
 	for _, configured := range []bool{false, true} {
@@ -33,9 +32,9 @@ func TestIssue107ParentedStartMustPassPureHostPreflightBeforeCreate(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			middleware := &issue107ProbeStartMiddleware{}
-			deps := agent.Dependencies{Runtime: rt, Model: auditAgentModel{},
-				RunMiddleware: []plugin.RunMiddleware{middleware}}
+			inputs := &issue107ProbeStartInputs{}
+			deps := agent.Dependencies{Runtime: rt, Model: &nativeLeaseFixtureModel{},
+				Inputs: inputs}
 			if configured {
 				deps.StartControlPreflight = func(context.Context, agent.StartRequest) error { return agent.ErrInvalidRequest }
 			}
@@ -48,8 +47,8 @@ func TestIssue107ParentedStartMustPassPureHostPreflightBeforeCreate(t *testing.T
 				OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"isolatedContext":true}`)),
 				Actor:             actor, Thread: thread, Model: "model",
 			})
-			if !agent.IsNativeStartNoEffect(startErr) || middleware.called != 0 {
-				t.Fatalf("Host Start ran before pure frozen source admission: err=%v middlewareCalls=%d", startErr, middleware.called)
+			if !agent.IsNativeStartNoEffect(startErr) || inputs.called != 0 {
+				t.Fatalf("Host Start ran before pure frozen source admission: err=%v inputsCalls=%d", startErr, inputs.called)
 			}
 			if _, loadErr := rt.Load(t.Context(), "attempt-child"); !errors.Is(loadErr, kernel.ErrNotFound) {
 				t.Fatalf("invalid frozen child was created/pinned before Host admission: %v", loadErr)

@@ -15,7 +15,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type modelClaimClock struct{ nanos atomic.Int64 }
@@ -30,27 +29,9 @@ func (clock *modelClaimClock) Advance(duration time.Duration) {
 	clock.nanos.Add(duration.Nanoseconds())
 }
 
-type holdModelMiddleware struct {
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (*holdModelMiddleware) Name() string { return "test.hold-model-after-claim" }
-func (middleware *holdModelMiddleware) Model(ctx context.Context, req model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	middleware.once.Do(func() { close(middleware.entered) })
-	select {
-	case <-middleware.release:
-	case <-ctx.Done():
-		return model.Response{}, ctx.Err()
-	}
-	return next(ctx, req, emit)
-}
-
-// A queued/blocked ModelMiddleware can outlast the persisted claim lease.
-// A clock-only contender must not replace the still-active physical owner.
-// Even when next rejects before Generate, an arbitrary middleware callback
-// cannot prove its own external outcome; the scope must remain unknown.
+// A fixed admission wait can outlast the persisted claim lease. A clock-only
+// contender cannot replace the active physical owner; the final guard must
+// reject the expired claim without dispatching the Provider.
 func TestExpiredModelInvocationClaimCannotDispatchAfterTakeover(t *testing.T) {
 	clock := newModelClaimClock()
 	store := memory.NewStore()
@@ -59,11 +40,12 @@ func TestExpiredModelInvocationClaimCannotDispatchAfterTakeover(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &invocationRecordingModel{}
-	hold := &holdModelMiddleware{entered: make(chan struct{}), release: make(chan struct{})}
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	hold := agent.NewModelAdmissionBarrier(entered, release)
 	var releaseOnce sync.Once
-	unblock := func() { releaseOnce.Do(func() { close(hold.release) }) }
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	t.Cleanup(unblock)
-	oldRunner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Clock: clock, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{hold}})
+	oldRunner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Clock: clock, Model: provider, ModelAdmissionBarrier: hold})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,9 +59,9 @@ func TestExpiredModelInvocationClaimCannotDispatchAfterTakeover(t *testing.T) {
 		outcomes <- result{run, e}
 	}()
 	select {
-	case <-hold.entered:
+	case <-entered:
 	case <-time.After(4 * time.Second):
-		t.Fatal("old claimed model never entered middleware")
+		t.Fatal("old claimed model never entered admission barrier")
 	}
 	claimed, err := runtime.Load(t.Context(), "model-claim-takeover")
 	if err != nil {
@@ -114,6 +96,9 @@ func TestExpiredModelInvocationClaimCannotDispatchAfterTakeover(t *testing.T) {
 	if len(provider.callsCopy()) != 0 {
 		t.Fatal("expired original claim reached provider before no-effect exit")
 	}
+	if _, err := runtime.LookupChildExecution(t.Context(), claimed.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
+		t.Fatalf("fixed admission no-send did not retire its original grant: %v", err)
+	}
 	restored, err := runtime.Load(t.Context(), claimed.Run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -121,12 +106,12 @@ func TestExpiredModelInvocationClaimCannotDispatchAfterTakeover(t *testing.T) {
 	_, err = takeover.Resume(t.Context(), restored.Run.ID, restored.Run.Revision)
 	after, loadErr := runtime.Load(t.Context(), restored.Run.ID)
 	calls := provider.callsCopy()
-	if !errors.Is(err, agent.ErrRootOutcomeUnknown) || len(calls) != 0 || loadErr != nil || !reflect.DeepEqual(restored, after) {
-		t.Fatalf("middleware outcome was incorrectly treated as no-effect: %v %+v", err, calls)
+	if err != nil || len(calls) != 1 || loadErr != nil || after.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("fixed admission no-send was not recoverable: %v calls=%+v status=%s", err, calls, after.Run.Status)
 	}
-	restoredView := mustModelInvocationView(t, restored)
+	restoredView := mustModelInvocationView(t, after)
 	if len(restoredView.ModelInvocations) != 1 || restoredView.ModelInvocations[0].ID != view.ModelInvocations[0].ID {
-		t.Fatal("retained unknown changed original invocation identity")
+		t.Fatal("recovery changed original invocation identity")
 	}
 }
 

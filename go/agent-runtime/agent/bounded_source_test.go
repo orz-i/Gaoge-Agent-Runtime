@@ -7,7 +7,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing.T) {
@@ -22,9 +21,9 @@ func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing
 	if !modelDeniedForRequest(ctx, normalized, denied) {
 		t.Fatal("nil/empty normalized request rejected")
 	}
-	// A Host middleware may alter the final candidate without ever reaching a
-	// Provider. Only the Agent terminal's private proof of the ORIGINAL frozen
-	// request can restore its reservation, not the altered candidate by itself.
+	// A changed candidate is not the original frozen Provider request. Only
+	// the Agent terminal's private proof of that original request can restore
+	// its reservation, not the altered candidate by itself.
 	mutated := denied
 	mutated.candidate = model.CloneRequest(request)
 	mutated.candidate.Model = "unapproved-model"
@@ -52,22 +51,19 @@ func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing
 		t.Fatal("public error string forged authority")
 	}
 }
-func TestAdmissionBarrierOwnsOnlyChannelWaitAndReturnedNext(t *testing.T) {
+func TestAdmissionBarrierOwnsOnlyChannelWaitAndReturnedProvider(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 	close(release)
 	barrier := NewModelAdmissionBarrier(entered, release)
 	scope := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "grant", Operation: "resume"}, []any{barrier})
-	chain, err := plugin.NewModelChain(barrier)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := &Runner{modelAdmissionBarrier: barrier}
 	denied := errors.New("downstream admission denied")
 	calls := 0
-	_, err = chain.Invoke(callbackscope.Bind(t.Context(), scope), model.Request{RunID: "run", InvocationID: "original"}, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	_, err := runner.invokeAdmittedModel(callbackscope.Bind(t.Context(), scope), model.Request{RunID: "run", InvocationID: "original"}, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		calls++
 		if scope.Complete() {
-			t.Fatal("live Next completed")
+			t.Fatal("live Provider completed")
 		}
 		return model.Response{}, denied
 	})

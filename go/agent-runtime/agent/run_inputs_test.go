@@ -14,7 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -442,38 +441,5 @@ func TestRunInputCommittedCursorACKLossDoesNotRedeliverOrDispatchEarly(t *testin
 	completed, err := reopened.Resume(t.Context(), current.Run.ID, current.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || calls != 1 {
 		t.Fatalf("could not recover original input once: %v status=%s calls=%d", err, completed.Run.Status, calls)
-	}
-}
-
-var errRunInputHostTail = errors.New("fixture unknown Host middleware tail")
-
-type inputHostTailMiddleware struct{}
-
-func (inputHostTailMiddleware) Name() string { return "fixture.input-host-tail" }
-func (inputHostTailMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	result, err := next(ctx)
-	if err != nil {
-		return result, err
-	}
-	return result, errRunInputHostTail
-}
-
-func TestRunInputBoundaryCannotSettleUnrelatedHostCallbackFailure(t *testing.T) {
-	rt, _ := newTestRuntimeAndApprovals(t)
-	queue, _ := agent.NewMemoryRunInputs("inputs-v1")
-	client := progressModelFunc(func(context.Context, model.Request) (model.Response, error) {
-		return model.Response{Content: "done"}, nil
-	})
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, Inputs: queue,
-		RunMiddleware: []plugin.RunMiddleware{inputHostTailMiddleware{}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := runner.StartRun(t.Context(), startRequest("input-host-tail", "request", "start"))
-	if !errors.Is(err, errRunInputHostTail) || !errors.Is(err, agent.ErrRootOutcomeUnknown) {
-		t.Fatalf("input frame upgraded unrelated Host failure: %v", err)
-	}
-	if _, err = rt.LookupChildExecution(t.Context(), result.Run.ID); err != nil {
-		t.Fatalf("unsettled original callback grant was retired: %v", err)
 	}
 }

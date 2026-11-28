@@ -31,26 +31,23 @@ func (p *boundedTimelineFixture) AppendToolTimeline(_ context.Context, _ Bounded
 	}
 	return "saved-" + status, nil
 }
-func TestBoundedToolTimelineNeedsActualStartedNextAndFinished(t *testing.T) {
-	for _, mode := range []string{"complete", "post-next-failure", "foreign-source"} {
+func TestBoundedToolTimelineNeedsActualStartedExecutorAndFinished(t *testing.T) {
+	for _, mode := range []string{"complete", "finish-append-failure", "foreign-source"} {
 		t.Run(mode, func(t *testing.T) {
-			ports := &boundedTimelineFixture{failFinish: mode == "post-next-failure", foreign: mode == "foreign-source"}
+			ports := &boundedTimelineFixture{failFinish: mode == "finish-append-failure", foreign: mode == "foreign-source"}
 			adapter, err := NewBoundedToolTimelineAdapter(ports)
 			if err != nil {
 				t.Fatal(err)
 			}
 			scope := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "grant", Operation: "resume"}, []any{adapter})
-			chain, err := plugin.NewToolChain(adapter)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := &Runner{toolTimeline: adapter}
 			inv := plugin.ToolInvocation{Run: kernel.Run{ID: "run"}, Request: tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "call"}}}
 			called := 0
 			business := errors.New("downstream business error")
-			_, err = chain.Invoke(callbackscope.Bind(t.Context(), scope), inv, func(context.Context) (tools.ExecutionResult, error) {
+			_, err = runner.invokeProjectedTool(callbackscope.Bind(t.Context(), scope), inv, func(context.Context) (tools.ExecutionResult, error) {
 				called++
 				if scope.Complete() {
-					t.Fatal("Next still live")
+					t.Fatal("executor still live")
 				}
 				return tools.ExecutionResult{}, business
 			})
@@ -70,27 +67,18 @@ func TestBoundedToolTimelineNeedsActualStartedNextAndFinished(t *testing.T) {
 	}
 }
 
-type opaqueToolReceiptLayer struct{}
-
-func (opaqueToolReceiptLayer) Name() string { return "opaque_tool_receipt_layer" }
-func (opaqueToolReceiptLayer) Tool(ctx context.Context, _ plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
-	return next(ctx)
-}
-func TestOrdinaryToolLayerCannotBorrowOriginalNoEffectReceipt(t *testing.T) {
-	scope := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "grant", Operation: "resume"}, nil)
-	chain, err := plugin.NewToolChain(opaqueToolReceiptLayer{})
-	if err != nil {
-		t.Fatal(err)
+func TestToolReceiptCannotBorrowForeignCallOrHostCompletion(t *testing.T) {
+	scope := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "grant", Operation: "resume"}, []any{inputReadStage})
+	_, ticket := callbackscope.Enter(callbackscope.Bind(t.Context(), scope), "run", inputReadStage, "original input read")
+	if ticket == nil {
+		t.Fatal("input stage did not enter")
 	}
-	inv := plugin.ToolInvocation{Run: kernel.Run{ID: "run"}, Request: tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "original-call"}}}
-	result, err := chain.Invoke(callbackscope.Bind(t.Context(), scope), inv, func(context.Context) (tools.ExecutionResult, error) {
-		return tools.RecoverableNoEffectResult("original-call", tools.NewRecoverableCallError("blocked", "not allowed", nil))
-	})
+	result, err := tools.RecoverableNoEffectResult("original-call", tools.NewRecoverableCallError("blocked", "not allowed", nil))
 	if !tools.ValidRecoverableNoEffectReceipt(result, err, "original-call") {
 		t.Fatal("fixture lacks exact no-effect receipt")
 	}
 	if scope.Complete() {
-		t.Fatal("Tool outcome certified opaque Host callback")
+		t.Fatal("Tool outcome certified unrelated Host callback")
 	}
 	if validBoundedToolReceipt(result, err, "foreign-call") {
 		t.Fatal("foreign Tool source accepted")

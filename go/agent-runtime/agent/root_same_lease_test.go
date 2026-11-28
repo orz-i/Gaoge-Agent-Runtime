@@ -11,7 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
@@ -54,8 +53,8 @@ func TestRootSameExternalLeaseCannotBorrowAnotherCallsGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := &rootCountingRunMiddleware{}
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: bound, Model: provider, RunMiddleware: []plugin.RunMiddleware{host}})
+	host := &rootCountingObserver{}
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: bound, Model: provider, Observers: []plugin.Observer{host}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,40 +92,6 @@ func TestRootSameExternalLeaseCannotBorrowAnotherCallsGrant(t *testing.T) {
 	}
 }
 
-type rootUnknownModelMiddleware struct{ sends int }
-
-func (m *rootUnknownModelMiddleware) Name() string { return "unknown-before-next" }
-func (m *rootUnknownModelMiddleware) Model(context.Context, model.Request, model.StreamSink, plugin.ModelNext) (model.Response, error) {
-	m.sends++
-	return model.Response{}, errors.New("middleware sent before provider Next")
-}
-func TestRootModelMiddlewareUnknownCannotRetireZeroProviderDispatch(t *testing.T) {
-	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := &nativeLeaseFixtureModel{}
-	middleware := &rootUnknownModelMiddleware{}
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{middleware}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := runner.StartRun(t.Context(), startRequest("middleware-unknown-root", "middleware-unknown-request", "finish"))
-	if !errors.Is(err, agent.ErrRootOutcomeUnknown) || middleware.sends != 1 || provider.calls != 0 {
-		t.Fatalf("unknown model middleware was settled: %v sends=%d provider=%d", err, middleware.sends, provider.calls)
-	}
-	grant, err := rt.LookupChildExecution(t.Context(), snapshot.Run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-	if err != nil || completion.HostCompleted {
-		t.Fatalf("false middleware completion: %#v %v", completion, err)
-	}
-	if err = runner.ReconcileRootPhysicalExecution(t.Context(), snapshot.Run.ID); !errors.Is(err, agent.ErrRootOutcomeUnknown) {
-		t.Fatalf("no provider dispatch forged no middleware effect: %v", err)
-	}
-}
 func TestPhysicalObservationCannotBeReusedForSecondCall(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -180,10 +145,11 @@ func TestStaleResumeProofBelongsToOneNativePreflight(t *testing.T) {
 	}
 }
 
-type rootCountingRunMiddleware struct{ calls atomic.Int32 }
+type rootCountingObserver struct{ calls atomic.Int32 }
 
-func (m *rootCountingRunMiddleware) Name() string { return "count-root-entry" }
-func (m *rootCountingRunMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	m.calls.Add(1)
-	return next(ctx)
+func (m *rootCountingObserver) Name() string { return "count-model-entry" }
+func (m *rootCountingObserver) Observe(_ context.Context, event plugin.Event) {
+	if event.Type == agent.EventModelStarted {
+		m.calls.Add(1)
+	}
 }

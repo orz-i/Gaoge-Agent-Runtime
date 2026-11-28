@@ -183,8 +183,8 @@ func TestRootRetirementCapabilityRequiredBeforeCreate(t *testing.T) {
 			t.Fatal(err)
 		}
 		model := &nativeLeaseFixtureModel{}
-		host := &rootCountingRunMiddleware{}
-		deps := agent.Dependencies{Runtime: rt, Model: model, RunMiddleware: []plugin.RunMiddleware{host}}
+		host := &rootCountingObserver{}
+		deps := agent.Dependencies{Runtime: rt, Model: model, Observers: []plugin.Observer{host}}
 		if explicit {
 			deps.RunExecution = &agent.RunExecution{OwnerID: "explicit-owner", LeaseDuration: 3 * time.Minute}
 		}
