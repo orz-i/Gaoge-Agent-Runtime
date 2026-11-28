@@ -38,14 +38,15 @@ func (p *pendingMemberOwner) VerifyExternalToolNoEffect(_ context.Context, req t
 }
 
 type memberExternalCase struct {
-	host   *harness.Runner
-	native *agent.Runner
-	store  *harness.MemoryStore
-	model  *roleBudgetModel
-	owner  *pendingMemberOwner
+	host    *harness.Runner
+	native  *agent.Runner
+	runtime *kernel.Runtime
+	store   *harness.MemoryStore
+	model   *roleBudgetModel
+	owner   *pendingMemberOwner
 }
 
-func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExternalCase {
+func newMemberExternalCase(t *testing.T, withCommittedReader bool, nativeBudget ...bool) memberExternalCase {
 	t.Helper()
 	fail := func(err error) {
 		t.Helper()
@@ -56,6 +57,7 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 	c := memberExternalCase{store: harness.NewMemoryStore(), model: &roleBudgetModel{}, owner: &pendingMemberOwner{}}
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	fail(err)
+	c.runtime = rt
 	edges, err := runrelation.New(memory.NewRunRelationStore(), nil)
 	fail(err)
 	delegate := harness.NewDelegationToolHandler()
@@ -63,6 +65,9 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 		{Definition: tools.Definition{Key: roleEvidenceTool, Name: "prepare_browser", InputSchema: []byte(`{"type":"object"}`)}, Handler: c.owner}})
 	fail(err)
 	d := harness.BudgetAuthorityDependencies{Store: c.store, Relations: edges, Meter: c.model, Clock: fixedClock{}}
+	if len(nativeBudget) != 0 && nativeBudget[0] {
+		d.Runtime = rt
+	}
 	shared, err := harness.NewBudgetAuthority(d)
 	fail(err)
 	bounded, err := shared.Adapter()
@@ -76,9 +81,14 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 	if withCommittedReader {
 		committed = delegate
 	}
-	c.native, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: c.model, Catalog: registry, Executor: registry, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
+	dependencies := agent.Dependencies{Runtime: rt, Model: c.model, Catalog: registry, Executor: registry, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
 		ToolOutcomeVerifier: committed, DelegatedToolResults: delegate, ExternalToolNoEffectVerifier: c.owner, RunMiddleware: []plugin.RunMiddleware{bounded},
-		ModelMiddleware: []plugin.ModelMiddleware{bounded}, ToolMiddleware: []plugin.ToolMiddleware{bounded}})
+		ModelMiddleware: []plugin.ModelMiddleware{bounded}, ToolMiddleware: []plugin.ToolMiddleware{bounded}}
+	if d.Runtime != nil {
+		dependencies.BoundedBudget = bounded
+		dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware = nil, nil, nil
+	}
+	c.native, err = agent.NewRunner(dependencies)
 	fail(err)
 	route, err := handoff.NewDeferredAgent(c.native)
 	fail(err)
