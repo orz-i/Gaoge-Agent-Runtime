@@ -205,12 +205,18 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				if err != nil || staged.Run.Revision != before.Run.Revision+1 || physical != 1 || approvals != 1 || len(m.calls) != 1 {
 					t.Fatal("receipt-only recovery changed physical authority", err, staged.Run, physical, approvals, len(m.calls))
 				}
+				if mode == "lost-recovery-ack" {
+					if makeRunner(rt, l, true).VerifiedDeferredRootControl(ctx, rt, staged) {
+						t.Fatal("unretired recovery acquired control")
+					}
+					if err = r.ReconcileRootPhysicalExecution(ctx, req.ID); err != nil {
+						t.Fatal("retire original recovered receipt", err)
+					}
+				}
 				if mode != "result-only-policy" {
 					controlReader := makeRunner(rt, l, true)
-					if mode != "lost-recovery-ack" {
-						if !controlReader.VerifiedDeferredRootControl(ctx, rt, staged) {
-							t.Fatal("original staged owner proof not observable")
-						}
+					if !controlReader.VerifiedDeferredRootControl(ctx, rt, staged) {
+						t.Fatal("original staged owner proof not observable")
 					}
 					current.Content = json.RawMessage(`{"answer":"<>&"}`)
 					// Metered recovery committed the exact owner result and
@@ -240,12 +246,15 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				t.Fatal("original approval policy upgraded to unrestricted scoped custody")
 			}
 			current.Content = json.RawMessage(`{"answer":"<>&"}`)
-			if mode == "unmetered-recovery" || mode == "unmetered-approved-pending" {
-				if r.VerifyDeferredToolResults(ctx, rt, final) || r.VerifiedDeferredRootControl(ctx, rt, final) {
-					t.Fatal("changed owner result acquired observation/control")
-				}
-			} else if !r.VerifyDeferredToolResults(ctx, rt, final) || r.VerifiedDeferredRootControl(ctx, rt, final) != (mode != "result-only-policy") {
-				t.Fatal("native receipt was replaced by a later Host result")
+			// Delegated observation still verifies the independent owner's
+			// exact bytes. Native bounded control instead uses acknowledged
+			// retirement and settled accounting, not a later Host response.
+			if r.VerifyDeferredToolResults(ctx, rt, final) {
+				t.Fatal("changed owner result acquired observation")
+			}
+			wantControl := mode != "result-only-policy" && mode != "unmetered-recovery" && mode != "unmetered-approved-pending"
+			if got := r.VerifiedDeferredRootControl(ctx, rt, final); got != wantControl {
+				t.Fatal("original native control classification changed", got, wantControl)
 			}
 			current = tools.CloneExecutionResult(owner)
 			if !r.VerifyDeferredToolResults(ctx, rt, final) {

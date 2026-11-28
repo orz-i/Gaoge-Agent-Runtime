@@ -337,7 +337,13 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				t.Fatal(e)
 			}
 			c, e := observer.LookupPhysicalCallbackReturn(ctx, g)
-			if e != nil || !c.HostCompleted || c.ControlCustody != kernel.OwnedBoundedApprovalReturn {
+			wantCustody := kernel.OwnedBoundedApprovalReturn
+			if mode == "unsent-before-chain" {
+				// The live cancellation observer is opaque, even though the
+				// third Call never committed a native dispatch obligation.
+				wantCustody = ""
+			}
+			if e != nil || !c.HostCompleted || !c.MatchesReturnSnapshot(started) || c.ControlCustody != wantCustody {
 				t.Fatal("wrong original completion", c, e)
 			}
 			bindings, e := c.ToolReturns.Bindings()
@@ -345,7 +351,7 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				t.Fatal("original physical siblings not bound", bindings, e)
 			}
 			for _, b := range bindings {
-				if b.ApprovalDigest == "" || b.PendingKind != "child_terminal" || b.ReceiptDigest != "" {
+				if (b.ApprovalDigest != "") != (mode != "unsent-before-chain") || b.PendingKind != "child_terminal" || b.ReceiptDigest != "" || b.Unsent || b.LedgerID != "original-ledger" {
 					t.Fatal("invalid sibling evidence", b)
 				}
 			}
@@ -388,7 +394,8 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			cur := started
 			for _, id := range []string{"child-a", "child-b"} {
 				view, e := agent.ViewState(cur)
-				if e != nil || view.PendingTool == nil || view.PendingTool.CallID != id {
+				deferred := mode == "unsent-before-chain" && id == "child-a"
+				if e != nil || (view.PendingTool == nil) != deferred || !deferred && view.PendingTool.CallID != id {
 					t.Fatal("wrong physical frontier", id, view.PendingTool, e)
 				}
 				if _, e = r.ReconcileToolOutcome(ctx, req.ID, cur.Run.Revision, "next-call"); !errors.Is(e, agent.ErrToolOutcomeUnknown) {
@@ -458,8 +465,9 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			if e != nil || charged.View("").Usage.ToolCalls != charges || charged.View("").Reserved.ToolCalls != 0 {
 				t.Fatal("original settlement mismatch", e, charged.View(""))
 			}
-			if !r.VerifyDeferredToolResults(ctx, rt, cur) || !r.VerifiedDeferredRootControl(ctx, rt, cur) {
-				t.Fatal("final approval/owner history not observable")
+			wantControl := mode != "unsent-before-chain"
+			if r.VerifyDeferredToolResults(ctx, rt, cur) != wantControl || r.VerifiedDeferredRootControl(ctx, rt, cur) != wantControl {
+				t.Fatal("final approval/owner custody changed", mode, wantControl)
 			}
 			seen := map[string]int{}
 			for _, msg := range m.requests[1].Messages {

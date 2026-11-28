@@ -59,7 +59,14 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			cancelled := mode != "dispatch-write-before" && mode != "dispatch-write-ack" && mode != "actual-handler-error"
 			if cancelled {
 				store.afterCheck = func() {
-					if _, err := (budget.Coordinator{Store: ledger}).CancelRoot(ctx, scope, root); err != nil {
+					coord := budget.Coordinator{Store: ledger}
+					var err error
+					if mode == "parented" {
+						_, err = coord.CancelRun(ctx, scope, root)
+					} else {
+						_, err = coord.CancelRoot(ctx, scope, root)
+					}
+					if err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -164,6 +171,28 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					}
 				} else if cur.Run.Status != kernel.RunStatusFailed || !saved.FinishedRuns[root] {
 					t.Fatal("native denial did not close original lifetime", runErr, cur.Run)
+				}
+				if mode == "parented" && saved.RunCancelled("dispatch-denial-parent") {
+					t.Fatal("native child denial cancelled its parent")
+				}
+				if mode == "projection-failure" {
+					// Native no-send/terminal accounting is known, but the
+					// original Host projection never acknowledged its return.
+					if !errors.Is(runErr, cut) || !errors.Is(runErr, agent.ErrRootOutcomeUnknown) {
+						t.Fatal("failed projection acquired completed return", runErr)
+					}
+					g, err := rt.LookupChildExecution(ctx, root)
+					if err != nil {
+						t.Fatal("unknown projection lost original grant", err)
+					}
+					c, err := rt.LookupPhysicalCallbackReturn(ctx, g)
+					if err != nil || c.HostCompleted || c.ControlCustody != "" || r.VerifiedDeferredRootControl(ctx, rt, cur) {
+						t.Fatal("failed projection manufactured control custody", err, c)
+					}
+					if err = r.ReconcileRootPhysicalExecution(ctx, root); !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+						t.Fatal("replacement retired unknown original projection", err)
+					}
+					return
 				}
 				if _, err = rt.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
 					t.Fatal("known pre-dispatch denial retained physical custody", err)

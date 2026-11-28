@@ -93,6 +93,14 @@ func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot
 		if currentState.ToolDispatchID != q.Call.ID || current.Run.Revision != source.Run.Revision+1 || currentState.ToolAdmission == nil || currentState.ToolAdmission.LedgerID != scope {
 			return current, true, errors.Join(ErrToolOutcomeUnknown, callErr)
 		}
+		// Only the acknowledged intent and the actual returned pre-entry
+		// boundary qualify no-send. An uncertain CAS ACK remains held.
+		if snapshot.Run.Revision == source.Run.Revision+1 && sameToolTransitionSource(current, snapshot) {
+			frame.recordUnsent(q, scope)
+			next, done, err := r.parkOriginalUnsentTool(accounting, current, currentState, q.Call, callErr)
+			r.noteNativeAdmissionReturn(next, err)
+			return next, done, err
+		}
 		snapshot, state = current, currentState
 		frame.recordHold(q, scope, "")
 	}

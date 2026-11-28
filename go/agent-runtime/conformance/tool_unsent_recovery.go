@@ -205,15 +205,25 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			}
 			fresh := reopen()
 			r, rt := makeRunner(fresh, nil, false)
-			_, marked, err := agent.FrozenPendingDispatch(before)
+			pendingCall, marked, err := agent.FrozenPendingDispatch(before)
 			if err != nil {
 				t.Fatal(err)
 			}
-			unknown := !unmetered && (mode == "dispatch-ack-unknown" || mode == "cancel-intent-ack" || mode == "owner-intent-ack" || mode == "cancel-after-chain-entry")
+			unknown := !unmetered && (mode == "dispatch-ack-unknown" || mode == "cancel-after-chain-entry")
 			if !unmetered {
 				l, e := newToolTestLedger(t, fresh).LoadBudget(ctx, scope)
 				res, exists := l.Reservations[id]
-				if e != nil || exists != unknown || marked != unknown || unknown && (!res.Dispatched || res.Status != budget.ReservationHeld || res.Active || len(res.Receipt) != 0 || res.Usage != (budget.Usage{})) {
+				// The unreadable dispatch ACK exits before the native suspend
+				// transition: both the Call quota and its live slot stay held.
+				active := mode == "dispatch-ack-unknown"
+				hasReceipt := len(res.Receipt) != 0 && !bytes.Equal(res.Receipt, []byte("null"))
+				// A returned pre-entry denial after an acknowledged intent
+				// atomically requeues the exact original reservation.
+				requeued := mode == "cancel-intent-ack" || mode == "owner-intent-ack"
+				if requeued && (!exists || marked || res.Status != budget.ReservationWaiting || res.Dispatched || res.Active || hasReceipt || res.Usage != (budget.Usage{}) || l.View(root).Reserved.ToolCalls != 0) {
+					t.Fatal("acknowledged no-send did not requeue", res, marked)
+				}
+				if e != nil || exists != (unknown || requeued) || marked != unknown || unknown && (res.ID != id || res.RunID != root || res.RequestHash != kernel.ManagedDigest(tools.ExecutionRequest{RunID: root, Call: pendingCall}) || res.Requested != (budget.Usage{ToolCalls: 1}) || !res.Dispatched || res.Status != budget.ReservationHeld || res.Active != active || hasReceipt || res.Usage != (budget.Usage{}) || l.View(root).Reserved.ToolCalls != 1 || l.FinishedRuns[root]) {
 					t.Fatal("interruption split native dispatch/accounting", e, res, marked)
 				}
 				if mode == "ledger-cancel-intent-ack" {

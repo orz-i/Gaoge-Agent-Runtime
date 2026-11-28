@@ -196,6 +196,12 @@ func (runner *Runner) cancelRuntimeRun(
 					return current, true, err
 				}
 			}
+			if nativeSelected && current.Run.Kind == agent.RunKind {
+				coordinator := runner.handoffs.(*handoff.Coordinator)
+				if !coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, delegation, current) {
+					return current, true, ErrHandoffCancellationUnverified
+				}
+			}
 			// The original route-specific ownership proof above owns
 			// physical settlement semantics. Native Agent checks
 			// unresolved Tool/Model intents before reaching here;

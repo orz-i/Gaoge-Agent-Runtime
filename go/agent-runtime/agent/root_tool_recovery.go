@@ -223,10 +223,17 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		// Replay of these *receipts*, not of their physical calls, occurs only
 		// after every original obligation has settled and a new owner is admitted.
 		calls := make([]tools.Call, 0, len(state.RecoveredTools)+len(state.PendingCalls))
+		recovered := make(map[string]bool, len(state.RecoveredTools))
 		for _, receipt := range state.RecoveredTools {
 			calls = append(calls, tools.CloneCall(receipt.Call))
+			recovered[receipt.Call.ID] = true
 		}
-		state.PendingCalls = append(calls, state.PendingCalls...)
+		for _, pending := range state.PendingCalls {
+			if !recovered[pending.ID] {
+				calls = append(calls, pending)
+			}
+		}
+		state.PendingCalls = calls
 	}
 	encoded, err := encodeState(state)
 	if err != nil {

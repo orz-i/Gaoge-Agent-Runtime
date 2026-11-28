@@ -123,19 +123,18 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 	rt := ea1StartRuntime(t, fresh)
 	l := newToolTestLedger(t, fresh)
 	r = makeRunner(rt, l, "original-ledger")
-	staged, e := r.Resume(ctx, before.Run.ID, before.Run.Revision)
-	if e != nil {
-		t.Fatal("settled rejection recovery", e)
-	}
+	// Native accounting already staged the refusal. Drain the original
+	// deferred children before admitting a successor business callback.
+	staged := before
 	if len(m.requests) != 1 || len(verifications) != 0 {
 		t.Fatal("recovery performed effects")
 	}
-	for _, id := range []string{"child-a", "child-b"} {
+	for index, id := range []string{"child-a", "child-b"} {
 		view, e := agent.ViewState(staged)
-		if e != nil || view.PendingTool == nil || view.PendingTool.CallID != id {
+		if e != nil || (view.PendingTool == nil) != (index == 0) || index != 0 && view.PendingTool.CallID != id {
 			t.Fatalf("wrong sibling: %v %+v", e, view.PendingTool)
 		}
-		if _, e = r.ReconcileToolOutcome(ctx, staged.Run.ID, before.Run.Revision, id); !errors.Is(e, kernel.ErrConflict) {
+		if _, e = r.ReconcileToolOutcome(ctx, staged.Run.ID, staged.Run.Revision-1, id); !errors.Is(e, kernel.ErrConflict) {
 			t.Fatal("stale revision accepted", e)
 		}
 		staged, e = r.ReconcileToolOutcome(ctx, staged.Run.ID, staged.Run.Revision, id)
@@ -148,7 +147,20 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 	}
 	final, e := r.Resume(ctx, staged.Run.ID, staged.Run.Revision)
 	if e != nil || final.Run.Status != kernel.RunStatusCompleted || len(m.requests) != 2 {
-		t.Fatal("original batch did not complete", e, final.Run.Status)
+		var evidence struct {
+			PendingCalls []tools.Call `json:"pendingCalls"`
+		}
+		if err := json.Unmarshal(staged.State, &evidence); err != nil {
+			t.Fatal(err)
+		}
+		pending := make([]string, 0, len(evidence.PendingCalls))
+		for _, call := range evidence.PendingCalls {
+			pending = append(pending, call.ID)
+		}
+		if saved, err := l.LoadBudget(ctx, "original-ledger"); err == nil {
+			t.Logf("original effects=%v verifications=%v model calls=%d charged=%d reserved=%d", physical, verifications, len(m.requests), saved.View("").Usage.ToolCalls, saved.View("").Reserved.ToolCalls)
+		}
+		t.Fatalf("original batch did not complete: %v; status=%s staged pending=%v", e, final.Run.Status, pending)
 	}
 	if e = rt.VerifyExecutionCustody(ctx, final, kernel.CustodyRetired); e != nil || !r.VerifiedDeferredRootControl(ctx, rt, final) {
 		t.Fatal("final history not qualified", e)

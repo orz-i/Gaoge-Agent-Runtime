@@ -60,7 +60,7 @@ func validToolAdmission(state runState) bool {
 	unsent := a.Phase == toolAdmissionUnsent
 	if (!positive && !unsent && a.Phase != toolAdmissionEvaluating && a.Phase != toolAdmissionRequired) ||
 		(!positive && !unsent && (a.ApprovalDigest != "" || a.ApprovalBounded || a.BudgetBound || state.ToolDispatchID == a.CallID)) ||
-		(unsent && (a.LedgerID != "" || state.ToolDispatchID == a.CallID)) ||
+		(unsent && state.ToolDispatchID == a.CallID) ||
 		(a.ApprovalDigest != "" && !validBindingFingerprint(a.ApprovalDigest)) || (a.ApprovalBounded && a.ApprovalDigest == "") ||
 		(!a.BudgetBound && a.LedgerID != "") || a.LedgerID != strings.TrimSpace(a.LedgerID) {
 		return false

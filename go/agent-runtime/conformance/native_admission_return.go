@@ -109,9 +109,17 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 			if _, err = observer.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
 				t.Fatal("capacity wait retained grant", err)
 			}
-			cancelled, err := coord.CancelRoot(ctx, scope, root)
+			var cancelled budget.Ledger
+			if mode == "parented-run-and-tool" {
+				cancelled, err = coord.CancelRun(ctx, scope, root)
+			} else {
+				cancelled, err = coord.CancelRoot(ctx, scope, root)
+			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if !cancelled.RunCancelled(root) || mode == "parented-run-and-tool" && (cancelled.RunCancelled("cancel-admission-parent") || cancelled.RunCancelled("peer")) {
+				t.Fatal("native cancellation escaped original subtree", cancelled)
 			}
 			if res, exists := cancelled.Reservations["tool:"+root+":original-call"]; exists {
 				t.Fatal("cancelled unsent wait manufactured dispatch accounting", res)

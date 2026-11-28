@@ -120,7 +120,7 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	if capture, ok := hs.(interface{ setGenerationRelations(*runrelation.Registry) }); ok {
 		capture.setGenerationRelations(relations)
 	}
-	deps := harness.BudgetAuthorityDependencies{Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
+	deps := harness.BudgetAuthorityDependencies{Runtime: rt, Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
 	shared, err := harness.NewBudgetAuthority(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -245,7 +245,17 @@ func TestGenerationControlRejectsForeignCallbackCustody(t *testing.T) {
 				t.Fatalf("delegation fixture: %+v %v", first.Turn, err)
 			}
 			release, finished := make(chan struct{}), make(chan struct{})
-			foreign, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, CompletionPolicies: []agent.CompletionPolicy{detachedGenerationCompletion{release, finished}}})
+			// Accounting is the same native Run binding; only the foreign
+			// completion policy differs from the original scoped composition.
+			shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: hs, Meter: m, Clock: generationClock{}})
+			if e != nil {
+				t.Fatal(e)
+			}
+			bounded, e := shared.Adapter()
+			if e != nil {
+				t.Fatal(e)
+			}
+			foreign, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, BoundedBudget: bounded, CompletionPolicies: []agent.CompletionPolicy{detachedGenerationCompletion{release, finished}}})
 			if err != nil {
 				t.Fatal(err)
 			}

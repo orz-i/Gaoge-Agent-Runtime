@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"math"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
 // LedgerMutation is the accounting portion of an existing Run transition.
@@ -42,6 +44,33 @@ func PlanLedgerMutation(ctx context.Context, original Ledger, change func(Coordi
 		return nil, ErrLedgerConflict
 	}
 	return &LedgerMutation{revision: original.Revision, source: sha256.Sum256(raw), next: CloneLedger(next)}, changeErr
+}
+
+// PlanUnsentToolDispatch is only a proposal for the original native Run
+// CAS (or its sealed callback-return recovery). An acknowledged intent
+// whose Tool chain never entered can be requeued; never refund a receipt.
+func PlanUnsentToolDispatch(ctx context.Context, original Ledger, expected Reservation, proof *featurecontrol.Proof) (*LedgerMutation, error) {
+	raw, err := json.Marshal(expected)
+	if err != nil || !proof.Matches(expected.RunID, original.Revision, "agent_tool_not_entered", original.ID, raw, nil) || !validToolReservationIdentity(expected) {
+		return nil, ErrInvalidUsage
+	}
+	return PlanLedgerMutation(ctx, original, func(c Coordinator) error {
+		_, err := c.update(ctx, original.ID, func(l *Ledger) error {
+			r, ok := l.Reservations[expected.ID]
+			if !ok || !sameToolReservationIdentity(r, expected) || !r.Dispatched || r.Status != ReservationHeld ||
+				r.Usage != (Usage{}) || len(r.Receipt) != 0 {
+				return ErrLedgerConflict
+			}
+			r.Active, r.Dispatched, r.Dimension = false, false, ""
+			r.Status = ReservationWaiting
+			if l.RunCancelled(r.RunID) {
+				r.Status = ReservationReleased
+			}
+			l.Reservations[r.ID] = r
+			return nil
+		})
+		return err
+	})
 }
 
 // PlanRunCancellation closes only the selected original subtree and marks

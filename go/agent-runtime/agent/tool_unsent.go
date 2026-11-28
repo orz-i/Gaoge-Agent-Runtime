@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -15,14 +16,50 @@ func originalToolReservation(q tools.ExecutionRequest) budget.Reservation {
 	return budget.Reservation{ID: "tool:" + q.RunID + ":" + q.Call.ID, RunID: q.RunID, RequestHash: kernel.ManagedDigest(q), Requested: budget.Usage{ToolCalls: 1}}
 }
 
+// Plan the accounting change for the exact acknowledged native intent,
+// never for a missing/foreign reservation or a successor's dispatch.
+func (r *Runner) planUnsentTool(ctx context.Context, s kernel.Snapshot, state runState, call tools.Call) (*budget.LedgerMutation, error) {
+	scope := s.Run.BudgetScopeID
+	if scope == "" {
+		if a := state.ToolAdmission; a != nil && a.LedgerID != "" {
+			return nil, ErrToolReceiptMismatch
+		}
+		return nil, nil
+	}
+	a := state.ToolAdmission
+	if r.boundedBudget == nil || state.ToolDispatchID != call.ID || !a.authorized(call) || !a.BudgetBound || a.LedgerID != scope {
+		return nil, ErrToolReceiptMismatch
+	}
+	q := tools.ExecutionRequest{RunID: s.Run.ID, Call: call}
+	l, _, err := r.boundedBudget.originalDispatchedTool(ctx, scope, q)
+	if err != nil {
+		return nil, err
+	}
+	expected := originalToolReservation(q)
+	raw, err := json.Marshal(expected)
+	if err != nil {
+		return nil, err
+	}
+	proof := featurecontrol.Seal(q.RunID, l.Revision, "agent_tool_not_entered", scope, raw, nil)
+	return budget.PlanUnsentToolDispatch(ctx, l, expected, proof)
+}
+
 func (r *Runner) commitUnsentTool(ctx context.Context, s kernel.Snapshot, state runState, call tools.Call) (kernel.Snapshot, error) {
-	if s.Run.BudgetScopeID != "" {
-		return s, ErrToolReceiptMismatch
+	plan, err := r.planUnsentTool(ctx, s, state, call)
+	if err != nil {
+		return s, err
 	}
 	if err := state.markUnsentTool(call); err != nil {
 		return s, err
 	}
-	return r.commitToolTransition(ctx, s, state, s.Checkpoint, kernel.RunStatusRunning, unsentToolEvent(call, r.clock.Now()))
+	if plan == nil {
+		return r.commitToolTransition(ctx, s, state, s.Checkpoint, kernel.RunStatusRunning, unsentToolEvent(call, r.clock.Now()))
+	}
+	encoded, err := encodeState(state)
+	if err != nil {
+		return s, err
+	}
+	return r.commitNativeTransition(ctx, s, kernel.Mutation{Ledger: plan, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint, Events: []kernel.EventDraft{unsentToolEvent(call, r.clock.Now())}})
 }
 func unsentToolEvent(call tools.Call, now time.Time) kernel.EventDraft {
 	return kernel.EventDraft{Type: "tool.admission_unsent", Message: call.ID, Wakeup: true, WakeupAt: agentWakeupAt(now)}
@@ -47,9 +84,6 @@ func (state *runState) markUnsentTool(call tools.Call) error {
 		copy := *state.ToolAdmission
 		a = &copy
 	}
-	if a.LedgerID != "" {
-		return ErrToolReceiptMismatch
-	}
 	a.Phase = toolAdmissionUnsent
 	state.ToolAdmission = a
 	state.ToolDispatchID = ""
@@ -67,7 +101,7 @@ func (r *Runner) finishUnsentTool(ctx context.Context, s kernel.Snapshot, state 
 	if state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || len(state.RecoveredTools) != 0 || a == nil || !a.matches(call) || a.Phase != toolAdmissionUnsent {
 		return s, ErrToolOutcomeUnknown
 	}
-	if s.Run.BudgetScopeID != "" || a.LedgerID != "" {
+	if s.Run.BudgetScopeID != a.LedgerID {
 		return s, ErrToolReceiptMismatch
 	}
 	ready := *a
@@ -139,8 +173,12 @@ func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snaps
 	if !b.Unsent || state.ToolDispatchID != q.Call.ID || !c.MatchesReturnSnapshot(s) {
 		return s, ErrToolReceiptMismatch
 	}
-	if b.LedgerID != "" || s.Run.BudgetScopeID != "" {
+	if b.LedgerID != s.Run.BudgetScopeID {
 		return s, ErrToolReceiptMismatch
+	}
+	plan, err := r.planUnsentTool(ctx, s, state, q.Call)
+	if err != nil {
+		return s, err
 	}
 	if err := state.markUnsentTool(q.Call); err != nil {
 		return s, err
@@ -151,12 +189,12 @@ func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snaps
 		return s, err
 	}
 	source := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, s.State, s.Checkpoint)
-	target := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, encoded, s.Checkpoint)
-	next, err := r.runtime.ApplyOwnedPhysicalRecovery(ctx, g, s.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint, Events: []kernel.EventDraft{unsentToolEvent(q.Call, r.clock.Now())}}, source, target)
+	target := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, encoded, kernel.ReceiptRecoveryTarget(s.Checkpoint, plan))
+	next, err := r.runtime.ApplyOwnedPhysicalRecovery(ctx, g, s.Run.Revision, kernel.Mutation{Ledger: plan, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint, Events: []kernel.EventDraft{unsentToolEvent(q.Call, r.clock.Now())}}, source, target)
 	if err != nil {
 		return s, err
 	}
-	// The original unmetered no-send proof committed in the receipt CAS.
+	// The original no-send proof and any accounting change committed in the receipt CAS.
 	// Retire only if every other original physical obligation drained.
 	if knownRootPhysicalSettlement(next) {
 		if err = r.reconcileRootRetirement(ctx, next, g, &c); err != nil {
