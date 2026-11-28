@@ -53,7 +53,10 @@ previous writer and retain or export the original Profile before cutover.
 The existing Run Create/Commit transaction now stores sealed Agent history
 as immutable ordered entries, selected by the current hot State envelope.
 The complete logical Snapshot is reconstructed byte-for-byte before exposure
-or authority verification. Pending model requests/receipts stay in hot state.
+or authority verification. Pending model requests retain only their unmatched
+raw bytes plus references to the exact transcript suffix of the same revision;
+pending receipts stay in hot state. No logical Agent wire or SQL schema change
+is required for this refinement. Do not mix writers.
 The SQLite v14 and matching PostgreSQL layout require a fresh Profile;
 earlier Profiles remain unchanged. Do not decode the internal state column
 as logical Agent JSON or mix old/new writers.

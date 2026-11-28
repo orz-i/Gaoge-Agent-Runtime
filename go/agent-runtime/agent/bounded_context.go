@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
@@ -171,7 +172,7 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 	if err != nil {
 		return model.Request{}, err
 	}
-	if !sameFrozenModelMessages(choice.request.Messages, model.CloneMessages(runtimecontext.Materialize(next.Window))) {
+	if !reflect.DeepEqual(choice.request.Messages, model.CloneMessages(runtimecontext.Materialize(next.Window))) {
 		return model.Request{}, ErrInvalidRequest
 	}
 	request, err = choice.selectForIntent(ctx)

@@ -38,7 +38,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		return snapshot, ErrModelOutcomeUnknown
 	}
 	active, ok := activeModelInvocation(state)
-	if !ok || (active.Status != ModelInvocationPending && active.Status != ModelInvocationCompleted) || active.DispatchAttempt == 0 {
+	if !ok || active.DispatchAttempt == 0 {
 		return snapshot, ErrModelOutcomeUnknown
 	}
 	inv := *active
@@ -100,7 +100,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		}
 		return snapshot, nil
 	}
-	if !validModelInvocationReceipt(inv) || !replaceLastModelInvocation(&state, inv) {
+	if !replaceLastModelInvocation(&state, inv) {
 		return snapshot, ErrInvalidModelResponse
 	}
 	encoded, err := encodeState(state)
@@ -151,27 +151,9 @@ func (runner *Runner) qualifiedRecoveredModelReceipt(state runState, inv ModelIn
 	if !rejected && !model.ValidResponse(response) {
 		return ModelInvocation{}, errors.Join(ErrModelOutcomeUnknown, ErrInvalidModelResponse)
 	}
-	if rejected {
-		response = model.BillingOnlyResponse(response)
-	}
-	inv.Status = ModelInvocationCompleted
-	inv.ProviderResponseID = strings.TrimSpace(response.ResponseID)
-	inv.Response = model.CloneResponse(response)
-	inv.ExecutionLeaseUntil = nil
-	inv.RetryAfter = nil
+	inv = completeModelInvocation(inv, response, receiptErr, rejected, runner.clock.Now().UTC())
 	if clearDiagnostic {
-		inv.OutcomeErrorCode = ""
-		inv.OutcomeErrorDetail = ""
-	}
-	completedAt := runner.clock.Now().UTC()
-	if inv.CompletedAt == nil {
-		inv.CompletedAt = &completedAt
-	}
-	if rejected {
-		inv.ErrorCode = model.ClassifiedErrorCode(receiptErr)
-		if inv.ErrorCode == "" {
-			inv.ErrorCode = rejectedModelResponseCode
-		}
+		inv.OutcomeErrorCode, inv.OutcomeErrorDetail = "", ""
 	}
 	if !validModelInvocationReceipt(inv) {
 		return ModelInvocation{}, ErrInvalidModelResponse

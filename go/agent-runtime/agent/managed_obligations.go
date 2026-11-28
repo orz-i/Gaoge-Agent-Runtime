@@ -367,15 +367,7 @@ func (r *Runner) recoverManagedModelFrontier(ctx context.Context, s kernel.Snaps
 	inv.ExecutionLeaseUntil = nil
 	now := r.clock.Now().UTC()
 	inv.RetryAfter = &now
-	if !replaceLastModelInvocation(&state, inv) {
-		return s, ErrInvalidRequest
-	}
-	encoded, err := encodeState(state)
-	if err != nil {
-		return s, err
-	}
-	return r.commitNativeTransition(ctx, s, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "agent.model_invocation.retryable", Message: inv.ID, Wakeup: true}}})
+	return r.commitInvocationState(ctx, s, &state, inv, kernel.EventDraft{Type: "agent.model_invocation.retryable", Message: inv.ID, Wakeup: true})
 }
 
 func (r *Runner) preflightManagedPoint(ctx context.Context, point kernel.ManagedSafePoint, current kernel.Snapshot) (managedObligations, error) {

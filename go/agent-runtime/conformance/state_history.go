@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"testing"
 )
@@ -18,8 +20,11 @@ func RunStateHistorySuite(t *testing.T, store kernel.Store, reopen func() kernel
 	if e != nil {
 		t.Fatal(e)
 	}
-	a := json.RawMessage(`{"messages":[{"role":"user","content":"original"}],"modelInvocations":[{"status":"consumed","id":"one"},{"status":"pending","id":"two"}],"_originalStateEvidence":{"version":"agent-state-opaque-v3","digest":"fixture"}}`)
-	b := json.RawMessage(`{"messages":[{"role":"user","content":"original"},{"role":"assistant","content":"answer"}],"modelInvocations":[{"status":"consumed","id":"one"},{"status":"completed","id":"two"}],"_originalStateEvidence":{"version":"agent-state-opaque-v3","digest":"fixture"}}`)
+	message := `{"role":"user","content":"` + strings.Repeat(`original evidence `, 32) + `"}`
+	transcript := `[` + message + `]`
+	frozen := `[{"role":"system","content":"original policy"},` + message + `]`
+	a := json.RawMessage(`{"messages":` + transcript + `,"modelInvocations":[{"status":"consumed","id":"one"},{"status":"pending","id":"two","request":{"messages":` + frozen + `}}],"_originalStateEvidence":{"version":"agent-state-opaque-v3","digest":"fixture"}}`)
+	b := json.RawMessage(`{"messages":[` + message + `,{"role":"assistant","content":"answer"}],"modelInvocations":[{"status":"consumed","id":"one"},{"status":"completed","id":"two","request":{"messages":` + frozen + `}}],"_originalStateEvidence":{"version":"agent-state-opaque-v3","digest":"fixture"}}`)
 	c := json.RawMessage(`{"messages":[{"role":"user","content":"compacted"}],"modelInvocations":[{"status":"consumed","id":"one"},{"status":"consumed","id":"two"}],"_originalStateEvidence":{"version":"agent-state-opaque-v3","digest":"fixture"}}`)
 	original, e := rt.Create(ctx, kernel.CreateRequest{ID: "state-history", Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "exact history", State: a})
 	if e != nil {

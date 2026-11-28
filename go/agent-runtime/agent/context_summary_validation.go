@@ -127,7 +127,7 @@ func validContextSummaryInvocation(invocation ModelInvocation) bool {
 			len(request.Tools) == 0 && len(request.HostedTools) == 0 && !request.RequireToolCall &&
 			request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 &&
 			request.PreviousResponseID == "" && request.PromptCacheKey == "" &&
-			sameFrozenOutputContract(request.OutputContract, workingStateSummaryContract())
+			reflect.DeepEqual(request.OutputContract, workingStateSummaryContract())
 	}
 	return invocation.Status == ModelInvocationConsumed
 }

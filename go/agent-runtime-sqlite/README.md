@@ -323,4 +323,8 @@ selects an immutable generation and prefix. Read the complete byte-exact
 logical State through the Store, not by decoding the internal `state_json`
 column. The same native transaction commits the history append, Run CAS,
 usage and journal. Context compaction can select a new history generation;
-older entries remain immutable. v13 profiles are not opened by v14 writers.
+older entries remain immutable. A pending model request (including a summary's
+frozen business request) references the byte-identical suffix of that same
+logical transcript; its unmatched raw prefix remains in hot state. No Host
+callback is used to recover the original request. v13 profiles are not opened
+by v14 writers.

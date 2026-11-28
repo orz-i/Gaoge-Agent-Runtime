@@ -1265,23 +1265,21 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		executed, yielded, executeErr := runner.executePending(ctx, prepared)
 		return executed, yielded || executeErr != nil, executeErr
 	}
-	if _, active := activeModelInvocation(state); !active && state.Budget.Usage.LLMCalls >= state.Budget.Limits.MaxLLMCalls {
-		failed, failErr := runner.fail(ctx, snapshot, state, "agent.llm_limit", ErrCallLimit)
-		return failed, true, failErr
-	}
-	// Never pause in the middle of a committed logical invocation: a replay
-	// must first reconcile its durable receipt without reissuing the request.
-	if _, active := activeModelInvocation(state); !active && allowanceExhausted(state, "model") {
-		return runner.advanceCallAllowance(ctx, snapshot, state, "model")
-	}
+	// Never pause or reprepare an already committed logical invocation.
 	if _, active := activeModelInvocation(state); !active {
+		if state.Budget.Usage.LLMCalls >= state.Budget.Limits.MaxLLMCalls {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.llm_limit", ErrCallLimit)
+			return failed, true, failErr
+		}
+		if allowanceExhausted(state, "model") {
+			return runner.advanceCallAllowance(ctx, snapshot, state, "model")
+		}
 		snapshot, err = runner.ensureManagedPreparation(ctx, snapshot, state)
 		if err != nil {
 			return snapshot, true, err
 		}
 		updated, _, changed, inputErr := runner.admitRunInputs(ctx, snapshot, state, nil)
 		if inputErr != nil || changed {
-			// Recheck the lease and read the next page before freezing the request.
 			return updated, inputErr != nil, inputErr
 		}
 	}

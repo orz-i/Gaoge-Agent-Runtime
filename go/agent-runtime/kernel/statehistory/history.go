@@ -22,8 +22,9 @@ type Span struct {
 	Prefix     bool
 }
 type Manifest struct {
-	Spans  [2]Span
-	Digest [32]byte
+	Spans        [2]Span
+	RequestTails [2]int `json:"RequestTails,omitzero"`
+	Digest       [32]byte
 }
 type Append struct {
 	Stream     int
@@ -38,90 +39,174 @@ type Plan struct {
 }
 
 type split struct {
-	hot     json.RawMessage
-	spans   [2]Span
-	entries [2][]json.RawMessage
+	hot          json.RawMessage
+	spans        [2]Span
+	entries      [2][]json.RawMessage
+	requestTails [2]int
 }
 
-// decompose only recognizes the first-party sealed Agent wire. Other
-// feature state remains opaque. Keep the actual encoded bytes, including
-// key order and raw JSON spelling; never marshal a typed state again.
+// field preserves byte offsets inside the original JSON object. Never
+// marshal an object again: raw provider evidence and ordering are original.
+type field struct {
+	start, end int
+	value      json.RawMessage
+}
+
+func fields(raw []byte) map[string]field {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	t, e := dec.Token()
+	if e != nil || t != json.Delim('{') {
+		return nil
+	}
+	out := make(map[string]field)
+	for dec.More() {
+		key, e := dec.Token()
+		if e != nil {
+			return nil
+		}
+		var v json.RawMessage
+		if e = dec.Decode(&v); e != nil {
+			return nil
+		}
+		end := int(dec.InputOffset())
+		name := key.(string)
+		if _, exists := out[name]; exists {
+			return nil
+		}
+		out[name] = field{end - len(v), end, v}
+	}
+	return out
+}
+func exactArray(f field) []json.RawMessage {
+	var all []json.RawMessage
+	if json.Unmarshal(f.value, &all) != nil || !bytes.Equal(array(all), f.value) {
+		return nil
+	}
+	return all
+}
+func replace(raw []byte, f field, v []byte) []byte {
+	out := make([]byte, 0, len(raw)+len(v)-(f.end-f.start))
+	out = append(out, raw[:f.start]...)
+	out = append(out, v...)
+	return append(out, raw[f.end:]...)
+}
+
+// Both the physical request and the summary's frozen business request may
+// share the exact transcript suffix of this same logical Run revision.
+// Never ask a model, Host, or a later State to reconstruct an original.
+// Retain all differing messages and unrecognized projections verbatim.
+var requestMessagePaths = [2][]string{{"request", "messages"}, {"contextSummary", "businessRequest", "messages"}}
+
+func requestMessages(inv []byte, path []string) field {
+	var offset int
+	for _, name := range path {
+		f := fields(inv)[name]
+		if len(f.value) == 0 {
+			return field{}
+		}
+		offset += f.start
+		inv = f.value
+	}
+	return field{offset, offset + len(inv), inv}
+}
+func activeInvocation(inv []byte) bool {
+	switch string(fields(inv)["status"].value) {
+	case `"pending"`, `"completed"`:
+		return true
+	}
+	return false
+}
+
+// Replace the shared raw suffix by a byte count; the nonmatching original
+// prefix remains encoded in the hot field. This is an exact byte reference,
+// not an inference about the message's meaning or a new history stream.
+func compactRequests(inv, transcript json.RawMessage) (json.RawMessage, [2]int) {
+	var tails [2]int
+	if !activeInvocation(inv) {
+		return inv, tails
+	}
+	for i, path := range requestMessagePaths {
+		f := requestMessages(inv, path)
+		original := f.value
+		n := 0
+		for n < len(original) && n < len(transcript) && original[len(original)-1-n] == transcript[len(transcript)-1-n] {
+			n++
+		}
+		if n <= 64 {
+			continue
+		}
+		head, _ := json.Marshal([]byte(original[:len(original)-n]))
+		if len(head)+16 < len(original) {
+			tails[i] = n
+			inv = replace(inv, f, head)
+		}
+	}
+	return inv, tails
+}
+func restoreRequests(state json.RawMessage, tails [2]int) (json.RawMessage, error) {
+	if tails == ([2]int{}) {
+		return state, nil
+	}
+	root := fields(state)
+	transcript := root["messages"].value
+	list := exactArray(root["modelInvocations"])
+	if len(list) == 0 || !activeInvocation(list[len(list)-1]) {
+		return nil, fmt.Errorf("missing original active request")
+	}
+	inv := list[len(list)-1]
+	for i, n := range tails {
+		if n == 0 {
+			continue
+		}
+		f := requestMessages(inv, requestMessagePaths[i])
+		var head []byte
+		if n < 0 || n > len(transcript) || json.Unmarshal(f.value, &head) != nil {
+			return nil, fmt.Errorf("invalid original request reference")
+		}
+		inv = replace(inv, f, append(head, transcript[len(transcript)-n:]...))
+	}
+	list[len(list)-1] = inv
+	return replace(state, root["modelInvocations"], array(list)), nil
+}
+
+// Only the first-party sealed Agent wire is partitioned. Other feature
+// states remain opaque, including unsupported/noncanonical arrays.
 func decompose(kind string, state json.RawMessage) split {
 	raw := split{hot: state}
 	if kind != "agent" {
 		return raw
 	}
-	dec := json.NewDecoder(bytes.NewReader(state))
-	t, e := dec.Token()
-	if e != nil || t != json.Delim('{') {
+	root := fields(state)
+	var evidence struct{ Version string }
+	if json.Unmarshal(root["_originalStateEvidence"].value, &evidence) != nil || evidence.Version != "agent-state-opaque-v3" {
 		return raw
 	}
-	type field struct {
-		start, end int
-		value      json.RawMessage
-	}
-	var fields [2]field
-	sealed := false
-	for dec.More() {
-		key, e := dec.Token()
-		if e != nil {
-			return raw
-		}
-		var v json.RawMessage
-		if e = dec.Decode(&v); e != nil {
-			return raw
-		}
-		end := int(dec.InputOffset())
-		switch key {
-		case "_originalStateEvidence":
-			var evidence struct{ Version string }
-			if json.Unmarshal(v, &evidence) == nil && evidence.Version == "agent-state-opaque-v3" {
-				sealed = true
-			}
-		case "messages":
-			fields[0] = field{end - len(v), end, v}
-		case "modelInvocations":
-			fields[1] = field{end - len(v), end, v}
-		}
-	}
-	if !sealed {
-		return raw
-	}
-	// In the canonical Agent encoding messages precede model invocations.
-	// Unrecognized/noncanonical layout is retained exactly as opaque bytes.
+	transcript := root["messages"].value
 	pos := 0
 	var hot []byte
-	for i, f := range fields {
+	for i, name := range []string{"messages", "modelInvocations"} {
+		f := root[name]
 		if len(f.value) == 0 || f.start < pos {
 			continue
 		}
-		var all []json.RawMessage
-		if json.Unmarshal(f.value, &all) != nil || len(all) == 0 || !bytes.Equal(array(all), f.value) {
+		all := exactArray(f)
+		if len(all) == 0 {
 			continue
 		}
 		n := 0
-		if i == 0 {
-			// The system guidance is mutable. Archive only the suffix after the
-			// last system entry; compaction may select a different generation.
-			for j, item := range all {
-				var x struct{ Role string }
-				if json.Unmarshal(item, &x) != nil {
-					return split{hot: state}
-				}
-				if x.Role == "system" {
+		for j, item := range all {
+			var tag struct{ Role, Status string }
+			if json.Unmarshal(item, &tag) != nil {
+				return split{hot: state}
+			}
+			if i == 0 {
+				if tag.Role == "system" {
 					n = j + 1
 				}
-			}
-		} else {
-			for _, item := range all {
-				var x struct{ Status string }
-				if json.Unmarshal(item, &x) != nil {
-					return split{hot: state}
-				}
-				if x.Status != "consumed" {
-					break
-				}
-				n++
+			} else if tag.Status == "consumed" {
+				n = j + 1
+			} else {
+				break
 			}
 		}
 		var retained, archived []json.RawMessage
@@ -129,8 +214,12 @@ func decompose(kind string, state json.RawMessage) split {
 			retained, archived = all[:n], all[n:]
 		} else {
 			archived, retained = all[:n], all[n:]
+			if len(retained) > 0 {
+				last := len(retained) - 1
+				retained[last], raw.requestTails = compactRequests(retained[last], transcript)
+			}
 		}
-		if len(archived) == 0 {
+		if len(archived) == 0 && raw.requestTails == ([2]int{}) {
 			continue
 		}
 		hot = append(hot, state[pos:f.start]...)
@@ -172,7 +261,7 @@ func Prepare(kind string, previous, next json.RawMessage, old Manifest, revision
 	if !old.Empty() {
 		before = decompose(kind, previous)
 	}
-	p := Plan{Hot: bytes.Clone(current.hot), Manifest: Manifest{Spans: current.spans, Digest: sha256.Sum256(next)}}
+	p := Plan{Hot: bytes.Clone(current.hot), Manifest: Manifest{Spans: current.spans, RequestTails: current.requestTails, Digest: sha256.Sum256(next)}}
 	for i, items := range current.entries {
 		if len(items) == 0 {
 			continue
@@ -200,7 +289,9 @@ func Prepare(kind string, previous, next json.RawMessage, old Manifest, revision
 	return p
 }
 
-func (m Manifest) Empty() bool { return m.Spans[0].Count == 0 && m.Spans[1].Count == 0 }
+func (m Manifest) Empty() bool {
+	return m.Spans[0].Count == 0 && m.Spans[1].Count == 0 && m.RequestTails == ([2]int{})
+}
 
 // A partitioned State has a non-JSON version marker, a compact manifest,
 // and the exact hot JSON bytes. A missing manifest or an old writer cannot
@@ -272,6 +363,10 @@ func Restore(hot json.RawMessage, m Manifest, read func(int, uint64, int) ([]jso
 		pos = s.End
 	}
 	result = append(result, hot[pos:]...)
+	result, e := restoreRequests(result, m.RequestTails)
+	if e != nil {
+		return nil, e
+	}
 	if !json.Valid(result) || sha256.Sum256(result) != m.Digest {
 		return nil, fmt.Errorf("invalid original state history digest")
 	}
