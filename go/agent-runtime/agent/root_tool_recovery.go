@@ -106,11 +106,8 @@ func (runner *Runner) reconcileOriginalToolReturnIfPresent(ctx context.Context, 
 	return repaired, true, err
 }
 
-// reconcileRootTool is receipt-only: no drive, Model, Executor, child Start or
-// remote Cancel can run while the original scope still has unresolved effects.
-func (runner *Runner) reconcileRootTool(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant, callID string) (kernel.Snapshot, error) {
-	return runner.reconcileRootToolReceipt(ctx, snapshot, state, grant, callID, true)
-}
+// reconcileRootToolReceipt is receipt-only: no drive, Model, Executor, child
+// Start or remote Cancel while the original scope has unresolved effects.
 func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant, callID string, continueTerminal bool) (kernel.Snapshot, error) {
 	completion, err := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
 	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
@@ -160,12 +157,9 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 			}
 		}
-		verified, verifyErr := runner.toolOutcomeVerifier.VerifyCommittedTool(ctx, request)
+		verified, verifyErr := verifyCommittedTool(ctx, runner.toolOutcomeVerifier, request)
 		if verifyErr != nil {
-			return snapshot, errors.Join(ErrToolOutcomeUnknown, verifyErr)
-		}
-		if tools.ValidateExecutionResult(verified) != nil || verified.Receipt.ExecutionID != callID || verified.Receipt.Disposition != "committed" || verified.Pending != nil {
-			return snapshot, ErrToolReceiptMismatch
+			return snapshot, verifyErr
 		}
 		outcome = newToolOutcomeReceipt(verified, nil)
 	}

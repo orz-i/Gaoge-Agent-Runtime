@@ -57,9 +57,8 @@ func approvalSourceDigest(q tools.ExecutionRequest, checkpoint *kernel.Checkpoin
 }
 
 func qualifiedOwnerToolReceipt(call tools.Call, result tools.ExecutionResult, approval string) (delegatedToolReceipt, bool) {
-	if !validBindingFingerprint(approval) || result.Receipt.ExecutionID != call.ID ||
-		result.Receipt.Disposition != "committed" || !validBindingFingerprint(result.Receipt.OwnerReceiptDigest) ||
-		result.Pending != nil || tools.ValidateExecutionResult(result) != nil {
+	if !validBindingFingerprint(approval) || !validBindingFingerprint(result.Receipt.OwnerReceiptDigest) ||
+		!validCommittedToolResult(result, call.ID) {
 		return delegatedToolReceipt{}, false
 	}
 	raw, err := encodeToolOutcome(newToolOutcomeReceipt(result, nil))
@@ -184,9 +183,8 @@ func (r *Runner) verifyToolHistory(ctx context.Context, runID string, state runS
 			return false
 		}
 		seen[receipt.Call.ID] = true
-		result, err := r.delegatedToolResults.VerifyCommittedTool(ctx, tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(receipt.Call)})
-		if err != nil || result.Receipt.ExecutionID != receipt.Call.ID || result.Receipt.Disposition != "committed" ||
-			result.Pending != nil || tools.ValidateExecutionResult(result) != nil {
+		result, err := verifyCommittedTool(ctx, r.delegatedToolResults, tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(receipt.Call)})
+		if err != nil {
 			return false
 		}
 		if receipt.ApprovalDigest != "" {

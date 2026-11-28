@@ -27,6 +27,25 @@ func (fn ToolOutcomeVerifierFunc) VerifyCommittedTool(ctx context.Context, reque
 	return fn(ctx, request)
 }
 
+// A provider lookup supplies a terminal committed result for exactly the
+// requested Call. Both recovery and delegated custody use this qualification;
+// the caller still owns the original Run, ledger and approval checks.
+func validCommittedToolResult(result tools.ExecutionResult, callID string) bool {
+	return result.Receipt.ExecutionID == callID && result.Receipt.Disposition == "committed" &&
+		result.Pending == nil && tools.ValidateExecutionResult(result) == nil
+}
+
+func verifyCommittedTool(ctx context.Context, verifier ToolOutcomeVerifier, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+	result, err := verifier.VerifyCommittedTool(ctx, request)
+	if err != nil {
+		return tools.ExecutionResult{}, errors.Join(ErrToolOutcomeUnknown, err)
+	}
+	if !validCommittedToolResult(result, request.Call.ID) {
+		return tools.ExecutionResult{}, ErrToolReceiptMismatch
+	}
+	return result, nil
+}
+
 // ReconcileToolOutcome consumes an original sealed no-send/terminal return
 // or a provider-verified external COMMIT without invoking Executor.Execute.
 // A no-send return reconciles admission only; it never mints a Tool result. The host authenticates the caller and supplies
@@ -74,7 +93,7 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 			if grant.ExecutionLeaseID == "" {
 				return snapshot, ErrRootOutcomeUnknown
 			}
-			return runner.reconcileRootTool(ctx, snapshot, state, grant, callID)
+			return runner.reconcileRootToolReceipt(ctx, snapshot, state, grant, callID, true)
 		}
 		if !errors.Is(lookupErr, kernel.ErrNotFound) {
 			return snapshot, lookupErr
@@ -82,8 +101,8 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 	}
 	// Non-owned or legacy recovery has no original native budget-return
 	// proof. Never consume a metered call through a verifier-only path.
-	if err := runner.requireUnmeteredToolRecovery(ctx, runID); err != nil {
-		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+	if snapshot.Run.BudgetScopeID != "" {
+		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)
 	}
 	return runner.withRunOwner(ctx, runID, expectedRevision, true,
 		func(nextCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
@@ -104,15 +123,10 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 			}
 			// The trusted callback queries the external system by the stable
 			// identity. A missing/failed lookup keeps the intent unresolved.
-			verified, verifyErr := scoped.toolOutcomeVerifier.VerifyCommittedTool(nextCtx,
+			verified, verifyErr := verifyCommittedTool(nextCtx, scoped.toolOutcomeVerifier,
 				tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(bound)})
 			if verifyErr != nil {
-				return fresh, errors.Join(ErrToolOutcomeUnknown, verifyErr)
-			}
-			if tools.ValidateExecutionResult(verified) != nil ||
-				verified.Receipt.ExecutionID != callID ||
-				verified.Receipt.Disposition != "committed" || verified.Pending != nil {
-				return fresh, ErrToolReceiptMismatch
+				return fresh, verifyErr
 			}
 			persisted, _, applyErr := scoped.persistPendingToolResult(nextCtx, fresh, execution,
 				tools.CloneExecutionResult(verified))

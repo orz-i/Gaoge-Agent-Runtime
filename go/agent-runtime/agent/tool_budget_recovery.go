@@ -173,19 +173,6 @@ func (r *Runner) originalToolLedger(ctx context.Context, q tools.ExecutionReques
 	return a, l, nil
 }
 
-// An observer must not accept a paid Tool without original accounting
-// evidence, or silently switch to a newly resolved ledger.
-func (r *Runner) requireUnmeteredToolRecovery(ctx context.Context, runID string) error {
-	s, e := r.runtime.Load(ctx, runID)
-	if e != nil {
-		return e
-	}
-	if s.Run.BudgetScopeID != "" {
-		return ErrToolReceiptMismatch
-	}
-	return nil
-}
-
 // The immutable original callback's Call binding selects the ledger and
 // terminal receipt, even if another sibling has advanced the Run revision.
 func (r *Runner) readOriginalSettledTool(ctx context.Context, q tools.ExecutionRequest, b kernel.OwnedToolReturn) (toolOutcomeReceipt, error) {
