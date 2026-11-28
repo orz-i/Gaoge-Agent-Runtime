@@ -195,6 +195,9 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 // depending on a cancelled caller Context. An expired or lost acknowledgment
 // is still an unknown receipt outcome: never infer a safe release from it.
 func (runner *Runner) finishCancellationFenceAfterRequest(ctx context.Context, intent Item) error {
+	if intent.ID == "" {
+		return nil
+	}
 	settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
 	defer stopSettlement()
 	err := runner.finishCancellationFence(settlementCtx, intent)
@@ -230,6 +233,16 @@ func (runner *Runner) cancelPreflightWithIntent(
 	original ...Invocation,
 ) (Item, error) {
 	if err := inspect(); err != nil {
+		return Item{}, err
+	}
+	host, err := runner.needsHostCancellation(ctx, turn, rootRunID)
+	if err != nil {
+		return Item{}, err
+	}
+	if !host {
+		// Validate the original Attempt; Runtime control arbitrates its
+		// physical identity. No independent Host CAS is needed.
+		_, err = runner.bindCancellationAttempt(ctx, turn, rootRunID, original...)
 		return Item{}, err
 	}
 	intent, fresh, err := runner.beginCancellationFence(ctx, turn, rootRunID, original...)

@@ -36,6 +36,9 @@ func (failure cancellationReadNoEffect) Unwrap() error { return failure.cause }
 func (runner *Runner) releaseNoEffectCancellation(
 	ctx context.Context, turn Turn, intent Item, runID string, cause error,
 ) error {
+	if intent.ID == "" {
+		return cause
+	}
 	_, nativeKernel := runner.cancellation.(*kernel.Runtime)
 	_, preflightRead := cause.(cancellationReadNoEffect) //nolint:errorlint // Only a direct Harness-minted proof is valid.
 	nativeNoEffect := nativeKernel && kernel.IsControlNoEffect(cause)

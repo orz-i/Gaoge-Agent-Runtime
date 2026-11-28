@@ -531,8 +531,10 @@ signatures are unchanged. This cut does not reintroduce legacy opt-in aliases.
 The read-only test audit covered `host_test.go` (physical identity, frozen history,
 read-only reopen, tenant isolation), `admission_integrity_test.go` (original
 admission integrity) and `http_integration_test.go` (HTTP/worker boundary).
-No downstream file was edited or downstream test claimed against this cut;
-the constructor/config and missing route-window data above block adoption.
+The downstream migration fixture is exercised in an isolated checkout against
+this module set using explicit test model bounds. Production deployment must
+supply the authorized model binding's actual window and output reservation;
+the original downstream working tree is unchanged.
 
 ## Verify locally
 

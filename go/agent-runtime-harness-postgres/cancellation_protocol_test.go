@@ -380,18 +380,18 @@ func (s *protocolCreationCut) DecideBeforeCreate(ctx context.Context, q kernel.R
 	}
 	return out, err
 }
-func (s *protocolCut) SettleUncreatedRoot(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
-	cut := s.armed && !s.hit && strings.HasPrefix(s.phase, "atomic-")
+func (s *protocolCut) UpdateTurn(ctx context.Context, turn harness.Turn, revision uint64) (harness.Turn, error) {
+	cut := s.armed && !s.hit && strings.HasPrefix(s.phase, "atomic-") && turn.Status == harness.TurnCancelled
 	if cut && strings.HasSuffix(s.phase, "before") {
 		s.hit = true
-		return harness.Invocation{}, harness.Turn{}, errCancellationPhaseCut
+		return harness.Turn{}, errCancellationPhaseCut
 	}
-	a, b, err := s.generationStore.SettleUncreatedRoot(ctx, inv, turn)
+	a, err := s.generationStore.UpdateTurn(ctx, turn, revision)
 	if cut && err == nil {
 		s.hit = true
-		return harness.Invocation{}, harness.Turn{}, errCancellationPhaseCut
+		return harness.Turn{}, errCancellationPhaseCut
 	}
-	return a, b, err
+	return a, err
 }
 
 func TestCancellationProtocolHostDurableCutRecovery(t *testing.T) {

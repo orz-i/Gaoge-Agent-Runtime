@@ -40,6 +40,15 @@ unsettled child or unknown effect. Approval decisions consume the original
 checkpoint once. No weakening of scope, immutable authorization or receipt
 identity to achieve deletion targets.
 
+AC-06 deliberately makes the HTTP adapter Agent-aware, not the Kernel.
+Agent is the single first-party execution feature. Start, authorized Get and
+Cancel share one snapshot projection, including Agent's bounded public
+pending-tool view; they must not acquire separate projection registries or
+duplicate DTOs merely to preserve the previous multi-feature HTTP boundary.
+Host authorization precedes projection; private effect correlation and
+unredacted state never enter that view. Remote cancellation continues to
+require its original protocol owner.
+
 ## Hard-cut inventory and implementation ownership
 
 The old names below identify removal targets and migration sites at the frozen

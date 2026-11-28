@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +84,9 @@ func TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation(t *testing.T) {
 		var actual runtimehttp.RunSnapshotResponse
 		if err = json.Unmarshal(recorder.Body.Bytes(), &actual); err != nil || recorder.Code != http.StatusOK || actual.PendingTool == nil {
 			t.Fatalf("authorized response=%s err=%v", recorder.Body, err)
+		}
+		if !reflect.DeepEqual(actual.PendingTool, response.PendingTool) {
+			t.Fatalf("authorized GET must use the exact Agent snapshot projection: got %#v want %#v", actual.PendingTool, response.PendingTool)
 		}
 		for _, private := range []string{"private-host-operation", strings.Repeat("b", 64), "externalSignals", "toolWait", "toolReturns"} {
 			if strings.Contains(recorder.Body.String(), private) {

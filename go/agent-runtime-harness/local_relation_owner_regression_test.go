@@ -26,7 +26,7 @@ func TestDelegationRelationCannotBorrowUnrelatedNativeAgentRoot(t *testing.T) {
 		t.Fatalf("forged delegation edge borrowed valid native root execution authority: %v", err)
 	}
 	f.runner.cancellation = f.runtime
-	if _, _, err = f.runner.cancelRuntimeRun(t.Context(), f.parentRun.Run.ID, "forged parent cancellation", &f.parent); !errors.Is(err, ErrRuntimeCancellationUnverified) {
+	if _, _, err = f.runner.cancelRuntimeRun(t.Context(), Turn{ID: f.parent.TurnID}, f.parentRun.Run.ID, "forged parent cancellation", &f.parent); !errors.Is(err, ErrRuntimeCancellationUnverified) {
 		t.Fatalf("forged delegation index reached physical cancellation: %v", err)
 	}
 	persisted, loadErr := f.runtime.Load(t.Context(), f.parentRun.Run.ID)

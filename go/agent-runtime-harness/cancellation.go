@@ -64,7 +64,7 @@ var ErrHandoffCancellationUnverified = errors.New("harness handoff child cancell
 var ErrRuntimeCancellationUnverified = errors.New("harness runtime cancellation outcome is unverified")
 
 func (runner *Runner) cancelRuntimeRun(
-	ctx context.Context,
+	ctx context.Context, turn Turn,
 	runID string,
 	reason string,
 	root *Invocation,
@@ -90,12 +90,19 @@ func (runner *Runner) cancelRuntimeRun(
 	}
 	nativeSelected := false
 	if delegatedChild != nil {
-		intent, bound := ctx.Value(cancellationElectionKey{}).(Item)
-		if !bound || intent.TurnID != delegatedChild.TurnID || !ValidCancellationFenceIntentAdmission(intent) || intent.Seq == 0 {
-			return kernel.Snapshot{}, false, ErrHandoffCancellationUnverified
-		}
 		d, e := decodeFrozenHandoffDelegation(delegatedChild.Input)
 		nativeSelected = e == nil && d.NativeLocal
+		if delegatedChild.TurnID != turn.ID {
+			return kernel.Snapshot{}, false, ErrHandoffCancellationUnverified
+		}
+		intent, bound := ctx.Value(cancellationElectionKey{}).(Item)
+		if !nativeSelected || runner.cancellation != runner.runtime {
+			if !bound || intent.TurnID != turn.ID || !ValidCancellationFenceIntentAdmission(intent) || intent.Seq == 0 {
+				return kernel.Snapshot{}, false, ErrHandoffCancellationUnverified
+			}
+		} else if _, e = runner.bindCancellationAttempt(ctx, turn, runID, *delegatedChild); e != nil {
+			return kernel.Snapshot{}, false, e
+		}
 	}
 	if delegatedChild != nil && !nativeSelected {
 		// Run IDs, Actor/Thread and even full frozen Goal/RequestID prove
@@ -154,7 +161,7 @@ func (runner *Runner) cancelRuntimeRun(
 			if delegatedChild != nil && !terminalInvocationStatus(delegatedChild.Status) {
 				return kernel.Snapshot{}, false, ErrHandoffCancellationUnverified // original opaque dispatch remains unresolved
 			}
-			return kernel.Snapshot{}, false, runner.verifyMissingRelatedCancellation(ctx, runID, reason)
+			return kernel.Snapshot{}, false, runner.verifyMissingRelatedCancellation(ctx, turn, runID, reason)
 		}
 		if err != nil {
 			// This is a Harness-owned read-only check before calling ANY
@@ -548,7 +555,7 @@ func (runner *Runner) cancelOwnedDescendants(ctx context.Context, turn Turn, roo
 	if err != nil {
 		return nil, err
 	}
-	return runner.cancelRelatedRuns(ctx, rootRunID, withoutHistoricalRuns(append(seeds, delegated...), historical), reason)
+	return runner.cancelRelatedRuns(ctx, turn, rootRunID, withoutHistoricalRuns(append(seeds, delegated...), historical), reason)
 }
 
 // The original cancellation election and the verified never-dispatched
@@ -663,7 +670,7 @@ func (runner *Runner) delegatedRunIDs(ctx context.Context, turnID string, target
 }
 
 func (runner *Runner) cancelRelatedRuns(
-	ctx context.Context,
+	ctx context.Context, turn Turn,
 	rootRunID string,
 	seedRunIDs []string,
 	reason string,
@@ -683,7 +690,7 @@ func (runner *Runner) cancelRelatedRuns(
 		}
 		visited[runID] = struct{}{}
 		if runID != rootRunID {
-			snapshot, found, err := runner.cancelRuntimeRun(ctx, runID, reason, nil)
+			snapshot, found, err := runner.cancelRuntimeRun(ctx, turn, runID, reason, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -701,15 +708,7 @@ func (runner *Runner) cancelRelatedRuns(
 }
 
 // Apply the same missing-Run proof to direct targets and traversed children.
-func (runner *Runner) verifyMissingRelatedCancellation(ctx context.Context, runID, reason string) error {
-	intent, bound := ctx.Value(cancellationElectionKey{}).(Item)
-	if !bound || !ValidCancellationFenceIntentAdmission(intent) || intent.Seq == 0 {
-		return ErrRuntimeCancellationUnverified
-	}
-	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, intent.TurnID)
-	if err != nil {
-		return err
-	}
+func (runner *Runner) verifyMissingRelatedCancellation(ctx context.Context, turn Turn, runID, reason string) error {
 	proven, err := runner.missingRunCancellation(ctx, turn, runID, &reason)
 	if !proven || err != nil {
 		return errors.Join(ErrRuntimeCancellationUnverified, err)

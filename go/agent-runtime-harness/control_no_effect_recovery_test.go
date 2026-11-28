@@ -307,6 +307,19 @@ func testNativeAllowanceLostReply(t *testing.T, mode string) {
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
 	paused, err := runner.StartAgentTurn(t.Context(), request)
+	if mode == "missing-authority" {
+		if !errors.Is(err, harness.ErrInvalidRequest) || paused.Turn.ID != "" {
+			t.Fatalf("native admission accepted an independent budget authority: %+v %v", paused.Turn, err)
+		}
+		sessionID, e := harness.SessionID(request.HostThread)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = harnessStore.GetSession(t.Context(), sessionID); !errors.Is(e, harness.ErrNotFound) {
+			t.Fatalf("rejected budget composition created Host identity: %v", e)
+		}
+		return
+	}
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("failed to create paused Agent: %v", err)
 	}

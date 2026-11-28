@@ -132,7 +132,7 @@ func (runner *Runner) nativeHandoff(ctx context.Context, turnID string, d handof
 	if !ok || d.Remote {
 		return nil, nil
 	}
-	native, err := runner.nativeRootCommands(ctx, turnID, true)
+	native, err := runner.nativeRootCommands(ctx, turnID)
 	if err != nil || native == nil || c.LocalAgent(runner.runtime) != native {
 		return nil, err
 	}

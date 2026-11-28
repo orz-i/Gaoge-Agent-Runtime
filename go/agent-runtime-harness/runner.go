@@ -280,7 +280,7 @@ func (runner *Runner) ResolveApproval(
 	resolve := runner.approvalCallback(runtimeSnapshot, decision, a.Comment)
 	var resolved kernel.Snapshot
 	var resolveErr error
-	native, err := runner.nativeRootCommands(ctx, turn.ID, true)
+	native, err := runner.nativeRootCommands(ctx, turn.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -681,6 +681,13 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil {
 		return nil, ErrInvalidRequest
 	}
+	// A concrete native Agent must share this Harness's execution authority.
+	// Independent external Features retain their own dispatch protocol.
+	if native, ok := dependencies.Agent.(*agent.Runner); ok {
+		if !native.ObservesKernelRuntime(dependencies.Runtime) {
+			return nil, ErrInvalidRequest
+		}
+	}
 	if native, ok := dependencies.Agent.(*agent.Runner); ok && native.SupportsManagedRecovery() {
 		host, supported := dependencies.Store.(kernel.ManagedRecoveryHostStore)
 		if !supported || !native.ObservesKernelRuntime(dependencies.Runtime) || !dependencies.Runtime.UsesManagedRecoveryHost(host) ||
@@ -986,13 +993,6 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	if err = validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
-	if !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
-		// A genuine returned callback may have reached a waiting gate.
-		// Recover only its original retirement; unknown work stays fenced.
-		if _, err = runner.recoverOriginalPhysicalDispatch(ctx, invocation); err != nil {
-			return Snapshot{}, err
-		}
-	}
 	// Refresh races naturally with Agent/ChildRunner continuation callbacks,
 	// which can advance the same root between the initial
 	// load and our Harness CAS. Treat that as a retryable observation race rather
@@ -1077,6 +1077,23 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if managed, recognized, managedErr := runner.cancelManagedOriginal(ctx, turn, invocation, reason); recognized {
 		return managed, managedErr
 	}
+	if native, ok := runner.agent.(*agent.Runner); ok && native.ObservesKernelRuntime(runner.runtime) && runner.cancellation != runner.runtime {
+		// An independent Host canceller cannot inherit the native Kernel's
+		// ability to fence a running callback. Reject before electing or
+		// invoking any external cleanup, without minting a Host Start grant.
+		if _, checkErr := runner.runtime.LookupChildExecution(ctx, invocation.ExecutionRefID); checkErr == nil {
+			current, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+			if loadErr != nil {
+				return Snapshot{}, loadErr
+			}
+			scope, proofErr := native.RootDeferredCleanupEligibility(ctx, current.Run.ID, current.Run.Revision)
+			if proofErr != nil || !scope.Valid() {
+				return Snapshot{}, errors.Join(ErrConflict, proofErr)
+			}
+		} else if !errors.Is(checkErr, kernel.ErrNotFound) {
+			return Snapshot{}, checkErr
+		}
+	}
 	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
 		func() error {
 			if checkErr := runner.checkInteractionCancellation(ctx, turn, ""); checkErr != nil {
@@ -1125,7 +1142,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			return Snapshot{}, err
 		}
 	}
-	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
+	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, turn, invocation.ExecutionRefID, reason, &invocation)
 	if err != nil {
 		if errors.Is(err, kernel.ErrChildExecutionBusy) && kernel.IsControlNoEffect(err) {
 			attempted, cleanupErr := runner.cleanupReturnedRootChildren(ctx, turn, intent, invocation, reason)
@@ -1135,7 +1152,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 				if cleanupErr != nil {
 					return Snapshot{}, errors.Join(err, cleanupErr)
 				}
-				runtimeSnapshot, found, err = runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
+				runtimeSnapshot, found, err = runner.cancelRuntimeRun(ctx, turn, invocation.ExecutionRefID, reason, &invocation)
 				if err != nil {
 					return Snapshot{}, err
 				}

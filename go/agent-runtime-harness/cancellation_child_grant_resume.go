@@ -149,8 +149,10 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 		return false, errors.Join(ErrConflict, err)
 	}
 	// Persist the same-election recovery witness BEFORE any remote cleanup.
-	if err = runner.recordDeferredChildGrantCancellation(ctx, turn, intent, current.Run.ID); err != nil {
-		return true, err
+	if intent.ID != "" {
+		if err = runner.recordDeferredChildGrantCancellation(ctx, turn, intent, current.Run.ID); err != nil {
+			return true, err
+		}
 	}
 	if scope.RetirementOnly() {
 		// No remaining physical Tool/Child receipt to obtain. Retire the

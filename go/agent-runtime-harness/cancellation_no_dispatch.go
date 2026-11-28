@@ -116,8 +116,8 @@ func (runner *Runner) missingRunCancellation(ctx context.Context, turn Turn, run
 		binding.Parents = append([]childAttemptBinding{invocationAttempt(parent)}, frozen.Parents...)
 	}
 	intent, bound := ctx.Value(cancellationElectionKey{}).(Item)
-	if !bound || intent.TurnID != turn.ID || intent.Seq <= source.Seq || !ValidCancellationFenceIntentAdmission(intent) ||
-		(intent.RunID != runID && intent.RunID != root.ExecutionRefID && !slices.ContainsFunc(binding.Parents, func(p childAttemptBinding) bool { return p.ExecutionRefID == intent.RunID })) {
+	if (!d.NativeLocal || bound) && (!bound || intent.TurnID != turn.ID || intent.Seq <= source.Seq || !ValidCancellationFenceIntentAdmission(intent) ||
+		(intent.RunID != runID && intent.RunID != root.ExecutionRefID && !slices.ContainsFunc(binding.Parents, func(p childAttemptBinding) bool { return p.ExecutionRefID == intent.RunID }))) {
 		return false, ErrConflict
 	}
 	if d.NativeLocal {

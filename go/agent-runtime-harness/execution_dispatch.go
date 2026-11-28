@@ -59,8 +59,6 @@ func executionDispatchReceiptIndex(items []Item) map[string][]Item {
 	return byGrant
 }
 
-type originalApprovalDispatchKey struct{}
-
 // The existing immutable physical grant carries the exact approval request.
 // Legacy two-field grants remain readable for ordinary return retirement.
 func executionDispatchFields(raw json.RawMessage) (map[string]string, bool) {
@@ -285,26 +283,6 @@ func (runner *Runner) pendingExecutionDispatch(
 		if len(receipts[item.ID]) != 0 {
 			return true, nil
 		}
-		// The same exact original-dispatch repair used by Resume is also
-		// available to protective control. Never require a new physical
-		// call to close an already acknowledged native retirement.
-		if native, ok := runner.agent.(*agent.Runner); ok && native.ObservesKernelRuntime(runner.runtime) {
-			owner, ownerErr := runner.store.GetInvocation(ctx, item.InvocationID)
-			if ownerErr != nil {
-				return false, ownerErr
-			}
-			if owner.ID != item.InvocationID || owner.TurnID != turnID || owner.ExecutionRefID != item.RunID {
-				return false, ErrConflict
-			}
-			repaired, repairErr := runner.recoverOriginalPhysicalDispatch(ctx, owner)
-			if repairErr != nil {
-				return false, repairErr
-			}
-			if repaired {
-				continue
-			}
-		}
-
 		return true, nil
 	}
 	return false, nil
@@ -334,6 +312,27 @@ func (runner *Runner) withPhysicalSubtaskApprovalDispatch(
 	if childRevision == 0 || strings.TrimSpace(checkpointID) == "" {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
+	if native, ok := runner.agent.(*agent.Runner); ok {
+		if !native.ObservesKernelRuntime(runner.runtime) || physical == nil {
+			return kernel.Snapshot{}, ErrInvalidRequest
+		}
+		if err := runner.originalNativeCommand(ctx, invocation); err != nil {
+			return kernel.Snapshot{}, err
+		}
+		child, err := runner.runtime.Load(ctx, childRunID)
+		if err != nil || child.Run.Revision != childRevision || child.Checkpoint == nil || child.Checkpoint.ID != checkpointID {
+			return kernel.Snapshot{}, errors.Join(ErrConflict, err)
+		}
+		if err = runner.verifyLocalApprovalRun(ctx, child); err != nil {
+			return kernel.Snapshot{}, err
+		}
+		// This context carries only the Host's exact selection. Native
+		// parent fences and physical admission still elect the execution.
+		scope := subtaskApprovalDispatchScope{GrantID: checkpointID, ChildRunID: childRunID, Revision: childRevision, CheckpointID: checkpointID, active: new(atomic.Bool)}
+		scope.active.Store(true)
+		defer scope.active.Store(false)
+		return physical(context.WithValue(ctx, subtaskApprovalDispatchContextKey{}, scope))
+	}
 	return runner.withPhysicalInvocationDispatchForContext(
 		ctx, invocation, "resolve-subtask-approval", childRunID,
 		&subtaskApprovalDispatchScope{
@@ -361,6 +360,11 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	physical func(context.Context) (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
 	if physical == nil || (scope != nil && phase != "resolve-subtask-approval") {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	if _, native := runner.agent.(*agent.Runner); native {
+		// Supported native commands must use their committed creation decision
+		// or native control receipt, never the external Feature protocol.
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	grant, err := runner.beginPhysicalInvocationDispatch(ctx, invocation, phase, resultRunID)
@@ -405,49 +409,8 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		defer bound.active.Store(false)
 		physicalCtx = context.WithValue(physicalCtx, subtaskApprovalDispatchContextKey{}, bound)
 	}
-	native, nativeAgent := runner.agent.(*agent.Runner)
-	operation := nativeDispatchOperation(phase)
-	observe := nativeAgent && operation != "" && phase != "handoff-start"
-	var snapshot kernel.Snapshot
-	var physicalErr error
-	var outcome agent.PhysicalCallOutcome
-	if observe {
-		snapshot, outcome, physicalErr = native.ObservePhysicalDispatch(physicalCtx, resultRunID, operation, grant.ID, physical)
-	} else {
-		snapshot, physicalErr = physical(physicalCtx)
-	}
+	snapshot, physicalErr := physical(physicalCtx)
 	if snapshot.Run.ID == "" {
-		if observe && phase == "resume" && outcome.RejectedStaleResume(resultRunID) {
-			receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected")
-			if receiptErr != nil {
-				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
-			}
-			return snapshot, physicalErr
-		}
-		// An arbitrary Feature may have dispatched remote side effects
-		// before returning a generic error, including a Kernel CAS conflict.
-		// Only the concrete first-party Agent control can certify that its
-		// own preflight failed BEFORE invoking middleware or ApplyControl.
-		// Never accept that marker from a custom wrapper or from a general
-		// physical Start/Resume path.
-		_, nativeAgent := runner.agent.(*agent.Runner)
-		control := phase == "resolve-approval" || phase == "resolve-subtask-approval" ||
-			phase == "grant-call-allowance"
-		if nativeAgent && control && agent.IsNativeControlNoEffect(physicalErr) {
-			return snapshot, errors.Join(physicalErr,
-				runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_control_no_effect"))
-		}
-		// A direct first-party Agent pre-middleware/pre-Create failure is
-		// also definitive. Its private result cannot be minted by a
-		// custom Feature or returned from an effectful Run middleware.
-		// Every other no-snapshot Agent error remains outcome-unknown.
-		if nativeAgent && (phase == "start" || phase == "start-retry") && agent.IsNativeStartNoEffect(physicalErr) {
-			if receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_start_no_effect"); receiptErr == nil {
-				return snapshot, dispatchProvenNoEffect{cause: physicalErr}
-			} else {
-				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
-			}
-		}
 		// Unknown effects retain the grant and its exact execution identity
 		// for explicit reconciliation, including errors without a snapshot.
 		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
@@ -455,27 +418,7 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	if snapshot.Run.ID != resultRunID {
 		return snapshot, errors.Join(physicalErr, ErrConflict)
 	}
-	if observe && !outcome.Matches(resultRunID, operation) {
-		// A nonempty Run is recoverable identity, not this callback's receipt.
-		// Only the current first-party invocation can certify settled or a
-		// durable known yield still protected by its original Kernel scope.
-		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
-	}
-	boundary := "physical_dispatch_returned"
-	if observe && outcome.Kind() == agent.PhysicalCallNotEntered {
-		boundary = "native_agent_callback_not_entered"
-	}
-	receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, boundary)
-	if boundary == "native_agent_callback_not_entered" {
-		if receiptErr != nil {
-			return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
-		}
-		// Reuse the existing private no-effect result. Unlike pre-Create
-		// rejection this has a real snapshot and a distinct durable boundary.
-		if physicalErr != nil {
-			return snapshot, dispatchProvenNoEffect{cause: physicalErr}
-		}
-	}
+	receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_returned")
 	return snapshot, errors.Join(physicalErr, receiptErr)
 }
 
@@ -506,18 +449,6 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		Phase         string `json:"phase"`
 		PhysicalRunID string `json:"physicalRunID,omitempty"`
 	}{Phase: phase, PhysicalRunID: physicalRunID})
-	if approval, ok := ctx.Value(originalApprovalDispatchKey{}).(kernel.ManagedApprovalDecision); ok && (phase == "resolve-approval" || phase == "resolve-subtask-approval") {
-		if !approval.Valid() {
-			return Item{}, ErrInvalidRequest
-		}
-		payload, err = json.Marshal(struct {
-			Phase         string `json:"phase"`
-			PhysicalRunID string `json:"physicalRunID"`
-			CheckpointID  string `json:"checkpointID"`
-			Decision      string `json:"decision"`
-			Comment       string `json:"comment"`
-		}{phase, physicalRunID, approval.CheckpointID, approval.Decision, approval.Comment})
-	}
 	if err != nil {
 		return Item{}, err
 	}
@@ -530,15 +461,6 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		CreatedAt: now, UpdatedAt: now,
 	}
 	_, fresh, appendErr := runner.store.AppendItem(ctx, grant)
-	if errors.Is(appendErr, ErrConflict) {
-		repaired, repairErr := runner.recoverOriginalPhysicalDispatch(ctx, invocation)
-		if repairErr != nil {
-			return Item{}, errors.Join(ErrConflict, repairErr)
-		}
-		if repaired {
-			_, fresh, appendErr = runner.store.AppendItem(ctx, grant)
-		}
-	}
 	if appendErr != nil || !fresh {
 		return Item{}, errors.Join(ErrConflict, appendErr)
 	}

@@ -70,7 +70,7 @@ func (runner *Runner) GrantCallAllowance(
 		return Snapshot{}, err
 	}
 	var resumed kernel.Snapshot
-	if native, e := runner.nativeRootCommands(ctx, turn.ID, false); e != nil {
+	if native, e := runner.nativeRootCommands(ctx, turn.ID); e != nil {
 		return Snapshot{}, e
 	} else if native != nil {
 		if err = validateRootRuntimeOwnership(invocation, current); err != nil {
