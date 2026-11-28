@@ -110,6 +110,9 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		if snapshot.Run.Status != kernel.RunStatusRunning {
 			return snapshot, ErrToolNotPending
 		}
+		if state.ExternalToolElection != nil {
+			return snapshot, ErrToolOutcomeUnknown
+		}
 		wait := state.ToolWait
 		if wait == nil && state.ToolDispatchID == signal.CallID {
 			// An external provider can emit a ready signal synchronously from

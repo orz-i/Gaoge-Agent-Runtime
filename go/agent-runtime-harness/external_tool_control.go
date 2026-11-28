@@ -10,9 +10,51 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-// VerifyExternalToolControlScope reads the already elected native cancellation
-// and the original frozen delegation chain. targetRunID is its actual target.
-// The external owner must separately bind its own ControlID and operation receipt.
+type externalToolCancellationControlKey struct{}
+
+// ContinueExternalToolCancellation resumes only the original bound external
+// owner control. The Host must first consume each original no-effect/committed
+// receipt. Ordinary Cancel/CancelSubtask cannot finish a different bound control.
+// The target is the original elected Root or scoped Subtask Run, never a sibling.
+func (r *Runner) ContinueExternalToolCancellation(ctx context.Context, turnID, targetRunID, controlID, reason string) (Snapshot, error) {
+	if ctx == nil || controlID == "" {
+		return Snapshot{}, ErrInvalidRequest
+	}
+	turn, err := loadVerifiedTurnIdentity(ctx, r.store, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if _, err = r.verifyExternalCancellationElection(ctx, turn, targetRunID); err != nil {
+		return Snapshot{}, err
+	}
+	root, err := loadTopLevelInvocation(ctx, r.store, turn.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	ctx = context.WithValue(ctx, externalToolCancellationControlKey{}, controlID)
+	if targetRunID == root.ExecutionRefID {
+		return r.Cancel(ctx, turn.ID, reason)
+	}
+	items, err := listAllItems(ctx, r.store, turn.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	tasks, err := r.loadSubtasks(ctx, turn, items, nil)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for _, task := range tasks {
+		if task.RunID == targetRunID {
+			return r.CancelSubtask(ctx, turn.ID, task.ID, reason)
+		}
+	}
+	return Snapshot{}, ErrNotFound
+}
+
+// VerifyExternalToolControlScope verifies the original cancellation and frozen
+// delegation chain. For native accounting it also durably binds the original
+// owner ControlID once, without calling the owner or changing quota. Retries
+// must retain that same control. targetRunID is the elected subtree target.
 func (r *Runner) VerifyExternalToolControlScope(ctx context.Context, turnID, targetRunID string, c agent.ExternalToolControl) error {
 	if r == nil || ctx == nil || r.runtime == nil || r.store == nil || targetRunID == "" || c.ControlID == "" {
 		return ErrInvalidRequest
@@ -26,7 +68,8 @@ func (r *Runner) VerifyExternalToolControlScope(ctx context.Context, turnID, tar
 	if err != nil {
 		return err
 	}
-	if err := r.verifyExternalCancellationElection(ctx, turn, targetRunID); err != nil {
+	election, err := r.verifyExternalCancellationElection(ctx, turn, targetRunID)
+	if err != nil {
 		return err
 	}
 	root, err := loadTopLevelInvocation(ctx, r.store, turn.ID)
@@ -50,6 +93,17 @@ func (r *Runner) VerifyExternalToolControlScope(ctx context.Context, turnID, tar
 		if owner.ID == root.ID {
 			if validateRootRuntimeOwnership(root, s) != nil || !seen[targetRunID] || id == c.RunID && c.ParentRunID != "" {
 				return ErrConflict
+			}
+			if r.nativeBudget() {
+				current, err := r.runtime.Load(ctx, c.RunID)
+				if err != nil {
+					return err
+				}
+				retained, err := original.ElectExternalToolCancellation(ctx, c.RunID, current.Run.Revision, election.ID, targetRunID)
+				if err != nil {
+					return err
+				}
+				return original.BindExternalToolCancellationControl(ctx, retained.Run.Revision, election.ID, targetRunID, c)
 			}
 			return nil
 		}
@@ -79,29 +133,60 @@ func (r *Runner) externalToolDelegationParent(ctx context.Context, owner Invocat
 	return parent.ID, nil
 }
 
-func (r *Runner) verifyExternalCancellationElection(ctx context.Context, turn Turn, target string) error {
+func (r *Runner) verifyExternalCancellationElection(ctx context.Context, turn Turn, target string) (Item, error) {
 	items, err := r.loadGlobalPhysicalEvidence(ctx, turn.ID)
 	if err != nil {
-		return err
+		return Item{}, err
 	}
 	receipts := cancellationFenceReceipts(items)
 	count := 0
+	var elected Item
 	for _, item := range items {
 		if item.ParentItemID != CancellationFenceParentItemID || VerifiedCancellationFenceReceipt(item, receipts[item.ID]) {
 			continue
 		}
 		source, ok := cancellationProtocol(item)
 		if len(receipts[item.ID]) != 0 || !CancellationEffectsSettled(item, items) || !ok || source != cancellationSource(r.cancellation) || item.RunID != target || item.TurnID != turn.ID || item.Seq == 0 || !ValidCancellationFenceIntentAdmission(item) {
-			return ErrConflict
+			return Item{}, ErrConflict
 		}
+		elected = item
 		count++
 	}
 	if count != 1 {
-		return ErrConflict
+		return Item{}, ErrConflict
 	}
 	ledger, err := r.loadTurnBudget(ctx, turn)
-	if err != nil || ledger != nil && !ledger.RunCancelled(target) {
+	if err != nil || ledger != nil && !ledger.RunCancelled(target) && !r.nativeBudget() {
+		return Item{}, errors.Join(ErrConflict, err)
+	}
+	return elected, nil
+}
+
+// This is a read-only native return proof, not an external owner operation or
+// a budget mutation. The physical Grant and exact pending call must still be
+// present. A live/opaque callback cannot preserve a receipt-recovery election.
+func (r *Runner) nativeExternalCancellationWait(ctx context.Context, runID, electionID string) error {
+	native, ok := r.agent.(*agent.Runner)
+	if !ok || !native.ObservesKernelRuntime(r.runtime) {
+		return ErrRuntimeCancellationUnverified
+	}
+	if present, err := native.VerifyExternalToolCancellationElection(ctx, runID, electionID, runID); present || err != nil {
+		return err
+	}
+	s, err := r.runtime.Load(ctx, runID)
+	if err != nil {
+		return err
+	}
+	call, waiting, err := agent.FrozenExternalToolCall(s)
+	if err != nil || !waiting {
 		return errors.Join(ErrConflict, err)
 	}
-	return nil
+	wait, err := native.QueryPendingTool(ctx, runID, call.ID)
+	if err != nil {
+		return err
+	}
+	return native.VerifyExternalToolControlWait(ctx, s.Run.Revision, agent.ExternalToolControl{
+		Actor: s.Run.Actor, RunID: runID, CallID: call.ID,
+		OperationID: wait.OperationID, InputDigest: wait.InputDigest, ControlID: electionID,
+	})
 }

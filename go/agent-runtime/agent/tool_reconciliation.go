@@ -45,6 +45,9 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 	if snapshot.Run.Revision != expectedRevision {
 		return snapshot, kernel.ErrConflict
 	}
+	if state.ExternalToolElection != nil {
+		return snapshot, ErrToolOutcomeUnknown
+	}
 	if state.ToolDispatchID == callID {
 		if repaired, handled, recoveryErr := runner.reconcileOriginalToolReturnIfPresent(ctx, snapshot, state); handled {
 			return repaired, recoveryErr

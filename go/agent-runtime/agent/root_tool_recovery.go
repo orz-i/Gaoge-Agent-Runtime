@@ -21,6 +21,8 @@ type rootToolReceipt struct {
 	LedgerID       string         `json:"ledgerID,omitempty"`
 }
 
+type externalToolControlReceiptKey struct{}
+
 // ReconcileExternalToolForControl verifies the original external wait without
 // continuing the Agent loop, including when the Tool is terminal.
 func (runner *Runner) ReconcileExternalToolForControl(ctx context.Context, runID string, revision uint64, callID string) (kernel.Snapshot, error) {
@@ -31,8 +33,16 @@ func (runner *Runner) ReconcileExternalToolForControl(ctx context.Context, runID
 	if err != nil {
 		return s, err
 	}
-	if s.Run.Revision != revision {
+	if s.Run.Revision != revision && (state.ExternalToolElection == nil || state.ExternalToolElection.SourceRevision != revision) {
 		return s, kernel.ErrConflict
+	}
+	if p := state.ExternalToolElection; p != nil {
+		if p.Control.ControlID == "" || p.Control.CallID != callID || runner.verifyExternalElection(ctx, s, p) != nil {
+			return s, ErrToolReceiptMismatch
+		}
+		if p.Committed != nil {
+			return s, runner.retireExternalToolControl(ctx, s, p.GrantID)
+		}
 	}
 	call, waiting, err := FrozenExternalToolCall(s)
 	if err != nil || !waiting || call.ID != callID || s.Run.ParentRunID != "" {
@@ -42,7 +52,7 @@ func (runner *Runner) ReconcileExternalToolForControl(ctx context.Context, runID
 	if err != nil {
 		return s, err
 	}
-	return runner.reconcileRootToolReceipt(ctx, s, state, grant, call.ID, false)
+	return runner.reconcileRootToolReceipt(context.WithValue(ctx, externalToolControlReceiptKey{}, true), s, state, grant, call.ID, false)
 }
 
 func (r rootToolReceipt) outcome() toolOutcomeReceipt {
@@ -103,6 +113,9 @@ func (runner *Runner) reconcileRootTool(ctx context.Context, snapshot kernel.Sna
 	return runner.reconcileRootToolReceipt(ctx, snapshot, state, grant, callID, true)
 }
 func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant, callID string, continueTerminal bool) (kernel.Snapshot, error) {
+	if state.ExternalToolElection != nil && ctx.Value(externalToolControlReceiptKey{}) != true {
+		return snapshot, ErrToolOutcomeUnknown
+	}
 	completion, err := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
 	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrRootOutcomeUnknown, err)
@@ -207,7 +220,14 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 			return snapshot, ErrToolReceiptMismatch
 		}
 	}
-	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection(), ApprovalDigest: approvalDigest, LedgerID: ledgerID})
+	receipt := rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection(), ApprovalDigest: approvalDigest, LedgerID: ledgerID}
+	if p := state.ExternalToolElection; p != nil {
+		copy := *p
+		copy.Committed = &receipt
+		state.ExternalToolElection = &copy
+	} else {
+		state.RecoveredTools = append(state.RecoveredTools, receipt)
+	}
 	state.ToolDispatchID = ""
 	state.clearToolAdmission(callID)
 	state.ToolWait = nil

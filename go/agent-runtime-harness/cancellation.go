@@ -190,6 +190,17 @@ func (runner *Runner) cancelRuntimeRun(
 			}
 			return kernel.Snapshot{}, true, err
 		}
+		if nativeKernel && runner.nativeBudget() && current.Run.Kind == agent.RunKind {
+			if owner, ok := runner.agent.(*agent.Runner); ok {
+				intent, bound := ctx.Value(cancellationElectionKey{}).(Item)
+				if bound {
+					controlID, _ := ctx.Value(externalToolCancellationControlKey{}).(string)
+					if verifyErr := owner.AuthorizeExternalToolCancellation(ctx, runID, intent.ID, intent.RunID, controlID); verifyErr != nil {
+						return current, true, errors.Join(ErrCancellationOutcomeUnknown, verifyErr)
+					}
+				}
+			}
+		}
 		if terminalRuntimeStatus(current.Run.Status) {
 			if root != nil || nativeSelected {
 				if err := runner.reconcileTerminalRootRetirement(ctx, current); err != nil {
@@ -270,6 +281,17 @@ func (runner *Runner) cancelRuntimeRun(
 		}
 		if nativeCall {
 			if kernel.IsControlNoEffect(err) {
+				if runner.nativeBudget() && errors.Is(err, kernel.ErrChildExecutionBusy) {
+					if owner, ok := runner.agent.(*agent.Runner); ok {
+						intent, bound := ctx.Value(cancellationElectionKey{}).(Item)
+						_, waiting, waitErr := agent.FrozenExternalToolCall(current)
+						if bound && waitErr == nil && waiting {
+							if _, electionErr := owner.ElectExternalToolCancellation(ctx, runID, current.Run.Revision, intent.ID, intent.RunID); electionErr != nil {
+								return current, true, errors.Join(ErrCancellationOutcomeUnknown, electionErr)
+							}
+						}
+					}
+				}
 				if errors.Is(err, kernel.ErrConflict) {
 					// A pre-Store CAS revision mismatch is safe to retry,
 					// but preserve its native proof if all retries exhaust.

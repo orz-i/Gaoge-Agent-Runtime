@@ -64,6 +64,18 @@ func (runner *Runner) releaseNoEffectCancellation(
 	if err != nil {
 		return errors.Join(cause, err)
 	}
+	if runner.nativeBudget() && nativeNoEffect && errors.Is(cause, kernel.ErrChildExecutionBusy) {
+		// Native accounting closes with the terminal Run CAS, not before it.
+		// An original returned external wait still needs its owner's receipt;
+		// retiring this intent would discard the cancellation elected to obtain
+		// that receipt. Keep the same election without revoking unknown quota.
+		if runner.nativeExternalCancellationWait(recoveryCtx, runID, intent.ID) == nil {
+			if saveErr := runner.recordDeferredChildGrantCancellation(recoveryCtx, turn, intent, runID); saveErr != nil {
+				return errors.Join(cause, saveErr)
+			}
+			return cause
+		}
+	}
 	if ledger != nil && (!runner.nativeBudget() || ledger.RunCancelled(runID)) {
 		// The shared budget was deliberately revoked BEFORE physical
 		// cancellation. An exact Kernel ChildGrant busy-no-effect does not

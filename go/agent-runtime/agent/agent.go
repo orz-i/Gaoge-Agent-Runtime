@@ -425,6 +425,7 @@ type Runner struct {
 
 type runState struct {
 	ExternalToolCancellation *externalToolCancellation `json:"externalToolCancellation,omitempty"`
+	ExternalToolElection     *externalToolElection     `json:"externalToolElection,omitempty"`
 
 	ExternalToolHold      *externalToolHold          `json:"externalToolHold,omitempty"`
 	DelegatedToolReceipts []delegatedToolReceipt     `json:"delegatedToolReceipts,omitempty"`
@@ -1101,7 +1102,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating {
 		return snapshot, errors.Join(ErrApprovalRequired, ErrRootOutcomeUnknown)
 	}
-	if state.ExternalToolCancellation != nil {
+	if state.ExternalToolCancellation != nil || state.ExternalToolElection != nil {
 		recordPhysicalObservation(ctx, runID, PhysicalCallDurableYield)
 		return snapshot, nil
 	}
@@ -1203,7 +1204,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		failed, failErr := runner.fail(ctx, snapshot, runState{}, "agent.state_invalid", err)
 		return failed, true, failErr
 	}
-	if state.ExternalToolCancellation != nil {
+	if state.ExternalToolCancellation != nil || state.ExternalToolElection != nil {
 		return snapshot, true, nil
 	}
 	if state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating {

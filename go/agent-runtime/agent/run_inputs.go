@@ -99,7 +99,7 @@ func (runner *Runner) admitRunInputs(ctx context.Context, snapshot kernel.Snapsh
 	// Its original receipt and the input cursor will commit in the same CAS.
 	if _, active := activeModelInvocation(state); active || len(state.PendingCalls) != 0 ||
 		state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 ||
-		state.PendingApproval != nil || state.ExternalToolCancellation != nil {
+		state.PendingApproval != nil || state.ExternalToolCancellation != nil || state.ExternalToolElection != nil {
 		return snapshot, state, false, ErrInvalidRequest
 	}
 	if runner.inputs == nil || runner.inputBinding != state.InputBinding {
