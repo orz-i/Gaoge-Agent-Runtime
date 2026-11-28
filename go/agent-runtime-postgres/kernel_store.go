@@ -356,7 +356,7 @@ func (store *KernelStore) Commit(ctx context.Context, runID string, expectedRevi
 			if e != nil {
 				return e
 			}
-			if e = kernel.ValidateOwnedPhysicalRecovery(g, current, pgManagedLease(lockedRun), expectedRevision, mutation, p, pgCallbackCompletion(row), row.SettledRevision); e != nil {
+			if e = kernel.ValidateOwnedPhysicalRecovery(g, current, pgManagedLease(lockedRun), expectedRevision, mutation, p, pgCallbackCompletion(row), 0); e != nil {
 				return e
 			}
 		}
@@ -368,8 +368,8 @@ func (store *KernelStore) Commit(ctx context.Context, runID string, expectedRevi
 		if e = accounting.Apply(ctx, runID, ledger); e != nil {
 			return e
 		}
-		var active []models.KernelChildEffectGrantRecord
-		if queryErr := tx.Where("parent_run_id = ?", runID).Find(&active).Error; queryErr != nil {
+		var active []models.KernelEffectRecord
+		if queryErr := pgActiveEffects(tx).Where(activeEffectScope, runID, runID).Find(&active).Error; queryErr != nil {
 			return translateKernelError(queryErr)
 		}
 		// A native waiting owner cannot bypass approval through ordinary Apply.

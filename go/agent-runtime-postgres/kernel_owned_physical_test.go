@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,37 +11,8 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
-
-func TestOwnedPhysicalBindingMigrationPreservesLegacyGrant(t *testing.T) {
-	db, e := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "legacy-grant.db")), &gorm.Config{})
-	if e != nil {
-		t.Fatal(e)
-	}
-	sqlDB, e := db.DB()
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	if e = db.Exec(`CREATE TABLE agent_kernel_child_effect_grants (grant_id text NOT NULL, parent_run_id text NOT NULL, child_run_id text NOT NULL, start_revision integer NOT NULL DEFAULT 0, settled_revision integer NOT NULL DEFAULT 0, PRIMARY KEY(grant_id,parent_run_id))`).Error; e != nil {
-		t.Fatal(e)
-	}
-	if e = db.Exec(`INSERT INTO agent_kernel_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,settled_revision) VALUES('old-grant','old-parent','old-child',7,0)`).Error; e != nil {
-		t.Fatal(e)
-	}
-	if e = Migrate(db); e != nil {
-		t.Fatal(e)
-	}
-	var rows []models.KernelChildEffectGrantRecord
-	if e = db.Find(&rows).Error; e != nil {
-		t.Fatal(e)
-	}
-	if len(rows) != 1 || rows[0].GrantID != "old-grant" || rows[0].ParentRunID != "old-parent" || rows[0].ChildRunID != "old-child" || rows[0].StartRevision != 7 || rows[0].SettledRevision != 0 || pgPhysicalGrant(rows[0]).IsOwned() || rows[0].CallbackReturnRevision != 0 || rows[0].CallbackReturnSourceHash != "" || rows[0].CallbackHostCompleted || rows[0].CallbackLeaseOwned {
-		t.Fatalf("legacy unknown grant was removed/backfilled: %+v", rows)
-	}
-}
 
 func TestOwnedPhysicalBindingGuardsGORM(t *testing.T) {
 	runOwnedPhysicalBindingGuards(t, openKernelStoreTestDB(t))
@@ -70,8 +40,11 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 	if _, e = store.BeginPhysicalExecution(ctx, kernel.PhysicalAdmission{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged admission: %v", e)
 	}
-	row := pgPhysicalRecord(grant, grant.ChildRunID)
+	row := pgPhysicalRecord(grant)
 	if e = db.Create(&row).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e = db.Create(&models.KernelEffectOwnerRecord{GrantID: grant.ID, ParentRunID: grant.ChildRunID}).Error; e != nil {
 		t.Fatal(e)
 	}
 	if e = db.Model(&models.KernelRunRecord{}).Where("run_id = ?", grant.ChildRunID).UpdateColumn("execution_physical_epoch", grant.ExecutionEpoch).Error; e != nil {
@@ -186,16 +159,13 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 		t.Fatalf("expired owner authorized: %v", e)
 	}
 	assertOwnedKernelRecord(t, db, expired)
-	// A marker fixture tests only exact-identity retirement, including binding
-	// fields. First-party marker creation is exercised by Kernel/Agent suites.
-	if e = db.Model(&models.KernelChildEffectGrantRecord{}).Where("grant_id = ?", grant.ID).Update("settled_revision", original.Run.Revision).Error; e != nil {
-		t.Fatal(e)
-	}
+	// The active effect still has no callback return. No legacy Mark
+	// column exists, and forged proofs cannot consume it.
 	for _, mutate := range []func(*kernel.ChildExecutionGrant){func(g *kernel.ChildExecutionGrant) { g.ExecutionOwnerID = "foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionLeaseID = "foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionEpoch++ }, func(g *kernel.ChildExecutionGrant) { g.AdmissionOperation = "resume" }, func(g *kernel.ChildExecutionGrant) { g.AdmissionSourceHash = strings.Repeat("b", 64) }} {
 		forged := grant
 		mutate(&forged)
 		if e = store.FinishChildExecution(ctx, forged, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
-			t.Fatalf("foreign binding retired original marker: %v", e)
+			t.Fatalf("foreign binding retired original effect: %v", e)
 		}
 		got, e = store.LookupChildExecution(ctx, original.Run.ID)
 		if e != nil || got != grant {
@@ -203,10 +173,10 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 		}
 	}
 	if e = store.FinishChildExecution(ctx, grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
-		t.Fatalf("legacy owned Mark authorized retirement: %v", e)
+		t.Fatalf("unknown physical effect authorized retirement: %v", e)
 	}
 	if retained, e := store.LookupChildExecution(ctx, original.Run.ID); e != nil || retained != grant {
-		t.Fatalf("legacy owned Mark fence was removed: %v", e)
+		t.Fatalf("unknown physical effect fence was removed: %v", e)
 	}
 	assertOwnedKernelRecord(t, db, expired)
 }

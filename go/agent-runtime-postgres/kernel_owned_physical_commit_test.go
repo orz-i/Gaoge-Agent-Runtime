@@ -23,14 +23,14 @@ func TestRealPostgresPhysicalAdmissionCommitRollback(t *testing.T) {
 		"CREATE TABLE admission_commit_parent(id text PRIMARY KEY)",
 		"CREATE TABLE admission_commit_probe(id text REFERENCES admission_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)",
 		"CREATE FUNCTION admission_commit_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO admission_commit_probe VALUES(NEW.grant_id); RETURN NEW; END; $$",
-		"CREATE TRIGGER admission_commit_fault AFTER INSERT ON agent_kernel_child_effect_grants FOR EACH ROW EXECUTE FUNCTION admission_commit_fault()",
+		"CREATE TRIGGER admission_commit_fault AFTER UPDATE OF start_revision ON agent_kernel_effects FOR EACH ROW WHEN (NEW.start_revision > 0) EXECUTE FUNCTION admission_commit_fault()",
 	} {
 		if e := db.Exec(ddl).Error; e != nil {
 			t.Fatal(e)
 		}
 	}
 	conformance.RunPhysicalAdmissionCommitRollback(t, NewKernelStore(db), func() {
-		if e := db.Exec("DROP TRIGGER admission_commit_fault ON agent_kernel_child_effect_grants").Error; e != nil {
+		if e := db.Exec("DROP TRIGGER admission_commit_fault ON agent_kernel_effects").Error; e != nil {
 			t.Fatal(e)
 		}
 	})

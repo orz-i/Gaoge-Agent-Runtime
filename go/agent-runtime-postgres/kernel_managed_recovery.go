@@ -64,7 +64,7 @@ func pgSaveManaged(tx *gorm.DB, t kernel.ManagedTransfer) error {
 // write or receipt operation. No managed history is consulted.
 func pgNativeEntryGate(tx *gorm.DB, id string) error {
 	var counts struct{ Pending, Valid int64 }
-	if err := tx.Raw(`SELECT count(*) AS pending, COALESCE(SUM(CASE WHEN g.execution_epoch=r.execution_epoch AND r.execution_physical_epoch<g.execution_epoch AND g.execution_owner_id=r.execution_owner AND g.execution_lease_id=r.execution_lease_id AND r.execution_quarantine_revision=0 THEN 1 ELSE 0 END),0) AS valid FROM agent_kernel_child_effect_grants g JOIN agent_kernel_runs r ON r.run_id=g.child_run_id WHERE g.child_run_id=? AND g.parent_run_id=g.child_run_id AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&counts).Error; err != nil {
+	if err := tx.Raw(`SELECT count(*) AS pending, COALESCE(SUM(CASE WHEN g.execution_epoch=r.execution_epoch AND r.execution_physical_epoch<g.execution_epoch AND g.execution_owner_id=r.execution_owner AND g.execution_lease_id=r.execution_lease_id AND r.execution_quarantine_revision=0 THEN 1 ELSE 0 END),0) AS valid FROM agent_kernel_effects g JOIN agent_kernel_runs r ON r.run_id=g.child_run_id WHERE g.start_revision>0 AND g.child_run_id=? AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&counts).Error; err != nil {
 		return translateKernelError(err)
 	}
 	if counts.Pending == 1 && counts.Valid == 1 {
@@ -83,11 +83,11 @@ func pgManagedLease(r models.KernelRunRecord) kernel.ExecutionLease {
 	return l
 }
 func pgManagedGrant(tx *gorm.DB, id string) (kernel.ChildExecutionGrant, error) {
-	var rows []models.KernelChildEffectGrantRecord
-	if e := tx.Where("parent_run_id = ? OR child_run_id = ?", id, id).Find(&rows).Error; e != nil {
+	var rows []models.KernelEffectRecord
+	if e := pgActiveEffects(tx).Where(activeEffectScope, id, id).Find(&rows).Error; e != nil {
 		return kernel.ChildExecutionGrant{}, translateKernelError(e)
 	}
-	if len(rows) != 1 || rows[0].ParentRunID != id || rows[0].ChildRunID != id || rows[0].SettledRevision != 0 || pgCallbackCompletion(rows[0]) != (kernel.PhysicalCallbackCompletion{}) {
+	if len(rows) != 1 || rows[0].ChildRunID != id || pgCallbackCompletion(rows[0]) != (kernel.PhysicalCallbackCompletion{}) {
 		return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
 	}
 	g := pgPhysicalGrant(rows[0])
@@ -137,7 +137,7 @@ func pgManagedControl(ctx context.Context, tx *gorm.DB, r models.KernelRunRecord
 			UNION SELECT r.run_id FROM agent_kernel_runs r JOIN children c ON r.parent_run_id=c.id OR r.logical_parent_run_id=c.id)
 			SELECT EXISTS(SELECT 1 FROM children c JOIN agent_kernel_runs r ON r.run_id=c.id
 			WHERE r.status NOT IN ('completed','failed','cancelled') OR r.execution_quarantine_revision<>0
-			OR EXISTS(SELECT 1 FROM agent_kernel_child_effect_grants g WHERE g.child_run_id=c.id))`, id, id).Scan(&busy).Error; e != nil {
+			OR EXISTS(SELECT 1 FROM agent_kernel_effects g WHERE g.start_revision>0 AND g.child_run_id=c.id))`, id, id).Scan(&busy).Error; e != nil {
 		return t, kernel.StoreMutation{}, false, translateKernelError(e)
 	}
 	if busy {
@@ -148,7 +148,7 @@ func pgManagedControl(ctx context.Context, tx *gorm.DB, r models.KernelRunRecord
 	if e != nil {
 		return t, kernel.StoreMutation{}, false, e
 	}
-	if e = pgConsumePhysicalGrant(tx, g, 1); e != nil {
+	if e = pgConsumePhysicalGrant(tx, g, ""); e != nil {
 		return t, kernel.StoreMutation{}, false, e
 	}
 	return n, m, false, nil

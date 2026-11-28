@@ -15,10 +15,10 @@ and profile restrictions are described in the
 [beta.24 upgrade notes](../../docs/releases/v0.1.0-beta.24.md).
 No production support is implied by `go.work`.
 
-**Schema v12:** stop previous writers and back up the profile before running
-`MigrateV11ToV12` (or `MigrateV11ToV12With`). Migration verifies the old current
-index against original history before dropping it. It does not rewrite Run
-payloads, receipts, or quota. A conflicting index is rejected atomically.
+**Schema v13:** initialize a fresh Profile. `OpenExisting` rejects earlier
+layouts without rewriting them. Stop the previous writer only after draining
+or quarantining its original obligations; retain or export its existing data.
+Do not mix writers. There is no in-place upgrade in this pre-stable cohort.
 
 ## Minimal desktop example
 
@@ -157,27 +157,13 @@ block a subsequent explicit CreateNew. Do not delete unknown files
 indiscriminately. If publication is uncertain, keep the original file and
 use `OpenExisting` to recover it.
 
-**Schema (unreleased beta.24 hard cut):** the current experimental
-Profile database is **Schema v3** (`PRAGMA user_version=3`). Earlier
-unreleased development variants v1 and v2 are **not** accepted, repaired,
-or silently migrated by `OpenExisting`. The v3 layout includes immutable
-`parent_run_id` in the Kernel Run and a durable
-`runtime_child_effect_grants` table with original
-`start_revision` plus `settled_revision`. An original Root Workflow
-physical segment is also recorded under its own Run ID, so a concurrent
-worker cannot claim the same Effect. The Store checks the exact Run
-revision at admission, and `FinishChildExecution` rejects a different
-start revision even if the Grant ID and child ID match.
+**Schema v13:** each physical operation has one permanent `runtime_effects`
+row. Active ownership is indexed by `runtime_effect_owners`; consumption clears
+active facts while retaining identity and the original terminal receipt.
+The Store validates the exact Run revision and original physical authority
+within its native transaction. Older schemas fail closed before any rewrite.
+The adapter checks the expected schema, including untrusted extra objects.
 
-Changing from the previous v2 candidate to v3 is an explicit
-**pre-stable persistence break**, not a compatibility migration. Hosts
-must drain/quarantine unknown physical operations, export or back up
-existing experimental Profiles, then intentionally recreate a clean v3
-Profile. An interrupted Tool/Model/Workflow operation cannot be treated
-as absent simply by deleting the old database. The adapter validates
-expected table/index definitions and rejects extra persistent objects,
-including untrusted triggers that could alter a successful Store CAS.
-No existing data is deleted or migrated automatically.
 
 Persisted timestamps used for ready/lease/due operations and relation
 creation must fit signed nanoseconds (~1677–2262); invalid/overflowing
@@ -284,19 +270,6 @@ New tests cover snapshot isolation across loads, mutation, concurrent readers
 and store reopening. This changes neither persisted DDL nor event/commit
 proof retention. See the [Stage 6 performance and safety audit](../../docs/audits/2026-10-17-stage6-sqlite-snapshot-buffer-optimization.md).
 
-Execution leases, physical Root/Child Grants and exact revision
-settlement are part of the still-**unreleased Schema v3**. This is an
-intentional pre-stable break from the previous v2 candidate, not an
-implicit production migration. The older published Core
-`v0.1.0-beta.22` does not export the opt-in execution APIs. The coordinated
-**beta.24** candidate pins Core and SQLite to the same future release,
-and the repository tests both a `GOWORK=off` source cohort and a separate
-**no-replace versioned ZIP** cohort. Official standalone public consumption
-remains **unverified until immutable beta.24 tags are pushed**; the release
-workflow must run the real no-replace consumer and read-only SQLite module
-gates before issuing a GitHub prerelease. See the
-[Stage 2 Phase 1 evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md).
-
 ### Deliberate Stage 1 limits
 
 - The current `kernel.Store` still exposes `TransitionOutbox`.
@@ -332,96 +305,15 @@ the [Stage 0 decision record](../../docs/audits/2026-10-15-minimal-runtime-stage
 the [Stage 1 post-audit fixes](../../docs/audits/2026-10-15-minimal-runtime-stage1-audit-remediation.md),
 and the [implementation contract](../../docs/minimal-agent-runtime-implementation.md).
 
-### Owned-retirement receipt schema (v6)
+### Native Profile layout (v13)
 
-Schema v6 adds immutable owned settlement evidence and durable retirement/ACK
-receipts. Existing v5 files require explicit `MigrateV5ToV6` with old writers
-stopped and a retained backup. Opening a v5 file does not migrate it. Migration
-preserves original grants, marks, callback records and managed authority and
-does not fabricate retirement receipts or historical Mark provenance.
+Physical admission, callback return, consumption and managed continuation
+commit against the same Effect identity. Native accounting and Run identity
+retain their shared transaction boundary. Managed current state derives from
+its original history. Relation progress is delivery evidence, not execution
+authority. Unknown effects remain fenced until their original obligations
+are resolved.
 
-### Executing callback custody schema (v7)
-
-Schema v7 seals the actual executing callback's control-custody classification
-with its immutable return and retirement evidence. Existing v6 files require
-explicit `MigrateV6ToV7` after stopping old writers and retaining a backup.
-Earlier databases must complete each prior migration first. Historical empty
-custody is preserved as unknown, never upgraded from a new Runner's composition.
-
-### Physical admission and deferred control schema (v8)
-
-Schema v8 implements the same prepared/owned Root settlement protocol as Memory
-and PostgreSQL, including complete ACK history and lease-only epochs. Existing
-v7 files require explicit `MigrateV7ToV8` with all old writers stopped and a
-retained backup; older files complete each prior migration first. Migration
-derives the last physical epoch only from original grant/retirement facts,
-never the current lease epoch, and does not rewrite original custody bytes.
-The independent retirement ACK, successor-side repair, and Owned Mark
-protocols have since been removed: current Owned Finish validates the exact
-private Snapshot proof and durable callback return, and commits the final
-receipt and owned Lease release together. The old Mark columns remain in the
-schema only for borrowed return witnesses or historical evidence; active
-legacy Owned Marks must be reconciled with their original writer. Unknown/stale/active effects remain fenced, and historical
-empty custody is never promoted to trusted.
-
-
-### Bounded child-terminal reconciliation and Call-qualified recovery schema (v9)
-
-The new `runtime_run_relation_progress` table records monotonic native parent
-and child revisions only after durable queue acceptance or feature-verified
-consumption. Volatile queue acceptance cannot advance delivery progress.
-It is not a second execution record. Missing/nonterminal Runs do not prevent
-the indexed scan from progressing. A failure to enqueue or record progress
-is retried on a later scan with the original wakeup identity.
-
-Existing exact v8 files require the explicit `MigrateV8ToV9` (or
-`MigrateV8ToV9With` with the original encrypted connection), all old writers
-stopped, and a retained backup. Open fails closed until the migration succeeds.
-The migration creates an empty watermark table and adds an empty
-`callback_tool_returns` field to the existing physical Grant record. It does
-not rewrite original Runs, relations, custody, native authority, or receipts.
-New callback returns bind outstanding Calls individually to their original
-request and ledger evidence; retirement still requires the original whole
-callback return and resolution of every physical obligation.
-Do not infer physical completion from a watermark or missing legacy evidence.
-Earlier unpublished v9 trial files do not match this final schema and fail
-closed; recreate trial files or migrate from the original v8 backup. Do not
-mix old and new readers or writers.
-
-
-### Permanent physical Grant identity schema (v10)
-
-Every Owned, Borrowed and Managed-successor physical admission now reserves one
-immutable Grant ID in the same transaction as its fence rows. Ancestor replicas
-are not independent identities. Finish, Managed Resume and Managed Cancel
-consume exact original fences but never free the ID for reuse. The identity
-table itself is not execution authority and does not establish callback return.
-
-Existing exact v9 files require the explicit `MigrateV9ToV10` (or
-`MigrateV9ToV10With` with the original encrypted connection). Stop all old
-writers and keep a backup. Open never migrates. The migration reserves IDs
-present in active grants, retained retirement receipts and managed history;
-ambiguous cross-Run ownership or active/retired collision aborts it atomically.
-It does not recreate missing historical evidence or reconstruct old discarded
-Borrowed IDs. Reservations survive all later physical consumption for the database lifetime.
-For current stores, complete the v11 migration below after v10.
-
-### Native accounting and Run identity schema (v11)
-
-Fresh Kernel databases now start at v11. Stop writers and back up before
-calling `MigrateV10ToV11` (or `MigrateV10ToV11With` with the original encrypted
-connection). This explicit schema migration adds the native ledger and
-immutable Run identity tables to the Kernel database; it does not move or
-delete an existing Harness ledger. Create and DecideBeforeCreate contend on
-one Run identity key in the native transaction. A failed or cancelled identity
-has no Run, event stream or execution lease, and closes its selected budget
-generation in the same commit. Pre-release v11 databases using the old
-cancellation-only identity payload are incompatible; Open fails closed.
-Existing Host accounting stays at its original location until a verified
-execution-path cutover migrates those facts. Do not enable an empty replacement
-ledger for an already budgeted Run. Open never migrates.
-
-v11 Open/migration rejects unfinished retirements; drain them with the old
-writer. Retired Managed and retirement Phase/ACKIdentity payloads are rejected
-without rewriting; use a fresh profile for incompatible history. Only final
-native receipts remain, with no independent ACK transition.
+Earlier development layouts and their migration entry points are retired.
+Keep old Profiles and resolve or export their original facts with the
+previous writer; initialize a separate v13 Profile only after that cutover.

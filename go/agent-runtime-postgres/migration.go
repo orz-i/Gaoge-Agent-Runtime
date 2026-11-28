@@ -3,27 +3,25 @@ package postgres
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 var ErrNilDatabase = errors.New("postgres kernel store database is nil")
+var ErrUnsupportedSchema = errors.New("unsupported PostgreSQL Kernel profile: stop the previous writer and initialize a fresh profile")
 
 // Models returns the GORM schema models managed by this adapter.
 // Hosts must initialize and upgrade databases through Migrate(db) rather than
 // calling AutoMigrate(Models()...) directly, which skips managed authority and
-// permanent Grant identity backfill.
+// the current profile boundary.
 func Models() []interface{} {
 	return []interface{}{
 		&models.KernelRunRecord{}, &models.KernelRunIdentityRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
-		&models.KernelChildEffectGrantRecord{}, &models.KernelGrantIdentityRecord{},
-		&models.KernelOwnedRetirementRecord{},
+		&models.KernelEffectRecord{}, &models.KernelEffectOwnerRecord{},
 		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedHistoryRecord{},
 		&models.RunRelationRecord{}, &sqlledger.Record{},
 	}
@@ -34,49 +32,24 @@ func Migrate(db *gorm.DB) error {
 		return ErrNilDatabase
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		// A stopped-writer hard cut, never an implicit upgrade of a live
+		// original execution or its permanent identity.
+		for _, old := range []string{"agent_kernel_child_effect_grants", "agent_kernel_grant_identities", "agent_kernel_owned_retirements", "agent_kernel_managed_transfers"} {
+			if tx.Migrator().HasTable(old) {
+				return ErrUnsupportedSchema
+			}
+		}
+		if tx.Migrator().HasTable(&models.KernelRunRecord{}) &&
+			(!tx.Migrator().HasTable(&models.KernelEffectRecord{}) || !tx.Migrator().HasTable(&models.KernelEffectOwnerRecord{})) {
+			return ErrUnsupportedSchema
+		}
 		if err := tx.AutoMigrate(Models()...); err != nil {
 			return err
 		}
-		var pending int64
-		if err := tx.Model(&models.KernelOwnedRetirementRecord{}).Where("phase <> ?", "ACKNOWLEDGED").Count(&pending).Error; err != nil {
-			return err
-		}
-		if pending != 0 {
-			return errors.New("postgres kernel migration requires draining unfinished original retirements with the previous writer")
-		}
-		managed := "jsonb_exists(payload::jsonb,'State') OR jsonb_exists(payload::jsonb->'Selection','ID')"
-		retirement := "jsonb_exists(payload::jsonb,'Phase') OR jsonb_exists(payload::jsonb,'ACKIdentity')"
-		if tx.Name() == "sqlite" {
-			managed = "json_type(payload,'$.State') IS NOT NULL OR json_type(payload,'$.Selection.ID') IS NOT NULL"
-			retirement = "json_type(payload,'$.Phase') IS NOT NULL OR json_type(payload,'$.ACKIdentity') IS NOT NULL"
-		}
-		if err := tx.Raw("SELECT count(*) FROM agent_kernel_managed_history WHERE " + managed).Scan(&pending).Error; err != nil {
-			return err
-		}
-		if pending != 0 {
-			return errors.New("postgres kernel migration rejects retired managed wire; use a fresh profile")
-		}
-		if err := tx.Raw("SELECT count(*) FROM agent_kernel_owned_retirements WHERE " + retirement).Scan(&pending).Error; err != nil {
-			return err
-		}
-		if pending != 0 {
-			return errors.New("postgres kernel migration rejects retired receipt wire; use a fresh profile")
-		}
-		if tx.Migrator().HasTable("agent_kernel_managed_transfers") {
-			if err := pgValidateManagedCurrent(tx); err != nil {
-				return err
-			}
-			if err := tx.Exec("DROP TABLE agent_kernel_managed_transfers").Error; err != nil {
-				return err
-			}
-		}
-
 		if err := validateNativeBudgetBindings(tx); err != nil {
 			return err
 		}
-		if err := pgBackfillGrantIdentities(tx); err != nil {
-			return err
-		}
+
 		var namespace [32]byte
 		if _, err := rand.Read(namespace[:]); err != nil {
 			return err
@@ -111,39 +84,6 @@ func validateNativeBudgetBindings(db *gorm.DB) error {
 	}
 	if invalid != 0 {
 		return errors.New("postgres kernel migration requires reconciling inconsistent native budget bindings with the previous writer")
-	}
-	return nil
-}
-
-// The previous table contained only an index/duplicate payload. Drop it
-// only when every Run points to its exact newest original history.
-func pgValidateManagedCurrent(tx *gorm.DB) error {
-	var rows []struct {
-		RunID, SuspensionID, RecoveryID string
-		Revision                        uint64
-		Payload                         string
-	}
-	if e := tx.Table("agent_kernel_managed_transfers").Find(&rows).Error; e != nil {
-		return e
-	}
-	var runs int64
-	if e := tx.Raw("SELECT count(DISTINCT run_id) FROM agent_kernel_managed_history").Scan(&runs).Error; e != nil {
-		return e
-	}
-	if runs != int64(len(rows)) {
-		return errors.New("postgres managed history has missing current index")
-	}
-	for _, row := range rows {
-		t, e := pgLoadManaged(tx, row.RunID)
-		if e != nil || t.SafePoint.ID != row.SuspensionID || t.SafePoint.RecoveryID != row.RecoveryID || t.Revision != row.Revision {
-			return errors.New("postgres managed current index does not name latest history")
-		}
-		if row.Payload != "null" {
-			var old kernel.ManagedTransfer
-			if e = json.Unmarshal([]byte(row.Payload), &old); e != nil || kernel.ManagedDigest(old) != kernel.ManagedDigest(t) {
-				return errors.New("postgres managed current duplicate payload conflicts with original history")
-			}
-		}
 	}
 	return nil
 }

@@ -376,7 +376,7 @@ func (s *Store) Commit(ctx context.Context, runID string, expectedRevision uint6
 	// Only ordinary leased writes use this gate. Trusted approval and opaque
 	// receipt recovery retain their separate same-transaction authority paths.
 	if lease != nil && guard == nil && recovery == nil && current.Run.Status == kernel.RunStatusWaitingInput {
-		original, _, grantErr := loadPhysicalGrant(ctx, tx, runID)
+		original, grantErr := loadPhysicalGrant(ctx, tx, runID, "")
 		if grantErr != nil && !errors.Is(grantErr, kernel.ErrNotFound) {
 			return kernel.Snapshot{}, false, grantErr
 		}
@@ -409,7 +409,7 @@ func (s *Store) Commit(ctx context.Context, runID string, expectedRevision uint6
 		}
 	}
 	if recovery != nil {
-		marked, e := loadOwnedPhysicalGrant(ctx, tx, recovery.Grant)
+		e := loadOwnedPhysicalGrant(ctx, tx, recovery.Grant)
 		if errors.Is(e, kernel.ErrNotFound) {
 			return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
 		}
@@ -427,7 +427,7 @@ func (s *Store) Commit(ctx context.Context, runID string, expectedRevision uint6
 		if e != nil {
 			return kernel.Snapshot{}, false, e
 		}
-		if e = kernel.ValidateOwnedPhysicalRecovery(recovery.Grant, current, native, expectedRevision, mutation, recovery.Permit, completion, marked); e != nil {
+		if e = kernel.ValidateOwnedPhysicalRecovery(recovery.Grant, current, native, expectedRevision, mutation, recovery.Permit, completion, 0); e != nil {
 			return kernel.Snapshot{}, false, e
 		}
 	}
@@ -435,7 +435,7 @@ func (s *Store) Commit(ctx context.Context, runID string, expectedRevision uint6
 	// not just Cancel. Its scoped first-party Kernel Runtime provides one
 	// per-revision proof; a public Grant ID or old Run revision cannot.
 	rows, grantErr := tx.QueryContext(ctx,
-		"SELECT "+physicalGrantColumns+" FROM runtime_child_effect_grants WHERE parent_run_id=?", runID)
+		"SELECT "+effectGrantColumns+" FROM runtime_effects WHERE start_revision>0 AND "+activeEffectScope, runID, runID)
 	if grantErr != nil {
 		return kernel.Snapshot{}, false, grantErr
 	}
@@ -444,8 +444,7 @@ func (s *Store) Commit(ctx context.Context, runID string, expectedRevision uint6
 	var ownedControlLease kernel.ExecutionLease
 	for rows.Next() {
 		var g kernel.ChildExecutionGrant
-		var marked uint64
-		if scanErr := rows.Scan(&g.ID, &g.ChildRunID, &g.ExpectedRevision, &g.ExecutionOwnerID, &g.ExecutionLeaseID, &g.ExecutionEpoch, &g.AdmissionSourceHash, &g.AdmissionOperation, &marked); scanErr != nil {
+		if scanErr := rows.Scan(&g.ID, &g.ChildRunID, &g.ExpectedRevision, &g.ExecutionOwnerID, &g.ExecutionLeaseID, &g.ExecutionEpoch, &g.AdmissionSourceHash, &g.AdmissionOperation); scanErr != nil {
 			_ = rows.Close()
 			return kernel.Snapshot{}, false, scanErr
 		}

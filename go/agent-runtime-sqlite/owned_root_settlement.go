@@ -47,7 +47,7 @@ func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snap
 	if err = tx.QueryRowContext(ctx, `SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?`, expected.Run.ID).Scan(&physicalEpoch); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT grant_id FROM runtime_owned_retirements WHERE run_id=?`, expected.Run.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT grant_id FROM runtime_effects WHERE child_run_id=? AND start_revision=0 AND retirement_json<>''`, expected.Run.ID)
 	if err != nil {
 		return err
 	}
@@ -74,11 +74,11 @@ func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snap
 		receipts = append(receipts, r)
 	}
 	var active int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?`, expected.Run.ID, expected.Run.ID).Scan(&active); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_effects WHERE start_revision>0 AND "+activeEffectScope, expected.Run.ID, expected.Run.ID).Scan(&active); err != nil {
 		return err
 	}
 	if requirement == kernel.CustodyReturned {
-		grant, _, err := loadPhysicalGrant(ctx, tx, expected.Run.ID)
+		grant, err := loadPhysicalGrant(ctx, tx, expected.Run.ID, "")
 		var completion kernel.PhysicalCallbackCompletion
 		if err == nil {
 			completion, err = loadPhysicalCallbackReturn(ctx, tx, grant)

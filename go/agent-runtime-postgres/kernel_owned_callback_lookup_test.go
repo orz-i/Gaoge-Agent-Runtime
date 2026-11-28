@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 )
@@ -17,11 +18,14 @@ func verifyOwnedCallbackLookupMissingRun(t *testing.T, db *gorm.DB) {
 	// an inconsistent persisted self-scoped row, not a public API admission.
 	g := kernel.ChildExecutionGrant{ID: "orphan-grant", ChildRunID: "missing-root", ExpectedRevision: 1,
 		ExecutionOwnerID: "owner", ExecutionLeaseID: "lease", ExecutionEpoch: 1, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
-	row := pgPhysicalRecord(g, g.ChildRunID)
+	row := pgPhysicalRecord(g)
 	row.CallbackReturnRevision = 1
 	row.CallbackReturnSourceHash = strings.Repeat("b", 64)
 	row.CallbackHostCompleted = true
 	if e := db.Create(&row).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := db.Create(&models.KernelEffectOwnerRecord{GrantID: g.ID, ParentRunID: g.ChildRunID}).Error; e != nil {
 		t.Fatal(e)
 	}
 	rt, e := kernel.New(kernel.Dependencies{Store: NewKernelStore(db)})

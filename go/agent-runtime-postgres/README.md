@@ -15,13 +15,14 @@ removed in beta.24. Legacy tables can be retired only after explicitly
 reconciling obsolete executions and following
 [`docs/migrations/retire-obsolete-orchestration.sql`](../../docs/migrations/retire-obsolete-orchestration.sql).
 
-Managed recovery now derives current state from the unique latest history
-revision. Stop previous writers and back up before `Migrate`; it verifies the
-legacy current index before removing it. A conflicting index rolls back the
-migration.
+Managed recovery derives current state from the unique latest history revision.
+`Migrate` initializes or verifies the current fresh-profile layout; it rejects
+legacy Effect, identity, retirement and Managed-current tables before any
+schema writes. Drain or quarantine obligations with the previous writer and
+retain or export its data before initializing a separate Profile.
+Do not mix writers or run `AutoMigrate(Models()...)` directly.
 
-Run migrations explicitly before starting workers. Constructing a store does
-not migrate the schema. The experimental Stage 2 Phase 1 branch adds
+The experimental Stage 2 Phase 1 branch adds
 **Epoch-derived sticky fencing**, owner/lease identity and Store-owned
 expiry to the Kernel Run record, without a redundant fence boolean.
 An explicit migration is required before trying these APIs on PostgreSQL.
@@ -75,12 +76,9 @@ Run the public Core conformance kit for custom store integrations. Follow the
 pinning modules, coordinating migrations, and recovering an interrupted upgrade.
 
 
-### Physical Grant identity
+### Permanent physical Effect identity
 
-Run `Migrate` with old writers stopped before serving this schema. The permanent
-`agent_kernel_grant_identities` primary key serializes admissions across
-independent Run locks and pools. Multiple ancestor fence rows share one
-reservation. Managed Resume/Cancel consume exactly one original self-scoped
-grant; neither consumption nor retirement releases the ID. Migration reserves
-known active, retained retirement and managed-history identities and rejects
-ambiguous retained ownership. It does not recreate discarded history.
+The permanent `agent_kernel_effects` key serializes admissions across Run
+locks and pools. `agent_kernel_effect_owners` indexes active ancestor fences
+without copying the execution facts. Consumption retains the same identity
+and, when applicable, the final retirement receipt in the same row.

@@ -68,30 +68,7 @@ func TestRealPostgresManagedRecoveryStore(t *testing.T) {
 			Reopen: func() kernel.Store {
 				closeAll()
 				fresh := open()
-				if strings.HasSuffix(t.Name(), "/transaction-ack/cancel") {
-					// Reconstruct the legacy index with a conflicting revision; rollback must preserve it.
-					for _, q := range []string{
-						"CREATE TABLE agent_kernel_managed_transfers (run_id text PRIMARY KEY, suspension_id text NOT NULL UNIQUE, recovery_id text NOT NULL UNIQUE, revision bigint NOT NULL, payload text NOT NULL)",
-						"INSERT INTO agent_kernel_managed_transfers SELECT run_id,suspension_id,recovery_id,revision+1,payload FROM agent_kernel_managed_history",
-					} {
-						if e := fresh.db.Exec(q).Error; e != nil {
-							t.Fatal(e)
-						}
-					}
-					if e := Migrate(fresh.db); e == nil {
-						t.Fatal("conflicting index accepted")
-					}
-					var mismatch int64
-					if e := fresh.db.Raw("SELECT count(*) FROM agent_kernel_managed_transfers c JOIN agent_kernel_managed_history h USING (suspension_id) WHERE c.revision=h.revision+1 AND c.payload=h.payload").Scan(&mismatch).Error; e != nil || mismatch != 1 {
-						t.Fatalf("failed migration changed source: %d %v", mismatch, e)
-					}
-					if e := fresh.db.Exec("UPDATE agent_kernel_managed_transfers SET revision=revision-1").Error; e != nil {
-						t.Fatal(e)
-					}
-					if e := Migrate(fresh.db); e != nil {
-						t.Fatal(e)
-					}
-				}
+
 				if fresh.db.Migrator().HasTable("agent_kernel_managed_transfers") {
 					t.Fatal("retired current table remains")
 				}

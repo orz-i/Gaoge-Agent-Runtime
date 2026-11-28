@@ -3,71 +3,48 @@ package sqlite
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-func TestRetirementCutoverRejectsUnfinishedHistory(t *testing.T) {
-	for _, upgrade := range []bool{false, true} {
-		t.Run(map[bool]string{false: "reopen", true: "v10-upgrade"}[upgrade], func(t *testing.T) {
-			ctx := t.Context()
-			path := ownedPrivatePath(t, "unfinished.sqlite")
-			s, e := CreateNew(ctx, path)
+func TestLegacyEffectProfilesRefusedWithoutWrites(t *testing.T) {
+	for _, version := range []int{3, 5, 6, 7, 8, 9, 10, 11, 12} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			path := ownedPrivatePath(t, "legacy.sqlite")
+			raw, e := sql.Open("sqlite", "file:"+filepath.ToSlash(path))
 			if e != nil {
 				t.Fatal(e)
 			}
-			rt, e := kernel.New(kernel.Dependencies{Store: s})
+			if _, e = raw.Exec(`CREATE TABLE runtime_child_effect_grants(grant_id TEXT, parent_run_id TEXT, child_run_id TEXT, settled_revision INTEGER, payload_json TEXT);
+    INSERT INTO runtime_child_effect_grants VALUES('original','parent','child',1,'{"unknown":"retained"}');
+    CREATE TABLE runtime_owned_retirements(grant_id TEXT,phase TEXT,payload_json TEXT);
+    INSERT INTO runtime_owned_retirements VALUES('original','RETIRED','{"receipt":"original"}');
+    CREATE TABLE runtime_grant_identities(grant_id TEXT,run_id TEXT);
+    INSERT INTO runtime_grant_identities VALUES('original','child');` + fmt.Sprintf("PRAGMA user_version=%d", version)); e != nil {
+				t.Fatal(e)
+			}
+			if e = raw.Close(); e != nil {
+				t.Fatal(e)
+			}
+			if e = os.Chmod(path, 0600); e != nil {
+				t.Fatal(e)
+			}
+			before, e := os.ReadFile(path)
 			if e != nil {
 				t.Fatal(e)
 			}
-			v, e := rt.Create(ctx, kernel.CreateRequest{ID: "root", Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original", State: []byte("{}"), ExecutionRequired: true})
-			if e != nil {
-				t.Fatal(e)
-			}
-			_, e = s.db.Exec("INSERT INTO runtime_owned_retirements(grant_id,run_id,settled_revision,version,phase,payload_json) VALUES(?,?,?,?,?,?)", "old", v.Run.ID, v.Run.Revision, 1, "RETIRED", "{}")
-			if e != nil {
-				t.Fatal(e)
-			}
-			if upgrade {
-				if _, e = s.db.Exec("DROP TABLE agent_harness_budgets; DROP TABLE runtime_run_identities; DROP INDEX runtime_managed_history_run_revision; " + managedSchemaDDL[2]); e != nil {
-					t.Fatal(e)
-				}
-				if _, e = s.db.Exec("PRAGMA user_version=10"); e != nil {
-					t.Fatal(e)
-				}
-			}
-			if e = s.Close(); e != nil {
-				t.Fatal(e)
-			}
-			if upgrade {
-				e = MigrateV10ToV11(ctx, path)
-			} else {
-				var opened *Store
-				opened, e = OpenExisting(ctx, path)
+			if opened, e := OpenExisting(t.Context(), path); !errors.Is(e, ErrUnsupportedSchema) {
 				if opened != nil {
-					_ = opened.Close()
+					opened.Close()
 				}
+				t.Fatalf("old profile admitted: %v", e)
 			}
-			if !errors.Is(e, ErrUnsupportedSchema) || !strings.Contains(e.Error(), "unfinished original retirements") {
-				t.Fatalf("legacy pending history was admitted: %v", e)
+			after, e := os.ReadFile(path)
+			if e != nil || string(before) != string(after) {
+				t.Fatalf("old bytes changed: %v", e)
 			}
-			raw, e := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
-			if e != nil {
-				t.Fatal(e)
-			}
-			defer func() { _ = raw.Close() }()
-			var phase, payload string
-			if e = raw.QueryRow("SELECT phase,payload_json FROM runtime_owned_retirements WHERE grant_id='old'").Scan(&phase, &payload); e != nil || phase != "RETIRED" || payload != "{}" {
-				t.Fatalf("legacy row was altered: %v %s %s", e, phase, payload)
-			}
-			var version int
-			if e = raw.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != map[bool]int{true: 10, false: 12}[upgrade] {
-				t.Fatalf("schema was changed: %v %d", e, version)
-			}
-
 		})
 	}
 }

@@ -39,6 +39,15 @@
 
 - The Kernel Store now exposes one Run write transaction, `Commit(ctx, runID, revision, mutation, authority)`. Removed Store `Apply`, `ApplyExecution`, `ApplyControl`, `ApplyOwnedPhysicalRecovery` and `ControlStore`; existing Runtime feature methods submit that same command. Original lease, control or receipt proof are transient mutually exclusive authority inputs (zero is an unclaimed/ancestor-fenced write), not selectable execution modes. The same native transaction qualifies source, commits Run/accounting/journal and returns the actual committed snapshot and owner-revocation result. Store implementations and fault fixtures must use the new method; no fallback write port is retained.
 
+## Native SQL Profile hard cut (AC-03)
+
+SQLite v13 and the matching PostgreSQL layout store one permanent Effect
+row and an active ancestor index. Separate Grant identity, retirement, and
+replicated ancestor Grant tables and earlier SQLite migration entry points
+are retired. Initialize a fresh Profile; the current adapters reject legacy
+layouts without modifying their data. Resolve original obligations with the
+previous writer and retain or export the original Profile before cutover.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

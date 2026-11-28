@@ -31,7 +31,7 @@ func TestRealPostgresOwnedRetirementFinishNativeIdentity(t *testing.T) {
 	})
 }
 func runOwnedRetirementFinishNativeIdentity(t *testing.T, factory func(*testing.T) *gorm.DB) {
-	for _, mode := range []string{"owner", "lease", "epoch", "cleared", "expired", "legacy-mark", "legacy-mark-with-return"} {
+	for _, mode := range []string{"owner", "lease", "epoch", "cleared", "expired", "unknown-return", "foreign-return"} {
 		t.Run(mode, func(t *testing.T) {
 			db := factory(t)
 			store := NewKernelStore(db)
@@ -51,19 +51,23 @@ func runOwnedRetirementFinishNativeIdentity(t *testing.T, factory func(*testing.
 			// Original callback/mark fixture, with a separate missing-return
 			// case that must not release the lease or erase its grant.
 			c := kernel.PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: snap.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
-			row := pgPhysicalRecord(g, g.ChildRunID)
-			if strings.HasPrefix(mode, "legacy-mark") {
-				row.SettledRevision = snap.Run.Revision
-			}
-			if mode != "legacy-mark" {
+			row := pgPhysicalRecord(g)
+			if mode != "unknown-return" {
 				row.CallbackReturnRevision = c.ReturnRevision
 				row.CallbackReturnSourceHash = c.ReturnSourceHash
+				if mode == "foreign-return" {
+					row.CallbackReturnSourceHash = "invalid-original-return"
+				}
 				row.CallbackHostCompleted = true
 				row.CallbackLeaseOwned = true
 			}
 			if e = db.Create(&row).Error; e != nil {
 				t.Fatal(e)
 			}
+			if e = db.Create(&models.KernelEffectOwnerRecord{GrantID: g.ID, ParentRunID: g.ChildRunID}).Error; e != nil {
+				t.Fatal(e)
+			}
+
 			delta := map[string]any{"execution_physical_epoch": g.ExecutionEpoch}
 			switch mode {
 			case "owner":
@@ -76,14 +80,14 @@ func runOwnedRetirementFinishNativeIdentity(t *testing.T, factory func(*testing.
 				delta["execution_owner"] = ""
 				delta["execution_lease_id"] = ""
 				delta["execution_expires_at"] = nil
-			case "expired", "legacy-mark", "legacy-mark-with-return":
+			case "expired", "unknown-return", "foreign-return":
 				delta["execution_expires_at"] = time.Unix(1, 0).UTC()
 			}
 			if e = db.Model(&models.KernelRunRecord{}).Where("run_id = ?", g.ChildRunID).UpdateColumns(delta).Error; e != nil {
 				t.Fatal(e)
 			}
 			before := ownedKernelRecord(t, db, g.ChildRunID)
-			var grantBefore []models.KernelChildEffectGrantRecord
+			var grantBefore []models.KernelEffectRecord
 			if e = db.Find(&grantBefore).Error; e != nil {
 				t.Fatal(e)
 			}
@@ -103,12 +107,12 @@ func runOwnedRetirementFinishNativeIdentity(t *testing.T, factory func(*testing.
 				if !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("identity %s accepted: %v", mode, e)
 				}
-				var after []models.KernelChildEffectGrantRecord
+				var after []models.KernelEffectRecord
 				if e = db.Find(&after).Error; e != nil || !reflect.DeepEqual(after, grantBefore) {
 					t.Fatalf("rejected finish changed grants: %v", e)
 				}
 				var n int64
-				if e = db.Model(&models.KernelOwnedRetirementRecord{}).Count(&n).Error; e != nil || n != 0 {
+				if e = pgRetiredEffects(db).Count(&n).Error; e != nil || n != 0 {
 					t.Fatalf("rejected finish inserted receipt: %d %v", n, e)
 				}
 			}

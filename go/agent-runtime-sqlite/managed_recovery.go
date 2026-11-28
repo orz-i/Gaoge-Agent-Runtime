@@ -54,7 +54,7 @@ func sqliteSaveManaged(ctx context.Context, tx *sql.Tx, t kernel.ManagedTransfer
 }
 func sqliteNativeEntryGate(ctx context.Context, q schemaQuery, id string) error {
 	var pending, valid int
-	if e := q.QueryRowContext(ctx, `SELECT count(*), COALESCE(SUM(CASE WHEN g.execution_epoch=r.execution_epoch AND r.execution_physical_epoch<g.execution_epoch AND g.execution_owner_id=r.execution_owner AND g.execution_lease_id=r.execution_lease_id AND r.execution_quarantine_revision=0 THEN 1 ELSE 0 END),0) FROM runtime_child_effect_grants g JOIN runtime_runs r ON r.run_id=g.child_run_id WHERE g.child_run_id=? AND g.parent_run_id=g.child_run_id AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&pending, &valid); e != nil {
+	if e := q.QueryRowContext(ctx, `SELECT count(*), COALESCE(SUM(CASE WHEN g.execution_epoch=r.execution_epoch AND r.execution_physical_epoch<g.execution_epoch AND g.execution_owner_id=r.execution_owner AND g.execution_lease_id=r.execution_lease_id AND r.execution_quarantine_revision=0 THEN 1 ELSE 0 END),0) FROM runtime_effects g JOIN runtime_runs r ON r.run_id=g.child_run_id WHERE g.start_revision>0 AND g.child_run_id=? AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&pending, &valid); e != nil {
 		return conflictOrDatabaseError(e)
 	}
 	if pending == 1 && valid == 1 {
@@ -80,20 +80,20 @@ func sqliteManagedLease(ctx context.Context, q schemaQuery, id string) (kernel.E
 }
 func sqliteManagedGrant(ctx context.Context, tx *sql.Tx, id string) (kernel.ChildExecutionGrant, error) {
 	var n int
-	if e := tx.QueryRowContext(ctx, `SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?`, id, id).Scan(&n); e != nil {
+	if e := tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_effects WHERE start_revision>0 AND "+activeEffectScope, id, id).Scan(&n); e != nil {
 		return kernel.ChildExecutionGrant{}, e
 	}
 	if n != 1 {
 		return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
 	}
-	g, mark, e := loadPhysicalGrant(ctx, tx, id)
+	g, e := loadPhysicalGrant(ctx, tx, id, "")
 	if e != nil {
 		return g, e
 	}
-	if g.ChildRunID != id || !g.IsOwned() || mark != 0 {
+	if g.ChildRunID != id || !g.IsOwned() {
 		return g, kernel.ErrExecutionConflict
 	}
-	if _, e = loadOwnedPhysicalGrant(ctx, tx, g); e != nil {
+	if e = loadOwnedPhysicalGrant(ctx, tx, g); e != nil {
 		return g, e
 	}
 	_, e = loadPhysicalCallbackReturn(ctx, tx, g)
@@ -153,7 +153,7 @@ func sqliteManagedControl(ctx context.Context, tx *sql.Tx, snap kernel.Snapshot,
 			UNION SELECT r.run_id FROM runtime_runs r JOIN children c ON json_extract(CAST(r.run_json AS TEXT),'$.parentRunID')=c.id OR json_extract(CAST(r.run_json AS TEXT),'$.logicalParentRunID')=c.id)
 			SELECT EXISTS(SELECT 1 FROM children c JOIN runtime_runs r ON r.run_id=c.id
 			WHERE r.status NOT IN ('completed','failed','cancelled') OR r.execution_quarantine_revision<>0
-			OR EXISTS(SELECT 1 FROM runtime_child_effect_grants g WHERE g.child_run_id=c.id))`, id, id).Scan(&busy); e != nil {
+			OR EXISTS(SELECT 1 FROM runtime_effects g WHERE g.start_revision>0 AND g.child_run_id=c.id))`, id, id).Scan(&busy); e != nil {
 		return t, kernel.StoreMutation{}, false, conflictOrDatabaseError(e)
 	}
 	if busy {
@@ -163,7 +163,7 @@ func sqliteManagedControl(ctx context.Context, tx *sql.Tx, snap kernel.Snapshot,
 	if e != nil {
 		return t, kernel.StoreMutation{}, false, e
 	}
-	if e = sqliteConsumePhysicalGrant(ctx, tx, g, 1); e != nil {
+	if e = sqliteConsumePhysicalGrant(ctx, tx, g, ""); e != nil {
 		return t, kernel.StoreMutation{}, false, e
 	}
 	return n, m, false, nil

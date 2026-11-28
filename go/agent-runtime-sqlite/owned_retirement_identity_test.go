@@ -12,7 +12,7 @@ import (
 )
 
 func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
-	for _, mode := range []string{"owner", "lease", "epoch", "cleared", "expired", "legacy-mark", "legacy-mark-with-return"} {
+	for _, mode := range []string{"owner", "lease", "epoch", "cleared", "expired", "unknown-return", "foreign-return"} {
 		t.Run(mode, func(t *testing.T) {
 			store, e := CreateNew(t.Context(), ownedPrivatePath(t, "identity.sqlite"))
 			if e != nil {
@@ -43,18 +43,13 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			_, e = store.db.Exec("INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,settled_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?,?)", g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, 0, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
-			if e != nil {
-				t.Fatal(e)
-			}
-			if mode != "legacy-mark" {
-				_, e = store.db.Exec("UPDATE runtime_child_effect_grants SET callback_return_revision=?,callback_return_source_hash=?,callback_host_completed=1,callback_lease_owned=1 WHERE grant_id=?", c.ReturnRevision, c.ReturnSourceHash, g.ID)
-				if e != nil {
-					t.Fatal(e)
+			seedPhysicalFixture(t, store, g)
+			if mode != "unknown-return" {
+				sourceHash := c.ReturnSourceHash
+				if mode == "foreign-return" {
+					sourceHash = "invalid-original-return"
 				}
-			}
-			if strings.HasPrefix(mode, "legacy-mark") {
-				if _, e = store.db.Exec("UPDATE runtime_child_effect_grants SET settled_revision=? WHERE grant_id=?", snap.Run.Revision, g.ID); e != nil {
+				if _, e = store.db.Exec("UPDATE runtime_effects SET callback_return_revision=?,callback_return_source_hash=?,callback_host_completed=1,callback_lease_owned=1 WHERE grant_id=?", c.ReturnRevision, sourceHash, g.ID); e != nil {
 					t.Fatal(e)
 				}
 			}
@@ -70,7 +65,7 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 				query = "execution_owner='',execution_lease_id='',execution_expiry_ms=0"
 			case "expired":
 				query = "execution_expiry_ms=1"
-			case "legacy-mark", "legacy-mark-with-return":
+			case "unknown-return", "foreign-return":
 				query = "execution_expiry_ms=1"
 			}
 			if _, e = store.db.Exec("UPDATE runtime_runs SET "+query+" WHERE run_id=?", g.ChildRunID); e != nil {
@@ -114,8 +109,8 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 				return out
 			}
 			before := readRows("runtime_runs")
-			grants := readRows("runtime_child_effect_grants")
-			receipts := readRows("runtime_owned_retirements")
+			grants := readRows("runtime_effects")
+			receipts := readRows("runtime_effect_owners")
 			e = conformance.FinishOwnedFixture(t.Context(), rt, g, snap)
 			if mode == "expired" {
 				if e != nil {
@@ -132,7 +127,7 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 				if !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("identity %s accepted: %v", mode, e)
 				}
-				if !reflect.DeepEqual(grants, readRows("runtime_child_effect_grants")) || !reflect.DeepEqual(receipts, readRows("runtime_owned_retirements")) {
+				if !reflect.DeepEqual(grants, readRows("runtime_effects")) || !reflect.DeepEqual(receipts, readRows("runtime_effect_owners")) {
 					t.Fatal("rejected finish changed durable grants/receipts")
 				}
 			}

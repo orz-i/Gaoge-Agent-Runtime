@@ -29,8 +29,8 @@ func (s *KernelStore) VerifyExecutionCustody(ctx context.Context, expected kerne
 		if err != nil {
 			return err
 		}
-		var historical []models.KernelOwnedRetirementRecord
-		if err = tx.Where("run_id = ?", expected.Run.ID).Find(&historical).Error; err != nil {
+		var historical []models.KernelEffectRecord
+		if err = pgRetiredEffects(tx).Where("child_run_id = ?", expected.Run.ID).Find(&historical).Error; err != nil {
 			return translateKernelError(err)
 		}
 		receipts := make([]kernel.OwnedRetirementReceipt, 0, len(historical))
@@ -42,18 +42,20 @@ func (s *KernelStore) VerifyExecutionCustody(ctx context.Context, expected kerne
 			receipts = append(receipts, receipt)
 		}
 		var active int64
-		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).
-			Where("parent_run_id = ? OR child_run_id = ?", expected.Run.ID, expected.Run.ID).Count(&active).Error; err != nil {
+		if err = pgActiveEffects(tx).Where(activeEffectScope, expected.Run.ID, expected.Run.ID).Count(&active).Error; err != nil {
 			return translateKernelError(err)
 		}
 		if requirement == kernel.CustodyReturned {
-			var roots []models.KernelChildEffectGrantRecord
-			if err = tx.Where("child_run_id = ?", expected.Run.ID).Limit(2).Find(&roots).Error; err != nil {
+			var roots []models.KernelEffectRecord
+			if err = pgActiveEffects(tx).Where("child_run_id = ?", expected.Run.ID).Limit(2).Find(&roots).Error; err != nil {
 				return translateKernelError(err)
 			}
 			var grant kernel.ChildExecutionGrant
 			var completion kernel.PhysicalCallbackCompletion
-			if len(roots) == 1 && roots[0].ParentRunID == expected.Run.ID {
+			if len(roots) == 1 {
+				if _, e := pgEffectOwners(tx, pgPhysicalGrant(roots[0])); e != nil {
+					return e
+				}
 				grant, completion = pgPhysicalGrant(roots[0]), pgCallbackCompletion(roots[0])
 			} else if len(roots) != 0 {
 				return kernel.ErrExecutionConflict
